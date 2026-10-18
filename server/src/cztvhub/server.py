@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .dvb.gateway import DvbGateway
 
 STREAM_RE = re.compile(r"^/ct/(CH_\d+)\.m3u8$")
+MAX_PUT_BODY = 64 * 1024  # ad-break uploads (spec/ad-breaks.md)
 DVB_DISABLED = '{"error": "DVB není zapnuté"}'.encode("utf-8")
 
 
@@ -57,11 +58,22 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None):
                 return self._send(302, b"", headers={"Location": url, "Cache-Control": "no-store"})
             self._send(404, b"not found\n")
 
-        def _dvb(self, path, query):
+        def do_PUT(self):
+            path, _, query = self.path.partition("?")
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if not path.startswith("/dvb/") or not 0 <= length <= MAX_PUT_BODY:
+                self.close_connection = True
+                return self._send(400, b"bad request\n")
+            self._dvb(path, query, "PUT", self.rfile.read(length))
+
+        def _dvb(self, path, query, method="GET", body=b""):
             if gateway is None:
                 return self._send(404, DVB_DISABLED, "application/json; charset=utf-8")
             params = dict(urllib.parse.parse_qsl(query))
-            resp = gateway.handle(path, params, self.headers)
+            resp = gateway.handle(path, params, self.headers, method, body, self.client_address[0])
             self._send(resp.status, resp.body, resp.content_type, resp.headers)
 
         def log_message(self, fmt, *args):

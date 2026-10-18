@@ -36,8 +36,9 @@ def enforce_retention(client: TvheadendClient, retention_days: int, now: float |
 
 class RetentionLoop:
     def __init__(self, client: TvheadendClient, retention_days: int, interval: float = CHECK_INTERVAL,
-                 log: Callable[[str], None] = print):
+                 log: Callable[[str], None] = print, after: Callable[[], None] | None = None):
         self.client = client
+        self.after = after  # e.g. deleting the ad breaks of removed recordings
         self.retention_days = retention_days
         self.interval = interval
         self.log = log
@@ -61,3 +62,9 @@ class RetentionLoop:
                     self.log(f"dvb: removed {len(removed)} recording(s) older than {self.retention_days} days")
             except TvhError as exc:
                 self.log(f"dvb: retention check failed: {exc}")
+                continue
+            if self.after is not None:
+                try:
+                    self.after()
+                except (TvhError, OSError) as exc:
+                    self.log(f"dvb: cleanup after retention failed: {exc}")

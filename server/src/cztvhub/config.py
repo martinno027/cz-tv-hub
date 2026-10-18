@@ -33,10 +33,21 @@ class DvbConfig:
 
 
 @dataclass
+class AdsConfig:
+    """Ad-break detection for "Anténa" recordings (spec/ad-breaks.md); off by default."""
+    enabled: bool = False
+    channels: list[str] | None = None  # None = all channels
+    worker_key: str = ""
+    worker_hosts: list[str] = field(default_factory=list)  # empty = any source address
+    breaks_dir: Path = Path("/var/lib/cztvhub/breaks")
+
+
+@dataclass
 class Config:
     host: str = "0.0.0.0"
     port: int = 8098
     dvb: DvbConfig = field(default_factory=DvbConfig)
+    ads: AdsConfig = field(default_factory=AdsConfig)
     tvheadend: TvheadendConfig = field(default_factory=TvheadendConfig)
 
 
@@ -93,8 +104,27 @@ def parse_config(text: str) -> Config:
         tvh.user = section.get("user", "").strip()
         tvh.password = section.get("password", "").strip()
 
+    if parser.has_section("ads"):
+        section = parser["ads"]
+        ads = cfg.ads
+        try:
+            ads.enabled = section.getboolean("enabled", False)
+        except ValueError as exc:
+            raise ConfigError("[ads] enabled: expected true/false") from exc
+        ads.channels = parse_record_channels(section.get("channels", "all"))
+        ads.worker_key = section.get("worker_key", "").strip()
+        ads.worker_hosts = [h.strip() for h in section.get("worker_hosts", "").split(",") if h.strip()]
+        ads.breaks_dir = Path(section.get("breaks_dir", str(ads.breaks_dir)).strip())
+
     if cfg.dvb.enabled and len(cfg.dvb.key) < MIN_KEY_LENGTH:
         raise ConfigError(f"[dvb] key must be at least {MIN_KEY_LENGTH} characters when DVB is enabled")
+    if cfg.ads.enabled:
+        if not cfg.dvb.enabled:
+            raise ConfigError("[ads] needs [dvb] enabled = true")
+        if len(cfg.ads.worker_key) < MIN_KEY_LENGTH:
+            raise ConfigError(f"[ads] worker_key must be at least {MIN_KEY_LENGTH} characters when enabled")
+        if cfg.ads.worker_key == cfg.dvb.key:
+            raise ConfigError("[ads] worker_key must differ from [dvb] key")
     return cfg
 
 

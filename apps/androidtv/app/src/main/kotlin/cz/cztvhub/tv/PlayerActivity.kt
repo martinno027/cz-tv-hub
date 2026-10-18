@@ -34,9 +34,13 @@ import cz.cztvhub.core.CtException
 import cz.cztvhub.core.PlayKind
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.PlayTarget
+import cz.cztvhub.core.dvb.AdBreak
+import cz.cztvhub.core.dvb.AdBreaks
 import cz.cztvhub.core.dvb.DvbParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -59,10 +63,16 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var message: TextView
     private lateinit var openApp: Button
     private lateinit var errorActions: LinearLayout
+    private lateinit var skipAd: Button
     private var player: ExoPlayer? = null
     private var target: PlayTarget? = null
     private var loadJob: Job? = null
     private var resumeOnStart: Resume = Resume.Default
+
+    /** Ad breaks of a finished gateway recording (spec/ad-breaks.md); empty when unknown or off. */
+    private var adBreaks: List<AdBreak> = emptyList()
+    private var adBreaksJob: Job? = null
+    private var skipTargetSeconds: Double? = null
 
     /** Pending start-over seek, applied once the live window is known. */
     private var pendingWallClockMs: Long? = null
@@ -112,9 +122,24 @@ class PlayerActivity : ComponentActivity() {
             addView(message, LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             addView(errorActions, LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         }
+        // "Přeskočit reklamu": bottom right above the controller's time bar, shown even when the controller is hidden.
+        skipAd = Button(this).apply {
+            text = getString(R.string.skip_ad)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
+            isAllCaps = false
+            setPadding(dp(32), dp(16), dp(32), dp(16))
+            visibility = View.GONE
+            setOnClickListener { skipAd() }
+        }
+        val skipParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.END,
+        ).apply { setMargins(0, 0, dp(48), dp(120)) }
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(playerView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            addView(skipAd, skipParams)
             addView(messageBox, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
         }
         setContentView(root)
@@ -134,6 +159,7 @@ class PlayerActivity : ComponentActivity() {
         playerView.player = exo
         playerView.requestFocus()
         load(forceRefresh = false, resume = resumeOnStart)
+        startAdBreaks()
     }
 
     override fun onStop() {
@@ -141,6 +167,9 @@ class PlayerActivity : ComponentActivity() {
         // Release when hidden; a fresh URL is resolved when the viewer comes back.
         resumeOnStart = currentResume()
         loadJob?.cancel()
+        adBreaksJob?.cancel()
+        adBreaksJob = null
+        updateSkipAd(null)
         playerView.player = null
         player?.release()
         player = null
@@ -270,9 +299,62 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Ad breaks for finished gateway recordings only (a still-growing one gets no button in v1): fetched on start
+     * and every minute, the position checked twice a second. Gateway failures are silent: no button.
+     */
+    private fun startAdBreaks() {
+        val recorded = request as? PlayRequest.DvbRecorded ?: return
+        if (recorded.fromStart) return
+        adBreaksJob?.cancel()
+        adBreaksJob = lifecycleScope.launch {
+            var fetchedAt = 0L
+            while (isActive) {
+                val now = SystemClock.elapsedRealtime()
+                if (fetchedAt == 0L || now - fetchedAt >= AD_BREAKS_REFRESH_MS) {
+                    fetchedAt = now
+                    val client = tvApp.dvb()?.client
+                    if (client != null) {
+                        try {
+                            adBreaks = withContext(Dispatchers.IO) { client.breaks(recorded.recordingId) }
+                        } catch (e: CtException) {
+                            Log.i(TAG, "no ad breaks: ${e.message}")
+                        } catch (e: RuntimeException) {
+                            Log.i(TAG, "no ad breaks: $e")
+                        }
+                    }
+                }
+                val exo = player
+                val positionMs = exo?.currentPosition
+                val usable = exo != null && target != null && message.visibility != View.VISIBLE &&
+                    exo.playbackState != Player.STATE_IDLE && pendingWallClockMs == null
+                updateSkipAd(if (usable && positionMs != null) AdBreaks.skipTarget(adBreaks, positionMs / 1000.0) else null)
+                delay(SKIP_CHECK_MS)
+            }
+        }
+    }
+
+    private fun updateSkipAd(targetSeconds: Double?) {
+        skipTargetSeconds = targetSeconds
+        val visible = targetSeconds != null
+        if (visible == (skipAd.visibility == View.VISIBLE)) return
+        if (!visible && skipAd.hasFocus()) playerView.requestFocus()
+        skipAd.visibility = if (visible) View.VISIBLE else View.GONE
+    }
+
+    private fun skipAd() {
+        val seconds = skipTargetSeconds ?: return
+        val exo = player ?: return
+        exo.seekTo((seconds * 1000).toLong())
+        updateSkipAd(null)
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
     private fun showMessage(text: String) {
         message.text = text
         message.visibility = View.VISIBLE
+        updateSkipAd(null)
     }
 
     private fun hideMessage() {
@@ -287,6 +369,13 @@ class PlayerActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_UP) playerView.hideController()
             return true
         }
+        // OK presses "Přeskočit reklamu" while it is shown, unless the viewer is working in the open controller.
+        if (isSelectKey(event.keyCode) && skipAd.visibility == View.VISIBLE &&
+            (skipAd.hasFocus() || !playerView.isControllerFullyVisible)
+        ) {
+            if (event.action == KeyEvent.ACTION_UP) skipAd()
+            return true
+        }
         if (event.keyCode != KeyEvent.KEYCODE_BACK && message.visibility != View.VISIBLE &&
             playerView.dispatchKeyEvent(event)
         ) {
@@ -295,8 +384,14 @@ class PlayerActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    private fun isSelectKey(keyCode: Int): Boolean =
+        keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER ||
+            keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+
     private companion object {
         const val TAG = "PlayerActivity"
+        const val AD_BREAKS_REFRESH_MS = 60_000L
+        const val SKIP_CHECK_MS = 500L
         const val HTTP_TIMEOUT_MS = 20_000
         const val RE_RESOLVE_COOLDOWN_MS = 5 * 60 * 1000L
         const val LIVE_EDGE_GUARD_MS = 10_000L

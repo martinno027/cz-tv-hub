@@ -100,6 +100,8 @@ Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cz
 - Sessions are shared by all viewers of the same source and deleted `idle_seconds` after the last request
   (playlist or segment). Players must keep polling the playlist; a paused player may lose the session.
 - No download/export endpoint, ever. Range requests only on HLS media files.
+- Optional ad breaks of recordings ("Přeskočit reklamu", off by default): `GET /dvb/recording/<id>/breaks` for the apps,
+  plus worker-only routes with a separate scoped key; see `spec/ad-breaks.md`.
 - Errors: `400` bad `date`, `401` missing/wrong key, `404` unknown id or DVB disabled,
   `503 {"error": "Tuner je obsazený"}` when TVHeadend has no free tuner, `502` TVHeadend unreachable or the stream
   could not be started, Czech `error` text in JSON bodies. When a live start finds no free tuner, the gateway

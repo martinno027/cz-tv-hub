@@ -8,7 +8,7 @@
  *           {kind: 'dvbLive', channelId, title}
  *           {kind: 'dvbRecorded', channelId, title, recordingId, fromStart}
  * Targets:  {url, kind: 'live' | 'timeshift' | 'vod', title, seekToWallClock, fallbackOffsetMs,
- *            startPositionMs, dvb: DvbClient | null}
+ *            startPositionMs, dvb: DvbClient | null, recordingId: finished Anténa recording | null}
  */
 (function (root) {
   'use strict';
@@ -16,7 +16,10 @@
   var M = CT.Messages;
 
   function target(url, kind, title, extra) {
-    var t = { url: url, kind: kind, title: title, seekToWallClock: null, fallbackOffsetMs: 0, startPositionMs: null, dvb: null };
+    var t = {
+      url: url, kind: kind, title: title, seekToWallClock: null, fallbackOffsetMs: 0, startPositionMs: null, dvb: null,
+      recordingId: null
+    };
     return Object.assign(t, extra || {});
   }
 
@@ -62,7 +65,12 @@
     }
     var url = client.recordingUrl(request.recordingId);
     return client.warmUp(url).then(function () {
-      return target(url, 'vod', request.title, { dvb: client, startPositionMs: request.fromStart ? 0 : null });
+      // A finished recording can carry ad breaks; the growing "Od začátku" one does not (v1).
+      return target(url, 'vod', request.title, {
+        dvb: client,
+        startPositionMs: request.fromStart ? 0 : null,
+        recordingId: request.fromStart ? null : request.recordingId
+      });
     });
   };
 

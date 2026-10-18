@@ -12,6 +12,8 @@
   var RE_RESOLVE_COOLDOWN_MS = 5 * 60 * 1000;
   var LIVE_EDGE_GUARD_MS = 10 * 1000;
   var OSD_MS = 4000;
+  var BREAKS_REFRESH_MS = 60 * 1000;
+  var BREAKS_CHECK_MS = 500;
 
   function $(id) {
     return document.getElementById(id);
@@ -109,16 +111,19 @@
     }
   };
 
-  AvPlayBackend.prototype.seekBy = function (deltaMs) {
-    var self = this;
+  AvPlayBackend.prototype.seekTo = function (ms) {
     var duration = this.duration();
-    var to = Math.max(0, this.position() + deltaMs);
+    var to = Math.max(0, ms);
     if (duration > 0) to = Math.min(to, Math.max(0, duration - LIVE_EDGE_GUARD_MS));
     try {
-      self.av.seekTo(to);
+      this.av.seekTo(to);
     } catch (e) {
       // Not seekable (plain live).
     }
+  };
+
+  AvPlayBackend.prototype.seekBy = function (deltaMs) {
+    this.seekTo(this.position() + deltaMs);
   };
 
   /** <video> backend for desktop development (plays HLS only where the browser can). */
@@ -169,8 +174,12 @@
     return isFinite(d) ? d * 1000 : 0;
   };
 
+  Html5Backend.prototype.seekTo = function (ms) {
+    this.video.currentTime = Math.max(0, ms / 1000);
+  };
+
   Html5Backend.prototype.seekBy = function (deltaMs) {
-    this.video.currentTime = Math.max(0, this.video.currentTime + deltaMs / 1000);
+    this.seekTo(this.position() + deltaMs);
   };
 
   /** The player overlay. `app` provides planner and close(). */
@@ -183,10 +192,14 @@
     this.lastReResolveAt = 0;
     this.loadToken = 0;
     this.osdTimer = null;
+    this.breaks = [];
+    this.breaksTimer = null;
+    this.skipTo = null;
     var cb = {
       onReady: function () {
         self.hideMessage();
         self.showOsd();
+        self.startBreaks();
       },
       onBuffering: function (on) {
         $('osd-state').textContent = on ? 'Načítání…' : '';
@@ -220,6 +233,7 @@
   Player.prototype.load = function (forceRefresh, resumeMs) {
     var self = this;
     var token = ++this.loadToken;
+    this.stopBreaks();
     this.backend.close();
     this.showMessage('Načítání…');
     this.app.planner.plan(this.request, forceRefresh).then(function (target) {
@@ -272,6 +286,7 @@
 
   Player.prototype.close = function () {
     this.loadToken++;
+    this.stopBreaks();
     this.backend.close();
     this.request = null;
     this.target = null;
@@ -284,6 +299,7 @@
     if (!this.isOpen()) return;
     this.suspendedAt = this.resumePosition();
     this.loadToken++;
+    this.stopBreaks();
     this.backend.close();
   };
 
@@ -299,6 +315,14 @@
         this.close();
         return;
       case 'enter':
+        // While "Přeskočit reklamu" is shown, OK presses it; otherwise OK pauses.
+        if (this.skipTo !== null) {
+          this.skipAd();
+          return;
+        }
+        if (!this.target) return;
+        this.backend.togglePause();
+        break;
       case 'playpause':
       case 'play':
       case 'pause':
@@ -321,6 +345,54 @@
         break;
     }
     this.showOsd();
+  };
+
+  /**
+   * "Přeskočit reklamu" (spec/ad-breaks.md): only for finished "Anténa" recordings. Breaks are fetched on
+   * start and every minute; failures are silent (no button).
+   */
+  Player.prototype.startBreaks = function () {
+    var self = this;
+    var target = this.target;
+    this.stopBreaks();
+    if (!target || !target.dvb || !target.recordingId) return;
+    var token = this.loadToken;
+    var fetch = function () {
+      target.dvb.breaks(target.recordingId).then(function (list) {
+        if (token === self.loadToken) self.breaks = list;
+      }, function () {});
+    };
+    fetch();
+    var fetchedAt = Date.now();
+    this.breaksTimer = setInterval(function () {
+      if (Date.now() - fetchedAt >= BREAKS_REFRESH_MS) {
+        fetchedAt = Date.now();
+        fetch();
+      }
+      self.updateSkip();
+    }, BREAKS_CHECK_MS);
+  };
+
+  Player.prototype.stopBreaks = function () {
+    clearInterval(this.breaksTimer);
+    this.breaksTimer = null;
+    this.breaks = [];
+    this.setSkip(null);
+  };
+
+  Player.prototype.updateSkip = function () {
+    this.setSkip(CT.AdBreaks.skipTarget(this.breaks, this.backend.position() / 1000));
+  };
+
+  Player.prototype.setSkip = function (to) {
+    this.skipTo = to;
+    $('skip-ad').classList.toggle('visible', to !== null);
+  };
+
+  Player.prototype.skipAd = function () {
+    if (this.skipTo === null) return;
+    this.backend.seekTo(this.skipTo * 1000);
+    this.setSkip(null);
   };
 
   Player.prototype.seek = function (deltaMs) {

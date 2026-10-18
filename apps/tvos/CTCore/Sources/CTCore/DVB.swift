@@ -251,6 +251,12 @@ public struct DVBClient: Sendable {
         return try DVBParser.epg(status: response.status, body: response.body)
     }
 
+    /// Detected ad breaks of a finished recording; empty while the gateway has not analysed it yet.
+    public func adBreaks(recordingID: String) async throws -> [AdBreak] {
+        let response = try await get("/dvb/recording/\(escape(recordingID))/breaks")
+        return try AdBreaks.parse(status: response.status, body: response.body)
+    }
+
     public func liveURL(channelID: String) -> URL { config.url("/dvb/live/\(escape(channelID)).m3u8") }
     public func recordingURL(id: String) -> URL { config.url("/dvb/recording/\(escape(id)).m3u8") }
     public func iconURL(path: String) -> URL { config.url(path) }

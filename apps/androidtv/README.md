@@ -16,6 +16,8 @@ Nativní aplikace pro **Android TV / Google TV**: sledování **oficiálních st
   přehrání odvysílaného pořadu ze záznamu; nenahrané pořady jsou ztlumené („Pořad nebyl nahrán“).
   Bez nastavení se Anténa nezobrazuje.
 
+- **Přeskočit reklamu** (volitelné, zapíná se na bráně, viz `spec/ad-breaks.md`): u hotových nahrávek z antény
+  se během reklamního bloku ukáže vpravo dole tlačítko.
 Stream se vždy vyžádá až na zařízení těsně před přehráním (odkazy ČT jsou vázané na IP a platí asi hodinu).
 Aplikace nic nenahrává, neukládá ani neobchází DRM či geoblokaci. Bez reklam, analytiky a účtů.
 

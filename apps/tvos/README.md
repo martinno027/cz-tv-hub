@@ -60,6 +60,9 @@ Vývoj proti falešné bráně na Macu: `-gatewayAddress 127.0.0.1:8098 -gateway
 pak např. `-play dvblive:1`, `-play dvbrec:1`, `-play dvbstartover:1` (číslo = číslo kanálu brány),
 `-liveScroll antenna`, `-tab guide -guideRow 6`, `-tab settings`.
 
+Volitelně **Přeskočit reklamu** (zapíná se na bráně, viz [`spec/ad-breaks.md`](../../spec/ad-breaks.md)): u hotových nahrávek
+z antény nabídne systémové tlačítko vpravo dole během reklamního bloku.
+
 ## Team ID a TestFlight pro rodinu
 
 1. V `project.yml` vyplňte `DEVELOPMENT_TEAM: "ABCDE12345"` (Team ID najdete na

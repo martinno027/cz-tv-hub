@@ -124,7 +124,7 @@ struct GuideView: View {
                 }
             case .antenna(let event, let channel):
                 if case .airing(let recordingID?) = AntennaAction.decide(event, now: Date()) {
-                    Button("Od začátku") { model.playAntennaRecording(id: recordingID, title: event.title) }
+                    Button("Od začátku") { model.playAntennaRecording(id: recordingID, title: event.title, finished: false) }
                 }
                 Button("Živě") { model.playAntennaLive(channel) }
             }
@@ -358,7 +358,7 @@ struct GuideView: View {
             case .airing:
                 airingChoice = entry
             case .recording(let id):
-                model.playAntennaRecording(id: id, title: event.title)
+                model.playAntennaRecording(id: id, title: event.title, finished: true)
             case .notRecorded:
                 model.alertMessage = AntennaAction.notRecordedMessage
             }

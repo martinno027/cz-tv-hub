@@ -54,6 +54,21 @@ object DvbParser {
         )
     }
 
+    /**
+     * `GET /dvb/recording/<id>/breaks`: entries without numeric `start < end` are dropped, the rest sorted by
+     * start; `confidence` defaults to 1. `pending` comes with an empty list.
+     */
+    fun parseBreaks(status: Int, body: String): List<AdBreak> {
+        val root = ok(status, body)
+        return (root["breaks"] as? JsonArray).orEmpty().mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val start = o.num("start") ?: return@mapNotNull null
+            val end = o.num("end") ?: return@mapNotNull null
+            if (start >= end) return@mapNotNull null
+            AdBreak(start, end, o.num("confidence") ?: 1.0)
+        }.sortedBy { it.start }
+    }
+
     /** The gateway's Czech `error` text from a JSON error body, if any. */
     fun errorText(body: String): String? = (parse(body))?.str("error")
 
@@ -95,6 +110,12 @@ object DvbParser {
         val v = this[key]
         if (v == null || v is JsonNull) return null
         return (v as? JsonPrimitive)?.content?.ifEmpty { null }
+    }
+
+    private fun JsonObject.num(key: String): Double? {
+        val v = this[key] as? JsonPrimitive ?: return null
+        if (v is JsonNull || v.isString) return null
+        return v.content.toDoubleOrNull()?.takeIf { it.isFinite() }
     }
 
     private fun JsonArray?.orEmpty(): List<kotlinx.serialization.json.JsonElement> = this ?: emptyList()

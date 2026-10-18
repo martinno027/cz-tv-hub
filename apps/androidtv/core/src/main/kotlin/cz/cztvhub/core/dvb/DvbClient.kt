@@ -22,6 +22,10 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
     /** Events of a Prague broadcast day (05:00–05:00). */
     fun epg(day: LocalDate): List<DvbEvent> = call("/dvb/epg?date=$day") { s, b -> DvbParser.parseEpg(s, b) }
 
+    /** Ad breaks of a finished recording (`[ads]` on the gateway); `404` when the feature is off. */
+    fun breaks(recordingId: String): List<AdBreak> =
+        call("/dvb/recording/$recordingId/breaks") { s, b -> DvbParser.parseBreaks(s, b) }
+
     fun liveUrl(channelId: String): String = config.url("/dvb/live/$channelId.m3u8")
 
     fun recordingUrl(recordingId: String): String = config.url("/dvb/recording/$recordingId.m3u8")

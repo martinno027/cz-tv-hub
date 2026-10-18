@@ -1,11 +1,13 @@
 import AVFoundation
+import AVKit
 import CTCore
 import os
 
 private let playerLog = Logger(subsystem: "cz.cztvhub.tv", category: "player")
 
 /// Owns the AVPlayer for one session: applies the start-over position and re-resolves
-/// the stream once when playback fails (signed URLs expire after ~1 h).
+/// the stream once when playback fails (signed URLs expire after ~1 h). For finished Anténa
+/// recordings it also offers "Přeskočit reklamu" during detected ad breaks (spec/ad-breaks.md).
 @MainActor
 final class PlayerController {
     private enum Resume {
@@ -25,16 +27,38 @@ final class PlayerController {
     private var timeObserver: Any?
     private var started = false
 
+    // "Přeskočit reklamu" (finished gateway recordings only).
+    private let fetchAdBreaks: (@Sendable () async throws -> [AdBreak])?
+    private var adBreaks: [AdBreak] = []
+    private var adBreakTask: Task<Void, Never>?
+    private var skipObserver: Any?
+    private var shownSkipTarget: Double?
+    private var isSkipping = false
+    /// Set by the player screen; the skip button is one of its contextual actions.
+    weak var playerViewController: AVPlayerViewController? {
+        didSet {
+            shownSkipTarget = nil
+            playerViewController?.contextualActions = []
+            updateSkipButton()
+        }
+    }
+
+    private static let adBreakRefreshInterval: Duration = .seconds(60)
+
     /// `resolve` fetches a fresh source (new signed URL / new gateway session) after a failure.
-    init(source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource) {
+    /// `adBreaks` is given only for finished recordings: it enables the "Přeskočit reklamu" button.
+    init(source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
+         adBreaks: (@Sendable () async throws -> [AdBreak])? = nil) {
         self.source = source
         self.resolve = resolve
+        self.fetchAdBreaks = adBreaks
     }
 
     func start() {
         guard !started else { return }
         started = true
         load(source, resume: nil)
+        startAdBreaks()
         #if DEBUG
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 1), queue: .main) { [player] time in
             let date = player.currentItem?.currentDate().map { "\($0)" } ?? "-"
@@ -50,9 +74,78 @@ final class PlayerController {
         failureObserver = nil
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
+        adBreakTask?.cancel()
+        adBreakTask = nil
+        if let skipObserver { player.removeTimeObserver(skipObserver) }
+        skipObserver = nil
+        adBreaks = []
+        shownSkipTarget = nil
+        playerViewController?.contextualActions = []
         player.pause()
         player.replaceCurrentItem(with: nil)
     }
+
+    // MARK: ad breaks
+
+    /// Fetches the breaks now and every minute while playing; failures are silent (no button).
+    private func startAdBreaks() {
+        guard fetchAdBreaks != nil else { return }
+        skipObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateSkipButton() }
+        }
+        adBreakTask = Task { [weak self] in
+            await self?.refreshAdBreaks()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.adBreakRefreshInterval)
+                guard let self, !Task.isCancelled else { return }
+                if self.player.timeControlStatus == .playing { await self.refreshAdBreaks() }
+            }
+        }
+    }
+
+    private func refreshAdBreaks() async {
+        guard let fetchAdBreaks else { return }
+        do {
+            let breaks = try await fetchAdBreaks()
+            guard !Task.isCancelled else { return }
+            if breaks != adBreaks { playerLog.info("ad breaks: \(breaks.count)") }
+            adBreaks = breaks
+            updateSkipButton()
+        } catch {
+            playerLog.info("ad breaks unavailable: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Shows the button while the position is inside a break (and not in its last seconds).
+    private func updateSkipButton() {
+        guard let viewController = playerViewController, !isSkipping else { return }
+        let position = player.currentItem?.currentTime().seconds ?? .nan
+        let target = AdBreaks.skipTarget(adBreaks, position: position)
+        guard target != shownSkipTarget else { return }
+        shownSkipTarget = target
+        if let target {
+            viewController.contextualActions = [
+                UIAction(title: "Přeskočit reklamu") { [weak self] _ in self?.skipAd(to: target) },
+            ]
+        } else {
+            viewController.contextualActions = []
+        }
+    }
+
+    private func skipAd(to target: Double) {
+        guard let item = player.currentItem else { return }
+        playerLog.info("skip ad break to \(target, format: .fixed(precision: 1))")
+        isSkipping = true
+        shownSkipTarget = nil
+        playerViewController?.contextualActions = []
+        Task {
+            await item.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            isSkipping = false
+            updateSkipButton()
+        }
+    }
+
+    // MARK: loading
 
     private func load(_ source: PlaybackSource, resume: Resume?) {
         var url = source.url

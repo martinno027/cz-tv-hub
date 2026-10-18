@@ -144,6 +144,20 @@
       };
     },
 
+    /**
+     * Ad breaks of a recording (spec/ad-breaks.md): entries without numeric start < end are dropped,
+     * the rest sorted by start; confidence defaults to 1. "pending" gives [].
+     */
+    parseBreaks: function (status, body) {
+      var root = ensureOk(status, body);
+      var num = function (v) { return typeof v === 'number' && isFinite(v); };
+      return J.arr(root, 'breaks').filter(isObject).filter(function (b) {
+        return num(b.start) && num(b.end) && b.start < b.end;
+      }).map(function (b) {
+        return { start: b.start, end: b.end, confidence: num(b.confidence) ? b.confidence : 1 };
+      }).sort(function (a, b) { return a.start - b.start; });
+    },
+
     /** The gateway's Czech `error` text from a JSON error body, if any. */
     errorText: function (body) {
       return J.str(J.parse(body), 'error');
@@ -176,6 +190,12 @@
   /** Events of a Prague broadcast day (05:00–05:00). */
   DvbClient.prototype.epg = function (day) {
     return this.get('/dvb/epg?date=' + day).then(function (r) { return DvbParser.parseEpg(r.status, r.body); });
+  };
+
+  DvbClient.prototype.breaks = function (recordingId) {
+    return this.get('/dvb/recording/' + encodeURIComponent(recordingId) + '/breaks').then(function (r) {
+      return DvbParser.parseBreaks(r.status, r.body);
+    });
   };
 
   DvbClient.prototype.liveUrl = function (channelId) {
@@ -281,6 +301,19 @@
     });
   };
 
+  /** The "Přeskočit reklamu" rule: inside a break and at least 3 s before its end → skip to the end. */
+  var AdBreaks = {
+    MIN_REMAINING_SECONDS: 3,
+    skipTarget: function (breaks, position) {
+      for (var i = 0; i < breaks.length; i++) {
+        var b = breaks[i];
+        if (b.start <= position && position < b.end - AdBreaks.MIN_REMAINING_SECONDS) return b.end;
+      }
+      return null;
+    }
+  };
+
+  CT.AdBreaks = AdBreaks;
   CT.DvbConfig = DvbConfig;
   CT.DvbParser = DvbParser;
   CT.DvbClient = DvbClient;

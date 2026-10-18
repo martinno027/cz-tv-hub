@@ -1,6 +1,7 @@
 # Ad breaks in "Anténa" recordings ("Přeskočit reklamu")
 
-Status: **proposal** (2026-10-18), not implemented; legal-guard: approve with changes (applied below). Applies only to the household's own DVB-T2 recordings
+Status: approved 2026-10-18 (legal-guard: approve with changes, applied below). **Implemented:** gateway endpoints,
+worker key and the button in all three apps. **Not yet:** the worker itself (needs real recordings to tune). Applies only to the household's own DVB-T2 recordings
 (`spec/dvb-gateway.md`). CT internet streams are never recorded or analysed (CLAUDE.md hard rules), so they get
 no ad-break detection.
 
@@ -33,12 +34,17 @@ apps (tvOS, Android TV, Samsung): fetch breaks while playing, show the button
   rented GPU, a CI runner or someone else's computer (that would be the cloud copy the hard rules forbid). It has no
   debug option that writes frames, crops or audio to disk.
 
+Fixtures: `spec/fixtures/ads/` (`breaks_done.json` with invalid entries to drop, `breaks_pending.json`,
+`breaks_off.json`, golden button cases `skip_cases.json`).
+
 ## Config (`/etc/cztvhub/cztvhub.conf`)
 ```ini
 [ads]
 enabled = false                 ; off by default
 channels = Nova HD, Prima HD    ; TVHeadend channel names, or "all"; antenna-received ČT channels rarely need it
 worker_key = <random 32+ chars> ; separate from [dvb] key, see "Worker key"
+worker_hosts =                  ; optional comma-separated source IPs allowed to use worker_key
+breaks_dir = /var/lib/cztvhub/breaks
 ```
 - `enabled = false` (or no `[ads]` section): the new endpoints answer `404`, apps never show the button.
 - Switching it off later deletes nothing automatically; stored breaks are removed with their recordings anyway.
@@ -46,8 +52,8 @@ worker_key = <random 32+ chars> ; separate from [dvb] key, see "Worker key"
 ## Worker key
 The worker uses its own bearer key (`worker_key`, at least 32 characters, different from `[dvb] key`) with a
 **narrow scope**: `GET /dvb/ads/jobs`, `GET` of recording HLS (`/dvb/recording/<id>.m3u8` and its `/dvb/hls/…`
-media) for recordings listed as jobs, and `PUT /dvb/recording/<id>/breaks`. Everything else (live TV, EPG, status)
-answers `401` for it. The app key cannot `PUT` breaks. A leaked worker key therefore cannot be used to watch live TV,
+media) of completed recordings on `[ads] channels`, and `PUT /dvb/recording/<id>/breaks`. Everything else (live TV,
+EPG, status, other recordings) answers `403` for it. The app key cannot `PUT` breaks. A leaked worker key therefore cannot be used to watch live TV,
 and can be rotated without touching the TVs.
 - Accepted **only** as the `Authorization` header, never as the `cztvhub_key` cookie (that exists for Samsung AVPlay
   and the app key only).
@@ -55,19 +61,22 @@ and can be rotated without touching the TVs.
 - Optional `worker_hosts = 192.168.1.10, 100.101.102.103` restricts the source addresses allowed to use the key.
 
 ## Gateway API (new)
-- `GET /dvb/ads/jobs` (worker key) →
+- `GET /dvb/ads/jobs?analyzer=logo-v1` (worker key) →
   `{"analyzer": "logo-v1", "jobs": [{"recordingId": "<dvr uuid>", "channelId": "<uuid>", "channelName": "Nova HD",
   "start": "…Z", "end": "…Z", "playlist": "/dvb/recording/<dvr uuid>.m3u8"}]}`
-  Completed recordings of `[ads] channels` without stored breaks (or with breaks from an older `analyzer`), oldest
-  first, at most 10 per call. A recording still being recorded is not a job (v1).
+  Completed recordings of `[ads] channels` without stored breaks or with breaks from another `analyzer` (the worker
+  names its own version), oldest first, at most 10 per call. A recording still being recorded is not a job (v1).
 - `PUT /dvb/recording/<id>/breaks` (worker key), body
   `{"analyzer": "logo-v1", "breaks": [{"start": 812.0, "end": 1105.5, "confidence": 0.9}]}` →
   `204`. `start`/`end` are **seconds from the beginning of the recording** (the position in its HLS), sorted,
-  non-overlapping, each break 20 s – 20 min long; invalid bodies → `400`. Stored as a small JSON file next to the HLS
-  state (`<hls_dir>/../breaks/<id>.json`), deleted by the retention loop together with the recording.
+  non-overlapping, each break 20 s – 20 min long, `confidence` 0–1, at most 200 breaks; invalid bodies → `400`;
+  a recording that is not a completed recording of `[ads] channels` → `403`. Stored as a small JSON file in
+  `[ads] breaks_dir` (default `/var/lib/cztvhub/breaks`); the retention loop deletes files of recordings that no
+  longer exist.
 - `GET /dvb/recording/<id>/breaks` (app key) →
-  `{"status": "done" | "pending", "breaks": [...]}`; `pending` with `[]` while not analysed yet. `404` for unknown
-  recordings or when `[ads]` is off.
+  `{"status": "done" | "pending", "breaks": [...]}`; `pending` with `[]` while not analysed yet. `404` when `[ads]`
+  is off. The app key cannot `PUT` (`403`).
+- A second worker recording while the worker's previous recording session is still alive → `409`.
 - The EPG's `recording` object gains `"breaks": true` when breaks are stored, so the guide could mark such recordings
   (optional for the apps).
 
@@ -92,7 +101,8 @@ recordings so breaks appear a few minutes behind live.
 ## App behaviour
 - Only for "Anténa" recordings (`dvbRecorded` play requests), never for CT internet streams.
 - On start and every 60 s while playing: `GET /dvb/recording/<id>/breaks` with the app key. Failures are silent
-  (no button, no error message).
+  (no button, no error message). Parsing drops entries without numeric `start < end`, sorts by `start`, defaults
+  `confidence` to 1.
 - When the position is inside a break and at least 3 s before its end, show **"Přeskočit reklamu"** bottom right
   (focusable; on Samsung the OK key presses it while it is visible, otherwise OK keeps meaning pause). Pressing it
   seeks to `end`. The button hides after a skip or when the break ends; it is not shown again for the same break
@@ -100,7 +110,17 @@ recordings so breaks appear a few minutes behind live.
 - A still-growing recording (start-over of an airing programme) shows no button in v1.
 - No app setting in v1: the household switches the feature on or off on the gateway.
 
-## Tests (when implemented)
+## Developing without a tuner
+`deploy/cztvhub-dev.conf` enables `[ads]` with worker key `dev-worker-dev-worker-dev-worker-00`. With `dvb-fake`
+and the dev gateway running, store test breaks for a fake recording (its clips are 60 s long) and play it in an app:
+```bash
+W="Authorization: Bearer dev-worker-dev-worker-dev-worker-00"
+curl -H "$W" "http://127.0.0.1:8098/dvb/ads/jobs?analyzer=logo-v1"        # pick a recordingId
+curl -X PUT -H "$W" --data '{"analyzer":"logo-v1","breaks":[{"start":20,"end":45}]}' \
+  http://127.0.0.1:8098/dvb/recording/<recordingId>/breaks
+```
+
+## Tests
 - Gateway: scopes of the two keys, jobs listing (channel filter, analyzer version), PUT validation, retention
   deletes breaks, `404` when off.
 - Worker: break building from synthetic logo/silence score sequences (golden cases in `spec/fixtures/ads/`, synthetic

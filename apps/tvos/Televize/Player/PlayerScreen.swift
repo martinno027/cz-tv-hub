@@ -9,7 +9,7 @@ struct PlayerScreen: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        PlayerViewControllerView(player: session.controller.player)
+        PlayerViewControllerView(controller: session.controller)
             .ignoresSafeArea()
             .background(Color.black)
             .onAppear {
@@ -24,15 +24,17 @@ struct PlayerScreen: View {
 }
 
 private struct PlayerViewControllerView: UIViewControllerRepresentable {
-    let player: AVPlayer
+    let controller: PlayerController
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-        return controller
+        let viewController = AVPlayerViewController()
+        viewController.player = controller.player
+        controller.playerViewController = viewController
+        return viewController
     }
 
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
-        if controller.player !== player { controller.player = player }
+    func updateUIViewController(_ viewController: AVPlayerViewController, context: Context) {
+        if viewController.player !== controller.player { viewController.player = controller.player }
+        if controller.playerViewController !== viewController { controller.playerViewController = viewController }
     }
 }

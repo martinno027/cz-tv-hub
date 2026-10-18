@@ -11,6 +11,15 @@ record_channels = all   ; or comma-separated TVHeadend channel names
 hls_dir = /var/lib/cztvhub/hls
 idle_seconds = 30
 
+[ads]
+; "Přeskočit reklamu" for antenna recordings (spec/ad-breaks.md). Off by default. The detection worker
+; runs only on a household machine (home LAN or own tailnet), never in a cloud.
+enabled = false
+channels = all          ; or comma-separated TVHeadend channel names, e.g. Nova HD, Prima HD
+worker_key =            ; random 32+ chars, different from [dvb] key
+worker_hosts =          ; optional: source IPs allowed to use worker_key
+breaks_dir = /var/lib/cztvhub/breaks
+
 [tvheadend]
 url = http://127.0.0.1:9981
 user = cztvhub

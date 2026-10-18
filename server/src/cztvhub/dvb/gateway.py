@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from ..config import Config
+from . import breaks as ads
 from . import epg
 from .hls import (Codecs, EmptySource, HlsManager, HlsSession, StreamFailed, build_ffmpeg_command, probe_codecs,
                   rewrite_playlist)
@@ -28,7 +29,10 @@ from .tvheadend import Channel, TunerBusy, TvheadendClient, TvhError, TvhNotFoun
 UUID = r"[A-Za-z0-9_-]{1,64}"
 LIVE_RE = re.compile(rf"^/dvb/live/({UUID})\.m3u8$")
 RECORDING_RE = re.compile(rf"^/dvb/recording/({UUID})\.m3u8$")
+BREAKS_RE = re.compile(rf"^/dvb/recording/({UUID})/breaks$")
+JOBS_PATH = "/dvb/ads/jobs"
 COOKIE_NAME = "cztvhub_key"
+MAX_BODY = 64 * 1024
 HLS_RE = re.compile(r"^/dvb/hls/([0-9a-f]{32})/([A-Za-z0-9_.-]+)$")
 ICON_RE = re.compile(rf"^/dvb/icon/({UUID})$")
 RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -80,7 +84,12 @@ class DvbGateway:
         self.popen = popen
         self.playlist_timeout = playlist_timeout
         self.log = log
-        self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log)
+        self.ads = cfg.ads
+        self.breaks = ads.BreakStore(self.ads.breaks_dir)
+        self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log,
+                                       after=self._prune_breaks if self.ads.enabled else None)
+        self._worker_sid: str | None = None  # the worker's one recording session (spec/ad-breaks.md)
+        self._worker_lock = threading.Lock()
         self._channels: list[Channel] = []
         self._channels_at = float("-inf")
         self._channels_lock = threading.Lock()
@@ -95,12 +104,20 @@ class DvbGateway:
         self.hls.shutdown()
 
     # -- entry point -----------------------------------------------------------------------
-    def handle(self, path: str, query: Mapping[str, str], headers: Mapping[str, str]) -> Response:
+    def handle(self, path: str, query: Mapping[str, str], headers: Mapping[str, str], method: str = "GET",
+               body: bytes = b"", client: str = "") -> Response:
         if not self.dvb.enabled:
             return error(404, "DVB není zapnuté")
-        if not self._authorized(headers.get("Authorization") or "", headers.get("Cookie") or ""):
+        role = self._role(headers.get("Authorization") or "", headers.get("Cookie") or "", client)
+        if role is None:
             return error(401, "Chybí nebo nesedí klíč", {"WWW-Authenticate": 'Bearer realm="cztvhub"'})
         try:
+            if role == "worker":
+                return self._worker_route(method, path, query, body)
+            if method != "GET":
+                if BREAKS_RE.match(path) and self.ads.enabled:
+                    raise HttpError(403, "Bloky reklam ukládá jen pracovník")
+                raise HttpError(405, "Nepodporovaná metoda")
             return self._route(path, query, headers)
         except HttpError as exc:
             return error(exc.status, exc.message)
@@ -115,16 +132,22 @@ class DvbGateway:
             self.log(f"dvb: {path}: {exc}")
             return error(502, TvhError.user_message)
 
-    def _authorized(self, header: str, cookie: str = "") -> bool:
-        """Bearer key, or the same key as cookie ``cztvhub_key`` (Samsung AVPlay cannot send headers)."""
-        if not self.dvb.key:
-            return False
+    def _role(self, header: str, cookie: str, client: str) -> str | None:
+        """"app" ([dvb] key as bearer or cookie), "worker" ([ads] worker_key, bearer header only) or None."""
         scheme, _, token = header.partition(" ")
-        if scheme.lower() != "bearer":
-            token = _cookie_key(cookie)
-            if token is None:
-                return False
-        return hmac.compare_digest(token.strip().encode("utf-8"), self.dvb.key.encode("utf-8"))
+        if scheme.lower() == "bearer":
+            if _same(token.strip(), self.dvb.key):
+                return "app"
+            if self.ads.enabled and _same(token.strip(), self.ads.worker_key):
+                if self.ads.worker_hosts and client not in self.ads.worker_hosts:
+                    return None
+                return "worker"
+            return None
+        return "app" if _same(_cookie_key(cookie) or "", self.dvb.key) else None
+
+    def _authorized(self, header: str, cookie: str = "") -> bool:
+        """The app key: bearer, or the same key as cookie ``cztvhub_key`` (Samsung AVPlay cannot send headers)."""
+        return self._role(header, cookie, "") == "app"
 
     def _route(self, path: str, query: Mapping[str, str], headers: Mapping[str, str]) -> Response:
         if path == "/dvb/status":
@@ -139,6 +162,8 @@ class DvbGateway:
             return self.live(m.group(1))
         if m := RECORDING_RE.match(path):
             return self.recording(m.group(1))
+        if m := BREAKS_RE.match(path):
+            return self.get_breaks(m.group(1))
         if m := ICON_RE.match(path):
             return self.icon(m.group(1))
         return error(404, "Nenalezeno")
@@ -186,7 +211,13 @@ class DvbGateway:
         start, end = epg.day_bounds(day)
         events = self.client.epg_events(start, end)
         entries = self.client.dvr_entries("grid")
-        return json_response(200, {"date": day.isoformat(), "events": epg.build_epg(events, entries, start, end)})
+        built = epg.build_epg(events, entries, start, end)
+        if self.ads.enabled:
+            stored = self.breaks.ids()
+            for event in built:
+                if event["recording"] and event["recording"]["id"] in stored:
+                    event["recording"]["breaks"] = True
+        return json_response(200, {"date": day.isoformat(), "events": built})
 
     def icon(self, channel_id: str) -> Response:
         channel = next((c for c in self._channel_list() if c.uuid == channel_id), None)
@@ -250,7 +281,7 @@ class DvbGateway:
             return False
         return bool(tuners) and all(t.in_use for t in tuners)
 
-    def recording(self, dvr_uuid: str) -> Response:
+    def recording(self, dvr_uuid: str, on_session: Callable[[HlsSession], None] | None = None) -> Response:
         def state() -> str:
             entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
             return epg.recording_state(entry.sched_status) if entry else ""
@@ -263,7 +294,10 @@ class DvbGateway:
                 return self.client.open_recording(dvr_uuid)
             raise HttpError(404, "Nahrávka není k dispozici")
 
-        return self._playlist(self._session(f"rec:{dvr_uuid}", False, open_source))
+        session = self._session(f"rec:{dvr_uuid}", False, open_source)
+        if on_session is not None:
+            on_session(session)
+        return self._playlist(session)
 
     def media(self, sid: str, name: str, range_header: str | None) -> Response:
         session = self.hls.get(sid)
@@ -290,6 +324,88 @@ class DvbGateway:
                     return Response(206, data[first:last + 1], content_type, headers)
             return Response(416, b"", content_type, {"Content-Range": f"bytes */{size}"})
         return Response(200, data, content_type, headers)
+
+    # -- ad breaks (spec/ad-breaks.md) -----------------------------------------------------
+    def get_breaks(self, dvr_uuid: str) -> Response:
+        if not self.ads.enabled:
+            raise HttpError(404, "Přeskakování reklam není zapnuté")
+        stored = self.breaks.get(dvr_uuid)
+        if stored is None:
+            return json_response(200, {"status": "pending", "breaks": []})
+        return json_response(200, {"status": "done", "breaks": stored.get("breaks", [])})
+
+    def _worker_route(self, method: str, path: str, query: Mapping[str, str], body: bytes) -> Response:
+        """The worker key reaches only the job list, job recordings and the break upload."""
+        if not self.ads.enabled:  # unreachable: the worker role needs [ads] enabled
+            raise HttpError(404, "Přeskakování reklam není zapnuté")
+        if method == "GET" and path == JOBS_PATH:
+            return self.ad_jobs(query.get("analyzer") or "")
+        if method == "GET" and (m := RECORDING_RE.match(path)):
+            return self._worker_recording(m.group(1))
+        if method == "GET" and (m := HLS_RE.match(path)) and m.group(1) == self._worker_sid:
+            return self.media(m.group(1), m.group(2), None)
+        if method == "PUT" and (m := BREAKS_RE.match(path)):
+            return self.put_breaks(m.group(1), body)
+        raise HttpError(403, "Klíč pracovníka sem nemá přístup")
+
+    def _analysable(self, dvr_uuid: str) -> bool:
+        entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
+        channels = {c.uuid: c for c in self._channel_list()}
+        return ads.analysable(entry, channels, self.ads.channels)
+
+    def ad_jobs(self, analyzer: str) -> Response:
+        if not ads.ANALYZER_RE.match(analyzer):
+            raise HttpError(400, "Chybí parametr analyzer")
+        channels = {c.uuid: c for c in self._channel_list()}
+        pending = ads.jobs(self.client.dvr_entries("grid_finished"), channels, self.ads.channels, self.breaks,
+                           analyzer)
+        return json_response(200, {"analyzer": analyzer, "jobs": [{
+            "recordingId": e.uuid,
+            "channelId": e.channel,
+            "channelName": channels[e.channel].name,
+            "start": epg.iso(e.start),
+            "end": epg.iso(e.stop),
+            "playlist": f"/dvb/recording/{e.uuid}.m3u8",
+        } for e in pending]})
+
+    def _worker_recording(self, dvr_uuid: str) -> Response:
+        if not self._analysable(dvr_uuid):
+            raise HttpError(403, "Nahrávka není k analýze")
+        key = f"rec:{dvr_uuid}"
+        with self._worker_lock:
+            # Looked up without touching it, so a refused request does not keep the old session alive.
+            current = next((x for x in self.hls.sessions() if x.sid == self._worker_sid), None)
+            if current is not None and current.key != key and current.usable():
+                raise HttpError(409, "Pracovník už zpracovává jinou nahrávku")
+
+        def remember(session: HlsSession) -> None:
+            with self._worker_lock:
+                self._worker_sid = session.sid
+
+        return self.recording(dvr_uuid, on_session=remember)
+
+    def put_breaks(self, dvr_uuid: str, body: bytes) -> Response:
+        if len(body) > MAX_BODY:
+            raise HttpError(400, "Příliš velký požadavek")
+        if not self._analysable(dvr_uuid):
+            raise HttpError(403, "Nahrávka není k analýze")
+        try:
+            analyzer, items = ads.validate(json.loads(body.decode("utf-8")))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise HttpError(400, f"Neplatné bloky: {exc}")
+        self.breaks.put(dvr_uuid, analyzer, items)
+        return Response(204, b"", JSON, {"Cache-Control": "no-store"})
+
+    def _prune_breaks(self) -> None:
+        entries = self.client.dvr_entries("grid") + self.client.dvr_entries("grid_finished") + \
+            self.client.dvr_entries("grid_failed")
+        removed = self.breaks.prune(e.uuid for e in entries)
+        if removed:
+            self.log(f"dvb: removed ad breaks of {len(removed)} deleted recording(s)")
+
+
+def _same(token: str, key: str) -> bool:
+    return bool(key) and hmac.compare_digest(token.encode("utf-8"), key.encode("utf-8"))
 
 
 def _cookie_key(header: str) -> str | None:

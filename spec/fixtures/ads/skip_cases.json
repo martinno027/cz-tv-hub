@@ -1,0 +1,23 @@
+{
+ "comment": "Golden cases for the 'Přeskočit reklamu' button (spec/ad-breaks.md). Positions are seconds from the start of the recording. The button shows while start <= position < end - minRemainingSeconds and skips to end. Parsing breaks_done.json must give exactly these breaks (invalid entries dropped, sorted by start; confidence defaults to 1).",
+ "minRemainingSeconds": 3,
+ "breaks": [
+  {"start": 60.0, "end": 180.0, "confidence": 0.9},
+  {"start": 600.0, "end": 615.5, "confidence": 0.7},
+  {"start": 1200.0, "end": 1500.0, "confidence": 1.0}
+ ],
+ "cases": [
+  {"position": 0, "skipTo": null},
+  {"position": 59.9, "skipTo": null},
+  {"position": 60, "skipTo": 180.0},
+  {"position": 120, "skipTo": 180.0},
+  {"position": 176.9, "skipTo": 180.0},
+  {"position": 177.0, "skipTo": null},
+  {"position": 180, "skipTo": null},
+  {"position": 605, "skipTo": 615.5},
+  {"position": 612.6, "skipTo": null},
+  {"position": 1499, "skipTo": null},
+  {"position": 1300, "skipTo": 1500.0},
+  {"position": 5000, "skipTo": null}
+ ]
+}

@@ -61,11 +61,14 @@ final class AppModel {
         open { try await Self.prepare(client, url: url, title: channel.name, mode: .live) }
     }
 
-    /// A recording from the gateway; while it is still recording this is the start-over.
-    func playAntennaRecording(id: String, title: String) {
+    /// A recording from the gateway; while it is still recording (`finished: false`) this is the
+    /// start-over. Only finished recordings offer "Přeskočit reklamu" (spec/ad-breaks.md, v1).
+    func playAntennaRecording(id: String, title: String, finished: Bool) {
         guard let client = antenna?.client else { return }
         let url = client.recordingURL(id: id)
-        open { try await Self.prepare(client, url: url, title: title, mode: .recording) }
+        var adBreaks: (@Sendable () async throws -> [AdBreak])?
+        if finished { adBreaks = { try await client.adBreaks(recordingID: id) } }
+        open(adBreaks: adBreaks) { try await Self.prepare(client, url: url, title: title, mode: .recording) }
     }
 
     private static func prepare(_ client: DVBClient, url: URL, title: String, mode: PlaybackSource.Mode) async throws -> PlaybackSource {
@@ -73,7 +76,8 @@ final class AppModel {
         return PlaybackSource(url: url, title: title, mode: mode, headers: client.config.authorizationHeaders)
     }
 
-    private func open(_ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
+    private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil,
+                      _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
             log.info("play ignored: still resolving the previous selection")
             return
@@ -89,7 +93,7 @@ final class AppModel {
             do {
                 let source = try await resolve()
                 log.info("resolved \(source.title, privacy: .public) mode=\(String(describing: source.mode), privacy: .public) host=\(source.url.host() ?? "", privacy: .public)")
-                let controller = PlayerController(source: source, resolve: resolve)
+                let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks)
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
                 let session = PlayerSession(controller: controller)
                 self.session = session
@@ -190,11 +194,11 @@ extension AppModel {
                 if case .recording(let id) = AntennaAction.decide(event, now: now) { return (event, id) }
                 return nil
             }
-            if let (event, id) = recorded.last { playAntennaRecording(id: id, title: event.title) }
+            if let (event, id) = recorded.last { playAntennaRecording(id: id, title: event.title, finished: true) }
         case "dvbstartover":
             for event in events {
                 if case .airing(let id?) = AntennaAction.decide(event, now: now) {
-                    playAntennaRecording(id: id, title: event.title)
+                    playAntennaRecording(id: id, title: event.title, finished: false)
                 }
             }
         default:

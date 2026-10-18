@@ -40,5 +40,6 @@
     <string name="state_recording">Přehrát záznam</string>
     <string name="state_live">Jen živě</string>
     <string name="back">Zpět</string>
+    <string name="skip_ad">Přeskočit reklamu</string>
     <string name="disclaimer">Neoficiální projekt, není spojen s Českou televizí. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.</string>
 </resources>
