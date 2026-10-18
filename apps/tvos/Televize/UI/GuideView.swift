@@ -83,8 +83,17 @@ struct GuideView: View {
     @State private var focusedEntry: GuideEntry?
     @State private var defaultFocusID: String?
     @State private var scrollRequest: ScrollRequest?
-    @State private var airingChoice: GuideEntry?
+    @State private var choice: Choice?
     @FocusState private var focusedID: String?
+
+    /// The "Pokračovat / Od začátku / Živě" choice for a selected programme.
+    private struct Choice {
+        let entry: GuideEntry
+        /// "Pokračovat" offer in seconds from the programme's start, if any.
+        let resumeAt: TimeInterval?
+        /// The programme is on air, so "Živě" is offered too.
+        let isAiring: Bool
+    }
 
     private struct LoadKey: Equatable {
         let day: BroadcastDay
@@ -108,25 +117,41 @@ struct GuideView: View {
             focusedEntry = entry(withID: id)
         }
         .confirmationDialog(
-            airingChoice?.title ?? "",
-            isPresented: Binding(get: { airingChoice != nil }, set: { if !$0 { airingChoice = nil } }),
+            choice?.entry.title ?? "",
+            isPresented: Binding(get: { choice != nil }, set: { if !$0 { choice = nil } }),
             titleVisibility: .visible,
-            presenting: airingChoice
-        ) { entry in
-            switch entry {
+            presenting: choice
+        ) { choice in
+            // "Pokračovat" comes first, so it has the focus.
+            switch choice.entry {
             case .ct(let programme):
                 if let channel = Channels.bySlug(programme.channel) {
+                    if let resumeAt = choice.resumeAt {
+                        Button(ResumeRules.buttonTitle(resumeAt)) {
+                            model.play(.programme(programme, channel: channel), resumeAt: resumeAt)
+                        }
+                    }
                     Button("Od začátku") { model.play(.programme(programme, channel: channel)) }
-                    Button("Živě") { model.play(.live(channel)) }
-                    Button(OfficialApp.buttonTitle) {
-                        OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
+                    if choice.isAiring {
+                        Button("Živě") { model.play(.live(channel)) }
+                        Button(OfficialApp.buttonTitle) {
+                            OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
+                        }
                     }
                 }
             case .antenna(let event, let channel):
-                if case .airing(let recordingID?) = AntennaAction.decide(event, now: Date()) {
-                    Button("Od začátku") { model.playAntennaRecording(id: recordingID, title: event.title, finished: false) }
+                if let recordingID = Self.playableRecordingID(event) {
+                    let finished = !choice.isAiring
+                    if let resumeAt = choice.resumeAt {
+                        Button(ResumeRules.buttonTitle(resumeAt)) {
+                            model.playAntennaRecording(id: recordingID, event: event, finished: finished, resumeAt: resumeAt)
+                        }
+                    }
+                    Button("Od začátku") { model.playAntennaRecording(id: recordingID, event: event, finished: finished) }
                 }
-                Button("Živě") { model.playAntennaLive(channel) }
+                if choice.isAiring {
+                    Button("Živě") { model.playAntennaLive(channel) }
+                }
             }
             Button("Zrušit", role: .cancel) {}
         }
@@ -347,21 +372,39 @@ struct GuideView: View {
             case .future:
                 model.alertMessage = CTError.notStarted
             case .startOver where programme.isAiring(at: now):
-                airingChoice = entry
+                choice = Choice(entry: entry, resumeAt: model.resumeOffer(for: programme), isAiring: true)
             default:
-                model.play(.programme(programme, channel: channel))
+                if let resumeAt = model.resumeOffer(for: programme) {
+                    choice = Choice(entry: entry, resumeAt: resumeAt, isAiring: false)
+                } else {
+                    model.play(.programme(programme, channel: channel))
+                }
             }
         case .antenna(let event, _):
             switch AntennaAction.decide(event, now: now) {
             case .future:
                 model.alertMessage = CTError.notStarted
-            case .airing:
-                airingChoice = entry
+            case .airing(let recordingID):
+                let resumeAt = recordingID.flatMap { model.resumeOffer(recordingID: $0, event: event) }
+                choice = Choice(entry: entry, resumeAt: resumeAt, isAiring: true)
             case .recording(let id):
-                model.playAntennaRecording(id: id, title: event.title, finished: true)
+                if let resumeAt = model.resumeOffer(recordingID: id, event: event) {
+                    choice = Choice(entry: entry, resumeAt: resumeAt, isAiring: false)
+                } else {
+                    model.playAntennaRecording(id: id, event: event, finished: true)
+                }
             case .notRecorded:
                 model.alertMessage = AntennaAction.notRecordedMessage
             }
+        }
+    }
+
+    /// The recording behind "Pokračovat" / "Od začátku" of an Anténa programme (growing or finished).
+    private static func playableRecordingID(_ event: DVBEvent) -> String? {
+        switch AntennaAction.decide(event, now: Date()) {
+        case .airing(let id): return id
+        case .recording(let id): return id
+        case .future, .notRecorded: return nil
         }
     }
 }

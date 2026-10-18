@@ -15,6 +15,7 @@
     <string name="choice_title">%1$s právě běží</string>
     <string name="choice_from_start">Od začátku</string>
     <string name="choice_live">Živě</string>
+    <string name="choice_resume">Pokračovat od %1$s</string>
     <string name="empty_day">Pro tento den není program k dispozici</string>
     <string name="error_playback">Přehrávání selhalo</string>
     <string name="open_ivysilani">Otevřít v iVysílání</string>

@@ -25,12 +25,22 @@ public struct PlaybackSource: Sendable, Equatable {
     public let mode: Mode
     /// HTTP headers the player must send on every request (playlist and segments).
     public let headers: [String: String]
+    /// "Pokračovat" for `.vod` and `.recording`: start this many seconds into the stream
+    /// (nil = from the beginning). Start-over carries its resume point in `mode`.
+    public let startPosition: TimeInterval?
 
-    public init(url: URL, title: String, mode: Mode, headers: [String: String] = [:]) {
+    public init(url: URL, title: String, mode: Mode, headers: [String: String] = [:], startPosition: TimeInterval? = nil) {
         self.url = url
         self.title = title
         self.mode = mode
         self.headers = headers
+        self.startPosition = startPosition
+    }
+
+    /// A gateway ("Anténa") recording, optionally resumed at `resumeAt` seconds.
+    public static func antennaRecording(url: URL, title: String, headers: [String: String],
+                                        resumeAt: TimeInterval? = nil) -> PlaybackSource {
+        PlaybackSource(url: url, title: title, mode: .recording, headers: headers, startPosition: resumeAt)
     }
 }
 
@@ -44,7 +54,9 @@ public struct PlaybackPlanner: Sendable {
         self.clock = clock
     }
 
-    public func resolve(_ request: PlaybackRequest) async throws -> PlaybackSource {
+    /// `resumeAt` ("Pokračovat") is seconds from the programme's start; ignored for live. The
+    /// decision rules still pick the source by time; only the start position changes.
+    public func resolve(_ request: PlaybackRequest, resumeAt: TimeInterval? = nil) async throws -> PlaybackSource {
         switch request {
         case .live(let channel):
             let streams = try await client.liveStreams(channelID: channel.id)
@@ -54,27 +66,33 @@ public struct PlaybackPlanner: Sendable {
             case .future:
                 throw CTError(CTError.notStarted)
             case .startOver:
-                return try await startOver(programme, channel: channel)
+                return try await startOver(programme, channel: channel, resumeAt: resumeAt)
             case .vod, .vodUnavailable:
                 // For unavailable items this surfaces CT's own reason as a CTError.
                 switch try await client.vod(idec: programme.idec) {
                 case .stream(let url):
-                    return PlaybackSource(url: url, title: programme.title, mode: .vod)
+                    return PlaybackSource(url: url, title: programme.title, mode: .vod, startPosition: resumeAt)
                 case .stillLive(let channelID):
-                    return try await startOver(programme, channel: Channels.byID(channelID) ?? channel)
+                    return try await startOver(programme, channel: Channels.byID(channelID) ?? channel, resumeAt: resumeAt)
                 }
             }
         }
     }
 
-    private func startOver(_ programme: Programme, channel: Channel) async throws -> PlaybackSource {
+    private func startOver(_ programme: Programme, channel: Channel, resumeAt: TimeInterval?) async throws -> PlaybackSource {
         let streams = try await client.liveStreams(channelID: channel.id)
         guard let timeshift = streams.timeshift else { throw CTError(CTError.noTimeshift) }
-        let offset = DecisionRules.startOverOffset(start: programme.start, now: clock())
-        return PlaybackSource(
-            url: timeshift,
-            title: programme.title,
-            mode: .startOver(seekDate: DecisionRules.startOverDate(start: programme.start), offset: offset)
-        )
+        return PlaybackSource(url: timeshift, title: programme.title,
+                              mode: Self.startOverMode(start: programme.start, now: clock(), resumeAt: resumeAt))
+    }
+
+    /// Start-over position: the programme's beginning (minus the margin), or `start + resumeAt`.
+    public static func startOverMode(start: Date, now: Date, resumeAt: TimeInterval?) -> PlaybackSource.Mode {
+        if let resumeAt {
+            return .startOver(seekDate: DecisionRules.resumeDate(start: start, progress: resumeAt),
+                              offset: DecisionRules.resumeOffset(start: start, progress: resumeAt, now: now))
+        }
+        return .startOver(seekDate: DecisionRules.startOverDate(start: start),
+                          offset: DecisionRules.startOverOffset(start: start, now: now))
     }
 }

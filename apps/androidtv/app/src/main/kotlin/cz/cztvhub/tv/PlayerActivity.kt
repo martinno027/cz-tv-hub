@@ -34,6 +34,8 @@ import cz.cztvhub.core.CtException
 import cz.cztvhub.core.PlayKind
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.PlayTarget
+import cz.cztvhub.core.ResumeRules
+import cz.cztvhub.core.ResumeSpot
 import cz.cztvhub.core.dvb.AdBreak
 import cz.cztvhub.core.dvb.AdBreaks
 import cz.cztvhub.core.dvb.DvbParser
@@ -74,6 +76,10 @@ class PlayerActivity : ComponentActivity() {
     private var adBreaksJob: Job? = null
     private var skipTargetSeconds: Double? = null
 
+    /** Where progress is remembered for "Pokračovat"; null for live. */
+    private var spot: ResumeSpot? = null
+    private var progressJob: Job? = null
+
     /** Pending start-over seek, applied once the live window is known. */
     private var pendingWallClockMs: Long? = null
     private var pendingFallbackMs: Long = 0
@@ -82,6 +88,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         request = PlayRequests.from(intent) ?: return finish()
+        spot = ResumeRules.spot(request)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         playerView = PlayerView(this).apply {
@@ -160,10 +167,14 @@ class PlayerActivity : ComponentActivity() {
         playerView.requestFocus()
         load(forceRefresh = false, resume = resumeOnStart)
         startAdBreaks()
+        startProgressSaving()
     }
 
     override fun onStop() {
         super.onStop()
+        saveProgress()
+        progressJob?.cancel()
+        progressJob = null
         // Release when hidden; a fresh URL is resolved when the viewer comes back.
         resumeOnStart = currentResume()
         loadJob?.cancel()
@@ -299,6 +310,53 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /** "Pokračovat": remember the position every [SAVE_INTERVAL_MS] while playing (and in [onStop]). */
+    private fun startProgressSaving() {
+        if (spot == null) return
+        progressJob?.cancel()
+        progressJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(SAVE_INTERVAL_MS)
+                if (player?.isPlaying == true) saveProgress()
+            }
+        }
+    }
+
+    private fun saveProgress() {
+        val remembered = spot ?: return
+        val seconds = progressSeconds(remembered) ?: return
+        tvApp.resume.save(remembered.key, seconds, remembered.lengthSeconds)
+    }
+
+    /**
+     * Seconds from the programme's start: the position for archive and recordings, the shown frame's wall
+     * clock − programme start for "Zpět v čase". Null for live, before the first seek, or on an error page.
+     */
+    private fun progressSeconds(remembered: ResumeSpot): Double? {
+        val exo = player ?: return null
+        val planned = target ?: return null
+        if (pendingWallClockMs != null || message.visibility == View.VISIBLE) return null
+        if (exo.playbackState == Player.STATE_IDLE) return null
+        return when (planned.kind) {
+            PlayKind.LIVE -> null
+            PlayKind.VOD -> exo.currentPosition / 1000.0
+            PlayKind.TIMESHIFT -> {
+                val start = remembered.start ?: return null
+                val timeline = exo.currentTimeline
+                if (timeline.isEmpty) return null
+                val window = timeline.getWindow(exo.currentMediaItemIndex, Timeline.Window())
+                if (window.isPlaceholder) return null
+                val wallClockMs = when {
+                    window.windowStartTimeMs != C.TIME_UNSET -> window.windowStartTimeMs + exo.currentPosition
+                    // No program date-time: estimate the window start as now − window length.
+                    window.durationMs != C.TIME_UNSET -> System.currentTimeMillis() - window.durationMs + exo.currentPosition
+                    else -> return null
+                }
+                (wallClockMs - start.toEpochMilli()) / 1000.0
+            }
+        }
+    }
+
     /**
      * Ad breaks for finished gateway recordings only (a still-growing one gets no button in v1): fetched on start
      * and every minute, the position checked twice a second. Gateway failures are silent: no button.
@@ -392,6 +450,7 @@ class PlayerActivity : ComponentActivity() {
         const val TAG = "PlayerActivity"
         const val AD_BREAKS_REFRESH_MS = 60_000L
         const val SKIP_CHECK_MS = 500L
+        const val SAVE_INTERVAL_MS = 10_000L
         const val HTTP_TIMEOUT_MS = 20_000
         const val RE_RESOLVE_COOLDOWN_MS = 5 * 60 * 1000L
         const val LIVE_EDGE_GUARD_MS = 10_000L

@@ -60,6 +60,9 @@ Vývoj proti falešné bráně na Macu: `-gatewayAddress 127.0.0.1:8098 -gateway
 pak např. `-play dvblive:1`, `-play dvbrec:1`, `-play dvbstartover:1` (číslo = číslo kanálu brány),
 `-liveScroll antenna`, `-tab guide -guideRow 6`, `-tab settings`.
 
+**Pokračovat**: Apple TV si pamatuje, kde jste pořad přestali sledovat (jen v zařízení), a v průvodci nabídne
+„Pokračovat od 23:10“. Dosledované pořady zapomene.
+
 Volitelně **Přeskočit reklamu** (zapíná se na bráně, viz [`spec/ad-breaks.md`](../../spec/ad-breaks.md)): u hotových nahrávek
 z antény nabídne systémové tlačítko vpravo dole během reklamního bloku.
 

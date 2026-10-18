@@ -5,7 +5,7 @@ import android.content.Intent
 import cz.cztvhub.core.PlayRequest
 import java.time.Instant
 
-/** Encodes a [PlayRequest] (never a stream URL or key) into Intent extras for [PlayerActivity]. */
+/** Encodes a [PlayRequest] (never a stream URL or key) into Intent extras for [PlayerActivity], resume point included. */
 object PlayRequests {
     private const val KIND = "kind"
     private const val CHANNEL = "channel"
@@ -16,6 +16,8 @@ object PlayRequests {
     private const val PLAYABLE = "playable"
     private const val RECORDING = "recording"
     private const val FROM_START = "fromStart"
+    private const val RESUME = "resumeSeconds"
+    private const val LENGTH = "lengthSeconds"
 
     fun intent(context: Context, request: PlayRequest): Intent {
         val intent = Intent(context, PlayerActivity::class.java)
@@ -23,17 +25,28 @@ object PlayRequests {
             .putExtra(TITLE, request.title)
         when (request) {
             is PlayRequest.Live -> intent.putExtra(KIND, "live")
-            is PlayRequest.Startover -> intent.putExtra(KIND, "startover")
-                .putExtra(START, request.start.toEpochMilli())
-            is PlayRequest.Programme -> intent.putExtra(KIND, "programme")
-                .putExtra(IDEC, request.idec)
-                .putExtra(START, request.start.toEpochMilli())
-                .putExtra(END, request.end.toEpochMilli())
-                .putExtra(PLAYABLE, request.isPlayableNow)
+            is PlayRequest.Startover -> {
+                intent.putExtra(KIND, "startover").putExtra(START, request.start.toEpochMilli())
+                request.idec?.let { intent.putExtra(IDEC, it) }
+                request.end?.let { intent.putExtra(END, it.toEpochMilli()) }
+                request.resumeSeconds?.let { intent.putExtra(RESUME, it) }
+            }
+            is PlayRequest.Programme -> {
+                intent.putExtra(KIND, "programme")
+                    .putExtra(IDEC, request.idec)
+                    .putExtra(START, request.start.toEpochMilli())
+                    .putExtra(END, request.end.toEpochMilli())
+                    .putExtra(PLAYABLE, request.isPlayableNow)
+                request.resumeSeconds?.let { intent.putExtra(RESUME, it) }
+            }
             is PlayRequest.DvbLive -> intent.putExtra(KIND, "dvbLive")
-            is PlayRequest.DvbRecorded -> intent.putExtra(KIND, "dvbRecorded")
-                .putExtra(RECORDING, request.recordingId)
-                .putExtra(FROM_START, request.fromStart)
+            is PlayRequest.DvbRecorded -> {
+                intent.putExtra(KIND, "dvbRecorded")
+                    .putExtra(RECORDING, request.recordingId)
+                    .putExtra(FROM_START, request.fromStart)
+                request.lengthSeconds?.let { intent.putExtra(LENGTH, it) }
+                request.resumeSeconds?.let { intent.putExtra(RESUME, it) }
+            }
         }
         return intent
     }
@@ -42,9 +55,17 @@ object PlayRequests {
         val channel = intent.getStringExtra(CHANNEL) ?: return null
         val title = intent.getStringExtra(TITLE).orEmpty()
         val start = Instant.ofEpochMilli(intent.getLongExtra(START, 0))
+        val resume = intent.doubleOrNull(RESUME)
         return when (intent.getStringExtra(KIND)) {
             "live" -> PlayRequest.Live(channel, title)
-            "startover" -> PlayRequest.Startover(channel, title, start)
+            "startover" -> PlayRequest.Startover(
+                channelId = channel,
+                title = title,
+                start = start,
+                idec = intent.getStringExtra(IDEC),
+                end = if (intent.hasExtra(END)) Instant.ofEpochMilli(intent.getLongExtra(END, 0)) else null,
+                resumeSeconds = resume,
+            )
             "programme" -> PlayRequest.Programme(
                 channelId = channel,
                 title = title,
@@ -52,6 +73,7 @@ object PlayRequests {
                 start = start,
                 end = Instant.ofEpochMilli(intent.getLongExtra(END, 0)),
                 isPlayableNow = intent.getBooleanExtra(PLAYABLE, false),
+                resumeSeconds = resume,
             )
             "dvbLive" -> PlayRequest.DvbLive(channel, title)
             "dvbRecorded" -> PlayRequest.DvbRecorded(
@@ -59,8 +81,12 @@ object PlayRequests {
                 title = title,
                 recordingId = intent.getStringExtra(RECORDING) ?: return null,
                 fromStart = intent.getBooleanExtra(FROM_START, false),
+                lengthSeconds = intent.doubleOrNull(LENGTH),
+                resumeSeconds = resume,
             )
             else -> null
         }
     }
+
+    private fun Intent.doubleOrNull(name: String): Double? = if (hasExtra(name)) getDoubleExtra(name, 0.0) else null
 }

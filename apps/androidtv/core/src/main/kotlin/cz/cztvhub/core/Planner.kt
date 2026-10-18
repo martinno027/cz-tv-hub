@@ -11,11 +11,17 @@ sealed interface PlayRequest {
 
     data class Live(override val channelId: String, override val title: String) : PlayRequest
 
-    /** Airing or recently aired programme, played from the rewind buffer. */
+    /**
+     * Airing or recently aired programme, played from the rewind buffer. [idec] and [end] identify the
+     * programme for "Pokračovat"; [resumeSeconds] continues from that point instead of the start.
+     */
     data class Startover(
         override val channelId: String,
         override val title: String,
         val start: Instant,
+        val idec: String? = null,
+        val end: Instant? = null,
+        val resumeSeconds: Double? = null,
     ) : PlayRequest
 
     /** A programme picked in the guide; the decision rules choose how to play it. */
@@ -26,17 +32,24 @@ sealed interface PlayRequest {
         val start: Instant,
         val end: Instant,
         val isPlayableNow: Boolean,
+        /** "Pokračovat": seconds from the programme's start. */
+        val resumeSeconds: Double? = null,
     ) : PlayRequest
 
     /** Live from the household's own tuner through the gateway ("Anténa"). */
     data class DvbLive(override val channelId: String, override val title: String) : PlayRequest
 
-    /** A gateway recording; [fromStart] plays a still-growing recording from its beginning. */
+    /**
+     * A gateway recording; [fromStart] plays a still-growing recording from its beginning. [lengthSeconds]
+     * (the EPG event's length) lets the player remember progress; [resumeSeconds] starts there instead.
+     */
     data class DvbRecorded(
         override val channelId: String,
         override val title: String,
         val recordingId: String,
         val fromStart: Boolean,
+        val lengthSeconds: Double? = null,
+        val resumeSeconds: Double? = null,
     ) : PlayRequest
 }
 
@@ -79,7 +92,11 @@ class Planner(
                     kind = PlayKind.VOD,
                     title = request.title,
                     headers = client.config.authHeaders,
-                    startPositionMs = if (request.fromStart) 0 else null,
+                    startPositionMs = when {
+                        request.resumeSeconds != null -> (request.resumeSeconds * 1000).toLong()
+                        request.fromStart -> 0
+                        else -> null
+                    },
                 )
             }
             else -> Unit
@@ -90,7 +107,8 @@ class Planner(
             is PlayRequest.Live -> {
                 PlayTarget(live.resolve(channel.id, forceRefresh).main, PlayKind.LIVE, request.title)
             }
-            is PlayRequest.Startover -> startover(channel, request.title, request.start, forceRefresh)
+            is PlayRequest.Startover ->
+                startover(channel, request.title, request.start, forceRefresh, request.resumeSeconds)
             is PlayRequest.Programme -> programme(channel, request, forceRefresh)
             is PlayRequest.DvbLive, is PlayRequest.DvbRecorded -> error("handled above")
         }
@@ -100,20 +118,41 @@ class Planner(
         val decision = Decisions.decide(request.start, request.end, request.isPlayableNow, clock())
         return when (decision.action) {
             Action.FUTURE -> throw CtException("${request.idec} has not started", Messages.FUTURE)
-            Action.STARTOVER -> startover(channel, request.title, request.start, forceRefresh)
+            Action.STARTOVER -> startover(channel, request.title, request.start, forceRefresh, request.resumeSeconds)
             // Not playable: still ask the API so the viewer gets CT's reason.
             Action.VOD, Action.VOD_UNAVAILABLE -> try {
-                PlayTarget(api.vodUrl(request.idec), PlayKind.VOD, request.title)
+                PlayTarget(
+                    api.vodUrl(request.idec),
+                    PlayKind.VOD,
+                    request.title,
+                    startPositionMs = request.resumeSeconds?.let { (it * 1000).toLong() },
+                )
             } catch (e: StillLiveException) {
                 val airingOn = Channels.byId(e.channelId) ?: channel
-                startover(airingOn, request.title, request.start, forceRefresh)
+                startover(airingOn, request.title, request.start, forceRefresh, request.resumeSeconds)
             }
         }
     }
 
-    private fun startover(channel: Channel, title: String, start: Instant, forceRefresh: Boolean): PlayTarget {
+    /** From the programme's start (minus a margin), or from [resumeSeconds] into it ("Pokračovat"). */
+    private fun startover(
+        channel: Channel,
+        title: String,
+        start: Instant,
+        forceRefresh: Boolean,
+        resumeSeconds: Double? = null,
+    ): PlayTarget {
         val timeshift = live.resolve(channel.id, forceRefresh).timeshift
             ?: throw CtException("${channel.id} has no timeshift", Messages.NO_TIMESHIFT)
+        if (resumeSeconds != null) {
+            return PlayTarget(
+                url = timeshift,
+                kind = PlayKind.TIMESHIFT,
+                title = title,
+                seekToWallClock = ResumeRules.wallClock(start, resumeSeconds),
+                fallbackOffsetMs = ResumeRules.timeshiftOffsetSeconds(start, resumeSeconds, clock()) * 1000,
+            )
+        }
         return PlayTarget(
             url = timeshift,
             kind = PlayKind.TIMESHIFT,

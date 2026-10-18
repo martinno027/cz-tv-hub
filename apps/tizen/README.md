@@ -9,6 +9,8 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
   Běžící pořad: **Od začátku** (Zpět v čase / rostoucí záznam antény) nebo **Živě**. Odvysílaný pořad:
   archiv iVysílání, do 3 h od začátku vždy ze „Zpět v čase“, u antény ze záznamu. Nedostupné pořady jsou ztlumené,
   po výběru se ukáže důvod od ČT („ČT nemá práva pro internet“, u DRM odkaz na oficiální aplikaci iVysílání).
+- **Pokračovat**: televize si pamatuje, kde jste pořad přestali sledovat (jen v sobě, nikam to neposílá), a při dalším
+  výběru nabídne „Pokračovat od 23:10“. Dosledované pořady zapomene.
 - **Přeskočit reklamu** (volitelné, zapíná se na bráně, viz [`spec/ad-breaks.md`](../../spec/ad-breaks.md)): u hotových
   nahrávek z antény se během reklamního bloku ukáže vpravo dole tlačítko; OK ho stiskne.
 - **Přehrávač**: Samsung AVPlay, OK = pauza, ◀ ▶ posun o 10 s, ⏪ ⏩ o minutu, Zpět = konec.

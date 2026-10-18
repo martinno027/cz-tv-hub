@@ -1,0 +1,26 @@
+{
+ "comment": "Golden cases for 'Pokračovat' (spec/apps.md). Seconds. action: offer = show 'Pokračovat od <label>', clear = watched (remove the entry), none = nothing to offer or store. Planner cases: CT start-over with a resume point.",
+ "minSeconds": 60,
+ "endMarginSeconds": 120,
+ "maxEntries": 200,
+ "maxAgeDays": 30,
+ "offer": [
+  {"progress": 0, "length": 3600, "action": "none"},
+  {"progress": 59.9, "length": 3600, "action": "none"},
+  {"progress": 60, "length": 3600, "action": "offer", "label": "1:00"},
+  {"progress": 1390, "length": 3600, "action": "offer", "label": "23:10"},
+  {"progress": 3479.9, "length": 3600, "action": "offer", "label": "57:59"},
+  {"progress": 3480, "length": 3600, "action": "clear"},
+  {"progress": 3725, "length": 7200, "action": "offer", "label": "1:02:05"},
+  {"progress": 9000, "length": 7200, "action": "clear"},
+  {"progress": 100, "length": 150, "action": "clear"}
+ ],
+ "startover": [
+  {"name": "ended_in_buffer", "now": "2026-10-17T18:00:00Z", "start": "2026-10-17T16:00:00Z", "progress": 1200,
+   "expect": {"seekToWallClock": "2026-10-17T16:20:00Z", "fallbackOffsetSeconds": 4800}},
+  {"name": "airing", "now": "2026-10-17T18:00:00Z", "start": "2026-10-17T17:30:00Z", "progress": 600,
+   "expect": {"seekToWallClock": "2026-10-17T17:40:00Z", "fallbackOffsetSeconds": 9600}},
+  {"name": "long_airing_start_outside_buffer", "now": "2026-10-17T18:00:00Z", "start": "2026-10-17T13:00:00Z", "progress": 600,
+   "expect": {"seekToWallClock": "2026-10-17T13:10:00Z", "fallbackOffsetSeconds": 0}}
+ ]
+}

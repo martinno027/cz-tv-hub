@@ -47,11 +47,44 @@
       }
     },
 
+    /** Key and length under which "Pokračovat" remembers this entry, or null (nothing to resume). */
+    resumeInfo: function (entry) {
+      var lengthSeconds = (entry.end - entry.start) / 1000;
+      if (entry.source === 'ct') return { key: 'ct:' + entry.item.idec, lengthSeconds: lengthSeconds };
+      var rec = entry.item.recording;
+      return rec ? { key: 'dvb:' + rec.id, lengthSeconds: lengthSeconds } : null;
+    },
+
     /**
      * {type: 'notice', text} | {type: 'play', request} |
-     * {type: 'choice', live: request, fromStart: request | null} (airing: "Od začátku" / "Živě").
+     * {type: 'choice', resume: request | null, resumeLabel, fromStart: request | null, live: request | null}
+     * Airing: "Od začátku" / "Živě"; with a remembered position (`store`, optional) "Pokračovat od …" comes
+     * first, also for ended programmes (spec/apps.md).
      */
-    select: function (entry, now) {
+    select: function (entry, now, store) {
+      var base = Entries.baseSelect(entry, now);
+      if (base.type === 'notice') return base;
+      var info = Entries.resumeInfo(entry);
+      var offer = info && store ? store.offer(info.key) : null;
+      var tag = function (request) {
+        if (!request || request.kind === 'live' || request.kind === 'dvbLive' || !info) return request;
+        return Object.assign({}, request, { resumeKey: info.key, lengthSeconds: info.lengthSeconds });
+      };
+      var fromStart = tag(base.type === 'play' ? base.request : base.fromStart);
+      if (offer) {
+        return {
+          type: 'choice',
+          resume: Object.assign({}, fromStart, { resumeSeconds: offer.progress }),
+          resumeLabel: offer.label,
+          fromStart: fromStart,
+          live: base.type === 'choice' ? base.live : null
+        };
+      }
+      if (base.type === 'play') return { type: 'play', request: fromStart };
+      return { type: 'choice', resume: null, resumeLabel: null, fromStart: fromStart, live: base.live };
+    },
+
+    baseSelect: function (entry, now) {
       var ch = entry.channel;
       if (entry.source === 'ct') {
         var p = entry.item;

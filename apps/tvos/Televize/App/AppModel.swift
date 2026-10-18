@@ -16,6 +16,8 @@ struct PlayerSession: Identifiable {
 final class AppModel {
     let schedules: ScheduleStore
     let planner: PlaybackPlanner
+    /// "Pokračovat" positions, on this device only.
+    let resume: ResumeStore
 
     var session: PlayerSession?
     var alertMessage: String?
@@ -34,6 +36,7 @@ final class AppModel {
     init(client: CTClient = CTClient()) {
         schedules = ScheduleStore(client: client)
         planner = PlaybackPlanner(client: client)
+        resume = ResumeStore()
         setGateway(GatewayStore.load(), persist: false)
     }
 
@@ -47,11 +50,26 @@ final class AppModel {
     }
 
     /// Resolves the stream on the device right now, then opens the player. Every outcome is
-    /// visible: the player, or a Czech alert.
-    func play(_ request: PlaybackRequest) {
-        log.info("play \(String(describing: request), privacy: .public)")
+    /// visible: the player, or a Czech alert. `resumeAt` ("Pokračovat") is seconds from the
+    /// programme's start; programmes save their progress, live never does.
+    func play(_ request: PlaybackRequest, resumeAt: TimeInterval? = nil) {
+        log.info("play \(String(describing: request), privacy: .public) resume=\(resumeAt ?? -1)")
         let planner = planner
-        open { try await planner.resolve(request) }
+        var target: ResumeTarget?
+        if case .programme(let programme, _) = request { target = .ct(programme) }
+        open(resumeTarget: target) { try await planner.resolve(request, resumeAt: resumeAt) }
+    }
+
+    /// Offered "Pokračovat" position of a CT programme, if any.
+    func resumeOffer(for programme: Programme) -> TimeInterval? {
+        let target = ResumeTarget.ct(programme)
+        return resume.offer(for: target.key, length: target.length)
+    }
+
+    /// Offered "Pokračovat" position of an Anténa recording, if any.
+    func resumeOffer(recordingID: String, event: DVBEvent) -> TimeInterval? {
+        let target = ResumeTarget.antenna(recordingID: recordingID, event: event)
+        return resume.offer(for: target.key, length: target.length)
     }
 
     /// Live picture of an Anténa channel.
@@ -63,12 +81,17 @@ final class AppModel {
 
     /// A recording from the gateway; while it is still recording (`finished: false`) this is the
     /// start-over. Only finished recordings offer "Přeskočit reklamu" (spec/ad-breaks.md, v1).
-    func playAntennaRecording(id: String, title: String, finished: Bool) {
+    /// `resumeAt` ("Pokračovat") is seconds into the recording.
+    func playAntennaRecording(id: String, event: DVBEvent, finished: Bool, resumeAt: TimeInterval? = nil) {
         guard let client = antenna?.client else { return }
         let url = client.recordingURL(id: id)
+        let title = event.title
         var adBreaks: (@Sendable () async throws -> [AdBreak])?
         if finished { adBreaks = { try await client.adBreaks(recordingID: id) } }
-        open(adBreaks: adBreaks) { try await Self.prepare(client, url: url, title: title, mode: .recording) }
+        open(adBreaks: adBreaks, resumeTarget: .antenna(recordingID: id, event: event)) {
+            try await client.preparePlaylist(url)
+            return .antennaRecording(url: url, title: title, headers: client.config.authorizationHeaders, resumeAt: resumeAt)
+        }
     }
 
     private static func prepare(_ client: DVBClient, url: URL, title: String, mode: PlaybackSource.Mode) async throws -> PlaybackSource {
@@ -76,7 +99,7 @@ final class AppModel {
         return PlaybackSource(url: url, title: title, mode: mode, headers: client.config.authorizationHeaders)
     }
 
-    private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil,
+    private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil, resumeTarget: ResumeTarget? = nil,
                       _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
             log.info("play ignored: still resolving the previous selection")
@@ -93,7 +116,8 @@ final class AppModel {
             do {
                 let source = try await resolve()
                 log.info("resolved \(source.title, privacy: .public) mode=\(String(describing: source.mode), privacy: .public) host=\(source.url.host() ?? "", privacy: .public)")
-                let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks)
+                let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks,
+                                                  progress: resumeTarget.map { ($0, resume) })
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
                 let session = PlayerSession(controller: controller)
                 self.session = session
@@ -194,11 +218,11 @@ extension AppModel {
                 if case .recording(let id) = AntennaAction.decide(event, now: now) { return (event, id) }
                 return nil
             }
-            if let (event, id) = recorded.last { playAntennaRecording(id: id, title: event.title, finished: true) }
+            if let (event, id) = recorded.last { playAntennaRecording(id: id, event: event, finished: true) }
         case "dvbstartover":
             for event in events {
                 if case .airing(let id?) = AntennaAction.decide(event, now: now) {
-                    playAntennaRecording(id: id, title: event.title, finished: false)
+                    playAntennaRecording(id: id, event: event, finished: false)
                 }
             }
         default:

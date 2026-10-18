@@ -78,6 +78,7 @@ import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
 import cz.cztvhub.tv.OfficialAppLauncher
 import cz.cztvhub.tv.R
+import cz.cztvhub.tv.tvApp
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.Duration
@@ -130,9 +131,10 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
             selection.notice = null
         }
     }
-    val onSelect: (Entry) -> Unit = remember(selection) {
+    val resume = LocalContext.current.tvApp.resume
+    val onSelect: (Entry) -> Unit = remember(selection, resume) {
         { entry ->
-            when (val action = entry.select(Instant.now())) {
+            when (val action = entry.select(Instant.now(), resume::offer)) {
                 is Selection.Notice -> selection.notice = action.text
                 is Selection.Choice -> selection.choice = action
                 is Selection.Play -> currentOnPlay(action.request)
@@ -173,19 +175,23 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     }
 
     selection.choice?.let { picked ->
-        PlayChoiceDialog(
-            title = picked.entry.title,
-            onDismiss = { selection.choice = null },
-            onFromStart = picked.fromStart?.let { request ->
-                {
-                    selection.choice = null
-                    onPlay(request)
-                }
-            },
-            onLive = {
+        val play: (PlayRequest) -> () -> Unit = { request ->
+            {
                 selection.choice = null
-                onPlay(picked.live)
+                onPlay(request)
+            }
+        }
+        PlayChoiceDialog(
+            title = if (picked.live != null) {
+                stringResource(R.string.choice_title, picked.entry.title)
+            } else {
+                picked.entry.title
             },
+            onDismiss = { selection.choice = null },
+            resumeLabel = picked.resumeLabel,
+            onResume = picked.resume?.let(play),
+            onFromStart = picked.fromStart?.let(play),
+            onLive = picked.live?.let(play),
             // CT's official app only helps with CT's own programmes.
             onOpenApp = if (picked.entry is CtEntry) {
                 {
@@ -577,11 +583,16 @@ private fun ProgrammeCell(
 private fun PlayChoiceDialog(
     title: String,
     onDismiss: () -> Unit,
+    resumeLabel: String?,
+    onResume: (() -> Unit)?,
     onFromStart: (() -> Unit)?,
-    onLive: () -> Unit,
+    onLive: (() -> Unit)?,
     onOpenApp: (() -> Unit)?,
 ) {
     val first = remember { FocusRequester() }
+    // The first offered option gets the focus: "Pokračovat od …", else "Od začátku", else "Živě".
+    val firstOption = onResume ?: onFromStart ?: onLive
+    fun focusFirst(option: () -> Unit) = if (option === firstOption) Modifier.focusRequester(first) else Modifier
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -589,18 +600,22 @@ private fun PlayChoiceDialog(
                 .padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(stringResource(R.string.choice_title, title), style = MaterialTheme.typography.titleLarge)
+            Text(title, style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(20.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (onResume != null && resumeLabel != null) {
+                    Button(onClick = onResume, modifier = focusFirst(onResume)) {
+                        Text(stringResource(R.string.choice_resume, resumeLabel))
+                    }
+                }
                 if (onFromStart != null) {
-                    Button(onClick = onFromStart, modifier = Modifier.focusRequester(first)) {
+                    Button(onClick = onFromStart, modifier = focusFirst(onFromStart)) {
                         Text(stringResource(R.string.choice_from_start))
                     }
                 }
-                Button(
-                    onClick = onLive,
-                    modifier = if (onFromStart == null) Modifier.focusRequester(first) else Modifier,
-                ) { Text(stringResource(R.string.choice_live)) }
+                if (onLive != null) {
+                    Button(onClick = onLive, modifier = focusFirst(onLive)) { Text(stringResource(R.string.choice_live)) }
+                }
                 if (onOpenApp != null) {
                     Button(onClick = onOpenApp) { Text(stringResource(R.string.open_ivysilani)) }
                 }

@@ -129,6 +129,42 @@ class PlannerTest {
         assertEquals(null, p.plan(PlayRequest.DvbRecorded("c1", "x", "r1", fromStart = false)).startPositionMs)
     }
 
+    @Test fun resumeOfArchivedProgrammeStartsAtProgress() {
+        val (p, _) = planner("media/external" to "vod_ok.json")
+        val request = programme("2026-10-17T08:00:00Z", "2026-10-17T09:00:00Z", true).copy(resumeSeconds = 1390.5)
+        val target = p.plan(request)
+        assertEquals(PlayKind.VOD, target.kind)
+        assertEquals(1390_500L, target.startPositionMs)
+        assertEquals(null, p.plan(programme("2026-10-17T08:00:00Z", "2026-10-17T09:00:00Z", true)).startPositionMs)
+    }
+
+    @Test fun resumeOfProgrammeInBufferSeeksByWallClock() {
+        val (p, _) = planner("channel/CH_1" to "live_CH_1.json")
+        val request = programme("2026-10-17T16:00:00Z", "2026-10-17T17:00:00Z", true).copy(resumeSeconds = 1200.0)
+        val target = p.plan(request)
+        assertEquals(PlayKind.TIMESHIFT, target.kind)
+        assertEquals(Instant.parse("2026-10-17T16:20:00Z"), target.seekToWallClock)
+        assertEquals(4800_000L, target.fallbackOffsetMs)
+    }
+
+    @Test fun resumeOfStillLiveArchiveItemSeeksByWallClock() {
+        val (p, _) = planner("media/external" to "vod_still_live.json", "channel/CH_24" to "live_CH_1.json")
+        val request = programme("2026-10-17T13:00:00Z", "2026-10-17T14:00:00Z", true).copy(resumeSeconds = 600.0)
+        val target = p.plan(request)
+        assertEquals(Instant.parse("2026-10-17T13:10:00Z"), target.seekToWallClock)
+        assertEquals(0L, target.fallbackOffsetMs)
+    }
+
+    @Test fun resumeOfDvbRecordingStartsAtProgress() {
+        val dvb = cz.cztvhub.core.dvb.DvbClient(cz.cztvhub.core.dvb.DvbConfig("http://10.0.2.2:8098", "k".repeat(32))) { _, _ ->
+            throw java.io.IOException("no network needed")
+        }
+        val api = CtApi { _, _ -> throw java.io.IOException("no CT call expected") }
+        val p = Planner(api, clock = { now }, dvb = { dvb })
+        assertEquals(600_000L, p.plan(PlayRequest.DvbRecorded("c1", "x", "r1", fromStart = true, resumeSeconds = 600.0)).startPositionMs)
+        assertEquals(600_000L, p.plan(PlayRequest.DvbRecorded("c1", "x", "r1", fromStart = false, resumeSeconds = 600.0)).startPositionMs)
+    }
+
     @Test fun dvbWithoutConfigurationFails() {
         val (p, _) = planner()
         failure { p.plan(PlayRequest.DvbLive("c1", "x")) }

@@ -14,6 +14,7 @@
   var OSD_MS = 4000;
   var BREAKS_REFRESH_MS = 60 * 1000;
   var BREAKS_CHECK_MS = 500;
+  var RESUME_SAVE_MS = 10 * 1000;
 
   function $(id) {
     return document.getElementById(id);
@@ -215,6 +216,7 @@
     this.backend = hasAvPlay ? new AvPlayBackend(cb) : new Html5Backend(cb);
     $('avplayer').style.display = hasAvPlay ? 'block' : 'none';
     setInterval(function () { self.updateOsd(); }, 1000);
+    setInterval(function () { self.saveProgress(); }, RESUME_SAVE_MS);
   }
 
   Player.prototype.isOpen = function () {
@@ -285,6 +287,7 @@
   };
 
   Player.prototype.close = function () {
+    this.saveProgress();
     this.loadToken++;
     this.stopBreaks();
     this.backend.close();
@@ -297,6 +300,7 @@
   /** The app went to the background: release the player, resolve afresh when it comes back. */
   Player.prototype.suspend = function () {
     if (!this.isOpen()) return;
+    this.saveProgress();
     this.suspendedAt = this.resumePosition();
     this.loadToken++;
     this.stopBreaks();
@@ -345,6 +349,27 @@
         break;
     }
     this.showOsd();
+  };
+
+  /**
+   * "Pokračovat": seconds from the programme start, remembered on this TV. Archive and Anténa recordings use the
+   * position; the rewind buffer has no wall clock in AVPlay, so its start is estimated as planned-at − 3 h.
+   */
+  Player.prototype.progressSeconds = function () {
+    var r = this.request;
+    var t = this.target;
+    if (!r || !t || !r.resumeKey || t.kind === 'live') return null;
+    var position = this.backend.position();
+    if (t.kind === 'vod') return position / 1000;
+    var wall = this.plannedAt - CT.Decisions.TIMESHIFT_WINDOW_MS + position;
+    return (wall - r.start) / 1000;
+  };
+
+  Player.prototype.saveProgress = function () {
+    if (!this.isOpen() || !this.target || this.backend.position() <= 0) return;
+    var progress = this.progressSeconds();
+    if (progress === null || progress < 0) return;
+    this.app.resumeStore.save(this.request.resumeKey, progress, this.request.lengthSeconds);
   };
 
   /**

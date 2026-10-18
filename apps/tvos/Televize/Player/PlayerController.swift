@@ -2,12 +2,14 @@ import AVFoundation
 import AVKit
 import CTCore
 import os
+import UIKit
 
 private let playerLog = Logger(subsystem: "cz.cztvhub.tv", category: "player")
 
 /// Owns the AVPlayer for one session: applies the start-over position and re-resolves
 /// the stream once when playback fails (signed URLs expire after ~1 h). For finished Anténa
 /// recordings it also offers "Přeskočit reklamu" during detected ad breaks (spec/ad-breaks.md).
+/// Programmes and recordings save their progress for "Pokračovat" (never live).
 @MainActor
 final class PlayerController {
     private enum Resume {
@@ -45,13 +47,26 @@ final class PlayerController {
 
     private static let adBreakRefreshInterval: Duration = .seconds(60)
 
+    // "Pokračovat": where to save progress; nil for live.
+    private let progressTarget: ResumeTarget?
+    private let resumeStore: ResumeStore?
+    private var progressObserver: Any?
+    private var backgroundObserver: NSObjectProtocol?
+    /// False until the start position has been applied, so the pre-seek position is never saved.
+    private var positionApplied = false
+
     /// `resolve` fetches a fresh source (new signed URL / new gateway session) after a failure.
     /// `adBreaks` is given only for finished recordings: it enables the "Přeskočit reklamu" button.
+    /// `progress` is where to save the "Pokračovat" position (programmes and recordings only).
     init(source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
-         adBreaks: (@Sendable () async throws -> [AdBreak])? = nil) {
+         adBreaks: (@Sendable () async throws -> [AdBreak])? = nil,
+         progress: (target: ResumeTarget, store: ResumeStore)? = nil) {
         self.source = source
         self.resolve = resolve
         self.fetchAdBreaks = adBreaks
+        let tracked = source.mode == .live ? nil : progress
+        self.progressTarget = tracked?.target
+        self.resumeStore = tracked?.store
     }
 
     func start() {
@@ -59,6 +74,7 @@ final class PlayerController {
         started = true
         load(source, resume: nil)
         startAdBreaks()
+        startProgressSaving()
         #if DEBUG
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 1), queue: .main) { [player] time in
             let date = player.currentItem?.currentDate().map { "\($0)" } ?? "-"
@@ -69,6 +85,12 @@ final class PlayerController {
 
     /// Safe to call more than once (fatal error, then the screen disappearing).
     func stop() {
+        saveProgress()
+        if let progressObserver { player.removeTimeObserver(progressObserver) }
+        progressObserver = nil
+        if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
+        backgroundObserver = nil
+        positionApplied = false
         statusObservation = nil
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         failureObserver = nil
@@ -83,6 +105,36 @@ final class PlayerController {
         playerViewController?.contextualActions = []
         player.pause()
         player.replaceCurrentItem(with: nil)
+    }
+
+    // MARK: progress ("Pokračovat")
+
+    private func startProgressSaving() {
+        guard progressTarget != nil else { return }
+        let interval = CMTime(seconds: ResumeRules.saveInterval, preferredTimescale: 1)
+        progressObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.player.timeControlStatus == .playing else { return }
+                self.saveProgress()
+            }
+        }
+        backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.saveProgress() }
+        }
+    }
+
+    /// Seconds from the programme's start: timeshift by the frame's wall clock, otherwise the position.
+    private func saveProgress() {
+        guard let target = progressTarget, let store = resumeStore, positionApplied,
+              let item = player.currentItem, item.status == .readyToPlay else { return }
+        let position = item.currentTime().seconds
+        let liveEdge = item.seekableTimeRanges.last.map { CMTimeRangeGetEnd($0.timeRangeValue).seconds }
+        guard let progress = ResumeRules.progress(mode: source.mode, position: position, frameDate: item.currentDate(),
+                                                  liveEdgePosition: liveEdge, programmeStart: target.programmeStart,
+                                                  now: Date()) else { return }
+        store.save(target, progress: progress)
     }
 
     // MARK: ad breaks
@@ -160,6 +212,7 @@ final class PlayerController {
         let options: [String: Any]? = source.headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": source.headers]
         let item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
         item.externalMetadata = [Self.metadata(.commonIdentifierTitle, source.title)]
+        positionApplied = false
         player.replaceCurrentItem(with: item)
         observe(item, source: source, resume: resume)
         // A stream that never becomes ready must end in the failure path, not a frozen screen.
@@ -185,6 +238,7 @@ final class PlayerController {
                         playerLog.info("ready to play")
                         Task {
                             await self.applyStartPosition(item, source: source, resume: resume)
+                            if self.player.currentItem === item { self.positionApplied = true }
                             self.player.play()
                         }
                     case .failed:
@@ -207,18 +261,21 @@ final class PlayerController {
 
     private func applyStartPosition(_ item: AVPlayerItem, source: PlaybackSource, resume: Resume?) async {
         switch (source.mode, resume) {
-        case (.vod, .seconds(let seconds)?):
+        case (.vod, .seconds(let seconds)?), (.recording, .seconds(let seconds)?):
             await item.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
         case (.startOver, .date(let date)?):
             await seek(item, to: date, fallbackOffset: nil)
         case (.startOver(let date, let offset), _):
             await seek(item, to: date, fallbackOffset: offset)
-        case (.recording, .seconds(let seconds)?):
-            await item.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+        case (.vod, _):
+            // "Pokračovat" in the archive, else from the beginning.
+            if let start = source.startPosition {
+                await item.seek(to: CMTime(seconds: start, preferredTimescale: 600))
+            }
         case (.recording, _):
-            await item.seek(to: .zero)
+            await item.seek(to: CMTime(seconds: source.startPosition ?? 0, preferredTimescale: 600))
         default:
-            break  // live edge, or VOD from the beginning
+            break  // live edge
         }
     }
 

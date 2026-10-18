@@ -18,6 +18,26 @@
     else element.scrollIntoView(false);
   };
 
+  /** localStorage as a ResumeStore backend; a failing storage just forgets (private, per TV). */
+  function localBackend(key) {
+    return {
+      load: function () {
+        try {
+          return JSON.parse(root.localStorage.getItem(key) || 'null');
+        } catch (e) {
+          return null;
+        }
+      },
+      save: function (data) {
+        try {
+          root.localStorage.setItem(key, JSON.stringify(data));
+        } catch (e) {
+          // Storage full or unavailable: positions are a convenience only.
+        }
+      }
+    };
+  }
+
   var App = {
     now: Date.now(),
     tab: 'live',
@@ -43,6 +63,7 @@
         guide: new CT.GuideScreen(this),
         settings: new CT.SettingsScreen(this)
       };
+      this.resumeStore = new CT.ResumeStore(localBackend('cztvhub.resume'));
       this.player = new CT.Player(this);
       this.setDvbConfig(CT.Demo.enabled ? CT.Demo.dvbConfig() : CT.SettingsStore.config(), true);
 
@@ -197,14 +218,15 @@
 
     /** What selecting a guide cell does (CT or Anténa). */
     select: function (entry) {
-      var s = CT.Entries.select(entry, Date.now());
+      var s = CT.Entries.select(entry, Date.now(), this.resumeStore);
       if (s.type === 'notice') return this.toast(s.text);
       if (s.type === 'play') return this.play(s.request);
-      if (!s.fromStart) return this.play(s.live);
-      this.openDialog(entry.title, [
-        { label: 'Od začátku', request: s.fromStart },
-        { label: 'Živě', request: s.live }
-      ]);
+      if (!s.fromStart && !s.resume) return this.play(s.live);
+      var buttons = [];
+      if (s.resume) buttons.push({ label: 'Pokračovat od ' + s.resumeLabel, request: s.resume });
+      if (s.fromStart) buttons.push({ label: 'Od začátku', request: s.fromStart });
+      if (s.live) buttons.push({ label: 'Živě', request: s.live });
+      this.openDialog(entry.title, buttons);
     },
 
     play: function (request) {

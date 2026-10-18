@@ -90,6 +90,26 @@ prefer seeking by wall-clock using `#EXT-X-PROGRAM-DATE-TIME` (AVPlayerItem `see
 `Timeline.Window.windowStartTimeMs`) to `start − M`; fall back to the computed offset.
 Golden cases: `spec/fixtures/decisions.json` (unit-test both the action and the offset).
 
+## "Pokračovat" (resume where the viewer stopped)
+Each TV remembers, **on the device only**, how far it got in a programme, and offers to continue there. Nothing leaves
+the device (no account, no sync, no analytics); only positions are stored, never stream URLs or video.
+- **Key**: CT programme `ct:<idec>`; "Anténa" recording `dvb:<recording id>`. Live (`Živě`) is never remembered.
+- **Progress** = seconds from the programme's start: archive (VOD) → player position; "Zpět v čase" (timeshift) →
+  wall-clock of the shown frame − programme start (on players without wall-clock, position − (planned at − W) style
+  estimate); Anténa recording (finished or growing) → player position.
+- **Saving**: every 10 s while playing and when the player closes or the app goes to the background.
+- **Rules** (`resume_cases.json`): `programme length` = end − start. Offer when `progress ≥ 60 s` and
+  `progress < length − 120 s`. When `progress ≥ length − 120 s` the programme counts as watched and the entry is
+  removed. Below 60 s nothing is stored and an existing position stays (pressing "Od začátku" by mistake does
+  not lose it); a programme shorter than 3 min is never offered. At most 200 entries, entries older than 30 days are dropped.
+- **Selecting a programme with an offer** shows a choice with **"Pokračovat od 23:10"** focused first:
+  airing → `Pokračovat od …` / `Od začátku` / `Živě`; ended (CT archive, buffer or Anténa recording) →
+  `Pokračovat od …` / `Od začátku`. Without an offer the behaviour is unchanged. Label format `m:ss` below an hour,
+  else `h:mm:ss`.
+- **Playing a resume**: the decision rules decide the source as usual (by time); then CT timeshift seeks by wall clock
+  to `start + progress` (fallback offset `max(0, (start + progress) − (now − W))`), CT archive and Anténa recordings
+  start at `progress`. A CT programme that began < 3 h ago is entirely in the buffer, so the resume point is too.
+
 ## Quality bar
 - Unit tests for API parsing (all fixtures) and decision rules (all golden cases); no network in tests.
 - Builds from the command line (`xcodebuild` / `./gradlew` / `apps/tizen/build.py`), runs in the tvOS simulator /

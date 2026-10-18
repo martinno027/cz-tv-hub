@@ -6,12 +6,14 @@ import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.Messages
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.Programme
+import cz.cztvhub.core.ResumeRules
 import cz.cztvhub.core.Timed
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
 import cz.cztvhub.core.dvb.DvbMessages
+import java.time.Duration
 import java.time.Instant
 
 /** A guide row: a CT internet channel or an "Anténa" channel. */
@@ -76,36 +78,76 @@ sealed interface Selection {
     data class Notice(val text: String) : Selection
     data class Play(val request: PlayRequest) : Selection
 
-    /** Airing: offer [live], and [fromStart] when the source can start over. */
-    data class Choice(val entry: Entry, val live: PlayRequest, val fromStart: PlayRequest?) : Selection
+    /**
+     * Airing: offer [live], and [fromStart] when the source can start over. With a remembered position
+     * ("Pokračovat od [resumeLabel]") [resume] comes first; an ended programme then has no [live].
+     */
+    data class Choice(
+        val entry: Entry,
+        val live: PlayRequest?,
+        val fromStart: PlayRequest?,
+        val resume: PlayRequest? = null,
+        val resumeLabel: String? = null,
+    ) : Selection
 }
 
-fun Entry.select(now: Instant): Selection = when (this) {
-    is CtEntry -> when {
-        Decisions.decide(programme, now).action == Action.FUTURE -> Selection.Notice(Messages.FUTURE)
-        isAiring(now) -> Selection.Choice(
-            this,
-            live = PlayRequest.Live(channel.id, channel.name),
-            fromStart = PlayRequest.Startover(channel.id, programme.title, programme.start),
-        )
-        else -> Selection.Play(
-            PlayRequest.Programme(channel.id, title, programme.idec, start, end, programme.isPlayableNow),
-        )
+/** Remembered progress (seconds) to offer for a resume key (`ct:<idec>`, `dvb:<id>`), or null. */
+typealias ResumeOffers = (key: String) -> Double?
+
+fun Entry.select(now: Instant, offers: ResumeOffers = { null }): Selection = when (this) {
+    is CtEntry -> {
+        val key = ResumeRules.ctKey(programme.idec)
+        when {
+            Decisions.decide(programme, now).action == Action.FUTURE -> Selection.Notice(Messages.FUTURE)
+            isAiring(now) -> {
+                val fromStart = PlayRequest.Startover(channel.id, programme.title, programme.start, programme.idec, end)
+                val offer = offers(key)
+                Selection.Choice(
+                    this,
+                    live = PlayRequest.Live(channel.id, channel.name),
+                    fromStart = fromStart,
+                    resume = offer?.let { fromStart.copy(resumeSeconds = it) },
+                    resumeLabel = offer?.let(ResumeRules::label),
+                )
+            }
+            else -> {
+                val play = PlayRequest.Programme(channel.id, title, programme.idec, start, end, programme.isPlayableNow)
+                val offer = offers(key)
+                if (offer == null) {
+                    Selection.Play(play)
+                } else {
+                    Selection.Choice(this, null, play, play.copy(resumeSeconds = offer), ResumeRules.label(offer))
+                }
+            }
+        }
     }
     is DvbEntry -> {
         val live = PlayRequest.DvbLive(channel.id, channel.name)
         val recordingId = event.recording?.id
+        val length = Duration.between(start, end).toMillis() / 1000.0
+        val offer = recordingId?.let { offers(ResumeRules.dvbKey(it)) }
         when (DvbDecisions.decide(event, now)) {
             DvbAction.FUTURE -> Selection.Notice(Messages.FUTURE)
             DvbAction.LIVE -> Selection.Choice(this, live, fromStart = null)
-            DvbAction.LIVE_OR_STARTOVER -> Selection.Choice(
-                this,
-                live,
-                fromStart = PlayRequest.DvbRecorded(channel.id, title, recordingId!!, fromStart = true),
-            )
-            DvbAction.RECORDING -> Selection.Play(PlayRequest.DvbRecorded(channel.id, title, recordingId!!, fromStart = false))
+            DvbAction.LIVE_OR_STARTOVER -> {
+                val fromStart = PlayRequest.DvbRecorded(channel.id, title, recordingId!!, fromStart = true, lengthSeconds = length)
+                Selection.Choice(
+                    this,
+                    live,
+                    fromStart = fromStart,
+                    resume = offer?.let { fromStart.copy(resumeSeconds = it) },
+                    resumeLabel = offer?.let(ResumeRules::label),
+                )
+            }
+            DvbAction.RECORDING -> {
+                val play = PlayRequest.DvbRecorded(channel.id, title, recordingId!!, fromStart = false, lengthSeconds = length)
+                if (offer == null) {
+                    Selection.Play(play)
+                } else {
+                    Selection.Choice(this, null, play, play.copy(resumeSeconds = offer), ResumeRules.label(offer))
+                }
+            }
             DvbAction.NOT_RECORDED -> Selection.Notice(DvbMessages.NOT_RECORDED)
         }
     }
 }
-

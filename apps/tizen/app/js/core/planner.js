@@ -7,6 +7,8 @@
  *           {kind: 'programme', channelId, title, idec, start, end, isPlayableNow}
  *           {kind: 'dvbLive', channelId, title}
  *           {kind: 'dvbRecorded', channelId, title, recordingId, fromStart}
+ *           Optional on startover/programme/dvbRecorded: resumeSeconds ("Pokračovat"), and for saving the progress
+ *           resumeKey (`ct:<idec>` / `dvb:<recording id>`), lengthSeconds; startover/programme also carry `start`.
  * Targets:  {url, kind: 'live' | 'timeshift' | 'vod', title, seekToWallClock, fallbackOffsetMs,
  *            startPositionMs, dvb: DvbClient | null, recordingId: finished Anténa recording | null}
  */
@@ -43,7 +45,7 @@
             return target(s.main, 'live', request.title);
           });
         case 'startover':
-          return this.startover(channel, request.title, request.start, forceRefresh);
+          return this.startover(channel, request.title, request.start, forceRefresh, request.resumeSeconds);
         case 'programme':
           return this.programme(channel, request, forceRefresh);
         default:
@@ -64,11 +66,12 @@
       });
     }
     var url = client.recordingUrl(request.recordingId);
+    var resume = request.resumeSeconds;
     return client.warmUp(url).then(function () {
       // A finished recording can carry ad breaks; the growing "Od začátku" one does not (v1).
       return target(url, 'vod', request.title, {
         dvb: client,
-        startPositionMs: request.fromStart ? 0 : null,
+        startPositionMs: resume ? resume * 1000 : (request.fromStart ? 0 : null),
         recordingId: request.fromStart ? null : request.recordingId
       });
     });
@@ -81,26 +84,37 @@
       case 'future':
         return Promise.reject(new CT.CtError(request.idec + ' has not started', M.FUTURE));
       case 'startover':
-        return this.startover(channel, request.title, request.start, forceRefresh);
+        return this.startover(channel, request.title, request.start, forceRefresh, request.resumeSeconds);
       default:
         // Not playable: still ask the API so the viewer gets CT's reason.
         return this.api.vodUrl(request.idec).then(function (url) {
-          return target(url, 'vod', request.title);
+          var resume = request.resumeSeconds;
+          return target(url, 'vod', request.title, { startPositionMs: resume ? resume * 1000 : null });
         }, function (e) {
           if (!(e instanceof CT.StillLiveError)) throw e;
           var airingOn = CT.Channels.byId(e.channelId) || channel;
-          return self.startover(airingOn, request.title, request.start, forceRefresh);
+          return self.startover(airingOn, request.title, request.start, forceRefresh, request.resumeSeconds);
         });
     }
   };
 
-  Planner.prototype.startover = function (channel, title, start, forceRefresh) {
+  /** From the programme start (minus the margin), or from `resumeSeconds` into it ("Pokračovat"). */
+  Planner.prototype.startover = function (channel, title, start, forceRefresh, resumeSeconds) {
     var self = this;
     return this.live.resolve(channel.id, forceRefresh).then(function (s) {
       if (!s.timeshift) throw new CT.CtError(channel.id + ' has no timeshift', M.NO_TIMESHIFT);
+      var now = self.clock();
+      if (resumeSeconds) {
+        var point = start + resumeSeconds * 1000;
+        var bufferStart = now - CT.Decisions.TIMESHIFT_WINDOW_MS;
+        return target(s.timeshift, 'timeshift', title, {
+          seekToWallClock: point,
+          fallbackOffsetMs: Math.max(0, Math.floor((point - bufferStart) / 1000)) * 1000
+        });
+      }
       return target(s.timeshift, 'timeshift', title, {
         seekToWallClock: start - CT.Decisions.START_MARGIN_MS,
-        fallbackOffsetMs: CT.Decisions.startoverOffsetSeconds(start, self.clock()) * 1000
+        fallbackOffsetMs: CT.Decisions.startoverOffsetSeconds(start, now) * 1000
       });
     });
   };

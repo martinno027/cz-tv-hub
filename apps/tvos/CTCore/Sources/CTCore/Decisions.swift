@@ -40,4 +40,16 @@ public enum DecisionRules {
     public static func startOverDate(start: Date) -> Date {
         start.addingTimeInterval(-startMargin)
     }
+
+    /// Wall-clock moment a "Pokračovat" in the timeshift buffer seeks to: `start + progress` (no margin).
+    public static func resumeDate(start: Date, progress: TimeInterval) -> Date {
+        start.addingTimeInterval(progress)
+    }
+
+    /// Fallback for players without wall-clock seeking: seconds from the buffer's oldest point
+    /// (`now − W`) to `start + progress`, at least 0.
+    public static func resumeOffset(start: Date, progress: TimeInterval, now: Date) -> TimeInterval {
+        let bufferStart = now.addingTimeInterval(-timeshiftWindow)
+        return max(0, resumeDate(start: start, progress: progress).timeIntervalSince(bufferStart))
+    }
 }
