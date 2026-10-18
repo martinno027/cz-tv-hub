@@ -25,3 +25,6 @@
 10. **Samsung TV app** (`apps/tizen`, Tizen 4.0+): done, tested with fixtures and in a desktop browser only. To verify
     on a real TV: cross-origin CT API calls under the `<access>` policy, AVPlay start-over offset in the timeshift
     buffer, the gateway key cookie on HLS segments, fMP4/HEVC from the gateway, `tizen` CLI packaging.
+11. **Ad-break skipping for "Anténa" recordings** (proposal, `spec/ad-breaks.md`, approved 2026-10-18): a detection worker
+    on a household machine (Windows PC first, a newer Pi later) marks breaks by logo absence; apps offer
+    "Přeskočit reklamu". Needs real recordings from a tuner to tune the detection.

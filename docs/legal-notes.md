@@ -25,6 +25,10 @@ cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed
 - Remote viewing over Tailscale is meant for members of the same household only (Tailscale ACLs, no Funnel, no node
   sharing). Relaying broadcasts outside the home is a legal grey area; you decide whether to enable it and you are
   responsible for that decision. Another household needs its own tuner.
+- Optional ad-break detection: a worker on a household machine (home LAN or own tailnet, never a cloud machine)
+  reads finished recordings through the gateway's authenticated HLS, analyses them in memory and stores only break
+  timestamps and per-channel logo masks. Skipping is a manual seek by the viewer; the recording is never cut or
+  altered. Break data and masks stay in the household and are never published.
 
 ## Publishing and use
 - The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,
