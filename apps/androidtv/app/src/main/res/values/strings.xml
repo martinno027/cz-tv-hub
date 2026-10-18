@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Televize</string>
+    <string name="tab_live">Živě</string>
+    <string name="tab_guide">TV průvodce</string>
+    <string name="loading">Načítám…</string>
+    <string name="retry">Zkusit znovu</string>
+    <string name="next_up">Potom: %1$s</string>
+    <string name="no_programme_info">Program není k dispozici</string>
+    <string name="on_air_badge">Právě běží</string>
+    <string name="state_future">Ještě nezačalo</string>
+    <string name="state_vod">Přehrát z archivu</string>
+    <string name="state_startover">Zpět v čase</string>
+    <string name="state_unavailable">Pravděpodobně nedostupné</string>
+    <string name="choice_title">%1$s právě běží</string>
+    <string name="choice_from_start">Od začátku</string>
+    <string name="choice_live">Živě</string>
+    <string name="empty_day">Pro tento den není program k dispozici</string>
+    <string name="error_playback">Přehrávání selhalo</string>
+    <string name="open_ivysilani">Otevřít v iVysílání</string>
+    <string name="off_air">Mimo vysílání</string>
+    <string name="tab_settings">Nastavení</string>
+    <string name="group_internet">Česká televize (internet)</string>
+    <string name="group_antenna">Anténa</string>
+    <string name="settings_title">Anténa (DVB-T2 brána)</string>
+    <string name="settings_intro">Vlastní tuner doma: adresa brány cz-tv-hub (v domácí síti nebo jméno v Tailscale) a klíč.</string>
+    <string name="settings_address">Adresa brány</string>
+    <string name="settings_address_hint">např. 192.168.1.20 nebo pi.tailnet.ts.net</string>
+    <string name="settings_key">Klíč</string>
+    <string name="settings_save">Uložit a ověřit</string>
+    <string name="settings_remove">Odebrat anténu</string>
+    <string name="settings_discovered">Nalezeno v domácí síti:</string>
+    <string name="settings_searching">Hledám bránu v domácí síti…</string>
+    <string name="settings_bad_address">Adresa brány musí být v domácí síti nebo v tailnetu</string>
+    <string name="settings_bad_key">Klíč musí mít alespoň 32 znaků</string>
+    <string name="settings_ok">Připojeno: %1$d kanálů, záznamy %2$d dny</string>
+    <string name="settings_configured">Nastaveno: %1$s</string>
+    <string name="antenna_unavailable">Anténa není dostupná: %1$s</string>
+    <string name="not_recorded">Pořad nebyl nahrán</string>
+    <string name="state_recording">Přehrát záznam</string>
+    <string name="state_live">Jen živě</string>
+    <string name="back">Zpět</string>
+    <string name="disclaimer">Neoficiální projekt, není spojen s Českou televizí. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.</string>
+</resources>

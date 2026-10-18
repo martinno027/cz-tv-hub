@@ -1,0 +1,25 @@
+{
+ "status": 403,
+ "body": {
+  "error": {
+   "type": "ResourceLicenceError"
+  },
+  "message": {
+   "isPlayable": false,
+   "status": {
+    "name": "UNSUPPORTED_DRM",
+    "params": null,
+    "expiresAt": null
+   },
+   "labels": {
+    "generalError": "DRM",
+    "button": "Nelze přehrát",
+    "textShort": "Video vyžaduje prohlížeč s ochranou DRM",
+    "textTVP": "Video vyžaduje prohlížeč s ochranou DRM",
+    "textLong": "Video vyžaduje prohlížeč s ochranou DRM",
+    "additionalText": "Nainstalujte si prohlížeč, který ochranu DRM podporuje.",
+    "longDescription": "Smyšlený popis pořadu pro testy."
+   }
+  }
+ }
+}

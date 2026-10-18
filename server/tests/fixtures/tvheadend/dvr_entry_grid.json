@@ -1,0 +1,29 @@
+{
+  "entries": [
+    {"uuid": "d1d2d3d4d5d6d7d8d9d0e1e2e3e4e5e6", "enabled": true, "create": 1792200000, "watched": 0,
+     "start": 1792300800, "start_extra": 0, "start_real": 1792300770, "stop": 1792305000, "stop_extra": 0,
+     "stop_real": 1792305030, "duration": 4200, "channel": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+     "channel_icon": "imagecache/3", "channelname": "ČT1 HD", "title": {"cze": "Události"},
+     "disp_title": "Události", "subtitle": {"cze": "Zpravodajství"}, "disp_subtitle": "Zpravodajství",
+     "summary": {"cze": "Krátké shrnutí."}, "disp_summary": "Krátké shrnutí.",
+     "description": {"cze": "Hlavní zpravodajská relace."}, "disp_description": "Hlavní zpravodajská relace.",
+     "pri": 2, "retention": 0, "removal": 0, "playposition": 0, "playcount": 0, "config_name": "c0c1c2c3",
+     "owner": "cztvhub", "creator": "Auto recording", "filename": "/srv/recordings/Události.ts", "errorcode": 0,
+     "errors": 0, "data_errors": 0, "dvb_eid": 4711, "noresched": false, "norerecord": false, "fileremoved": 0,
+     "uri": "", "image": "", "autorec": "a0a1a2a3", "autorec_caption": "cztvhub: ČT1 HD", "timerec": "",
+     "timerec_caption": "", "parent": "", "child": "", "content_type": 2, "genre": [32], "broadcast": 4711,
+     "episode_disp": "", "url": "dvrfile/d1d2d3d4d5d6d7d8d9d0e1e2e3e4e5e6", "filesize": 523456789,
+     "status": "Running", "sched_status": "recording", "duplicate": 0, "first_aired": 0, "comment": ""},
+    {"uuid": "c1c2c3c4c5c6c7c8c9c0b1b2b3b4b5b6", "start": 1792200000, "stop": 1792203600,
+     "channel": "9f8e7d6c5b4a39281706f5e4d3c2b1a0", "channelname": "ČT1 HD", "title": {"cze": "Včerejší film"},
+     "disp_title": "Včerejší film", "disp_subtitle": "", "disp_summary": "Starý popis.", "genre": [16],
+     "broadcast": 0, "filesize": 1234567, "status": "Completed OK", "sched_status": "completed"},
+    {"uuid": "e1e2e3e4e5e6e7e8e9e0f1f2f3f4f5f6", "start": 1792100000, "stop": 1792103600,
+     "channel": "0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c", "channelname": "Nova HD", "disp_title": "Seriál",
+     "broadcast": 0, "filesize": 0, "status": "Time missed", "sched_status": "completedError"},
+    {"uuid": "f1f2f3f4f5f6f7f8f9f0a1a2a3a4a5a6", "start": 1792305000, "stop": 1792310400,
+     "channel": "9f8e7d6c5b4a39281706f5e4d3c2b1a0", "disp_title": "Film", "broadcast": 4713,
+     "sched_status": "scheduled", "status": "Scheduled for recording"}
+  ],
+  "total": 4
+}

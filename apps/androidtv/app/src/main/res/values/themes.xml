@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Televize" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    <color name="background">#FF0E1116</color>
+    <color name="accent">#FF3D7BFD</color>
+</resources>

@@ -1,0 +1,163 @@
+{
+ "status": 200,
+ "body": {
+  "data": {
+   "TVProgramDailyChannelsPlanV2": [
+    {
+     "channel": "ct1",
+     "program": [
+      {
+       "idec": "226411010101016",
+       "title": "Testovací pořad 2",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Zpravodajství",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T03:59:00.000Z",
+       "end": "2026-10-16T07:00:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "224381492050002",
+       "title": "Testovací pořad 3",
+       "episodeTitle": "Testovací pořad 4",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Seriály",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T07:00:00.000Z",
+       "end": "2026-10-16T07:51:00.000Z",
+       "isPlayableNow": false,
+       "liveOnly": false
+      },
+      {
+       "idec": "225544160510002",
+       "title": "Testovací pořad 5",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Magazíny",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T07:55:00.000Z",
+       "end": "2026-10-16T08:32:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "226544160010007",
+       "title": "Testovací pořad 6",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Zábava",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T08:35:00.000Z",
+       "end": "2026-10-16T09:15:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "326291310010152",
+       "title": "Testovací pořad 7",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Zábava",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T09:25:00.000Z",
+       "end": "2026-10-16T09:50:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "226544160470005",
+       "title": "Testovací pořad 8",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Zábava",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T09:50:00.000Z",
+       "end": "2026-10-16T09:55:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      }
+     ]
+    },
+    {
+     "channel": "ct24",
+     "program": [
+      {
+       "idec": "226411010101016",
+       "title": "Testovací pořad 9",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Zpravodajství",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T03:59:00.000Z",
+       "end": "2026-10-16T07:00:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "226411010111016",
+       "title": "Testovací pořad 10",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Zpravodajství",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T07:00:00.000Z",
+       "end": "2026-10-16T07:59:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "226411058061016",
+       "title": "Testovací pořad 11",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Magazíny",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T08:00:00.000Z",
+       "end": "2026-10-16T09:59:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "226411012001016",
+       "title": "Testovací pořad 12",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "Zpravodajství",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T10:00:00.000Z",
+       "end": "2026-10-16T10:20:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      },
+      {
+       "idec": "226411000401016",
+       "title": "Testovací pořad 13",
+       "episodeTitle": "",
+       "description": "Smyšlený popis pořadu pro testy.",
+       "genre": "",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T10:20:00.000Z",
+       "end": "2026-10-16T10:29:00.000Z",
+       "isPlayableNow": false,
+       "liveOnly": false
+      },
+      {
+       "idec": "226411012301016",
+       "title": "Testovací pořad 14",
+       "episodeTitle": "",
+       "description": "",
+       "genre": "Zpravodajství",
+       "imageUrl": "https://img.example.invalid/porad.jpg",
+       "start": "2026-10-16T10:30:00.000Z",
+       "end": "2026-10-16T10:33:00.000Z",
+       "isPlayableNow": true,
+       "liveOnly": false
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

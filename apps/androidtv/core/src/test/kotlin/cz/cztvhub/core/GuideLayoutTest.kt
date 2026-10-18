@@ -1,0 +1,67 @@
+package cz.cztvhub.core
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.time.Instant
+
+class GuideLayoutTest {
+    private fun t(hm: String) = Instant.parse("2026-10-17T${hm}:00Z")
+    private fun p(id: String, from: String, to: String) = Programme(id, id, t(from), t(to), true)
+    private val axisStart = t("20:00")
+    private val axisEnd = t("23:00")
+
+    private fun assertContiguous(slots: List<GuideLayout.Slot<Programme>>) {
+        assertEquals(axisStart, slots.first().start)
+        slots.zipWithNext().forEach { (a, b) -> assertEquals("no overlap, no hole", a.end, b.start) }
+        slots.forEach { assertTrue(it.end.isAfter(it.start)) }
+    }
+
+    @Test fun emptyRowIsOneFiller() {
+        val slots = GuideLayout.row(emptyList<Programme>(), axisStart, axisEnd)
+        assertEquals(listOf(GuideLayout.Slot<Programme>(axisStart, axisEnd, null)), slots)
+    }
+
+    @Test fun gapsBecomeFillersAndProgrammesKeepTheirTimes() {
+        val slots = GuideLayout.row(listOf(p("a", "20:30", "21:00"), p("b", "21:30", "22:00")), axisStart, axisEnd)
+        assertContiguous(slots)
+        assertEquals(listOf(null, "a", null, "b", null), slots.map { it.item?.idec })
+        assertEquals(t("20:30"), slots[1].start)
+        assertEquals(t("21:00"), slots[1].end)
+        assertEquals(axisEnd, slots.last().end)
+    }
+
+    @Test fun overlappingProgrammesAreLaidOutSideBySide() {
+        // The schedule API does publish overlapping programmes (a short slot overlapping the next one).
+        val slots = GuideLayout.row(listOf(p("weather", "21:00", "21:08"), p("news", "21:05", "22:00")), axisStart, axisEnd)
+        assertContiguous(slots)
+        val news = slots.single { it.item?.idec == "news" }
+        assertEquals(t("21:08"), news.start)
+        assertEquals(t("22:00"), news.end)
+    }
+
+    @Test fun veryShortProgrammeGetsMinimumWidthAndPushesTheNextOne() {
+        val slots = GuideLayout.row(listOf(p("short", "21:00", "21:01"), p("next", "21:01", "21:30")), axisStart, axisEnd)
+        assertContiguous(slots)
+        val short = slots.single { it.item?.idec == "short" }
+        assertEquals(GuideLayout.MIN_SLOT.seconds, short.end.epochSecond - short.start.epochSecond)
+        assertEquals(short.end, slots.single { it.item?.idec == "next" }.start)
+    }
+
+    @Test fun tinyGapIsAbsorbed() {
+        val slots = GuideLayout.row(listOf(p("a", "20:00", "21:00"), p("b", "21:00", "22:00")), axisStart, t("22:00"))
+        assertEquals(listOf("a", "b"), slots.map { it.item?.idec })
+        val withSliver = GuideLayout.row(
+            listOf(Programme("a", "a", t("20:00"), t("21:00").minusSeconds(20), true), p("b", "21:00", "22:00")),
+            axisStart, t("22:00"),
+        )
+        assertContiguous(withSliver)
+        assertNull(withSliver.firstOrNull { it.item == null })
+    }
+
+    @Test fun axisStartsOnHalfHourAndTicksAreWholeLabels() {
+        assertEquals(t("03:30"), GuideLayout.axisStart(listOf(p("x", "03:59", "05:00"))))
+        assertEquals(listOf(t("20:00"), t("20:30"), t("21:00")), GuideLayout.ticks(t("20:00"), t("21:10")))
+    }
+}

@@ -1,0 +1,65 @@
+{
+ "status": 200,
+ "body": {
+  "id": 102,
+  "streamUrls": {
+   "main": "https://cdn.example.invalid/cdn/uri/get/?token=TOKEN&userId=USER&contentId=1000&streamType=hls&quality=1080p&contentType=live&region=1&drmOnly=false&qualityCount=5&skipIpAddressCheck=false",
+   "timeshift": "https://cdn.example.invalid/cdn/uri/get/?token=TOKEN&userId=USER&contentId=1000&streamType=hls&quality=1080p&contentType=timeshift&region=1&drmOnly=false&qualityCount=5",
+   "isBlocked": false,
+   "availableQualities": [
+    "180p",
+    "360p",
+    "540p",
+    "720p",
+    "1080p"
+   ],
+   "manifestQualities": [
+    "180p",
+    "360p",
+    "540p",
+    "720p",
+    "1080p"
+   ],
+   "profileVersion": 2,
+   "audioTracks": [
+    {
+     "id": "1",
+     "language": "cze",
+     "codec": "AAC",
+     "channels": "2",
+     "ad": false
+    },
+    {
+     "id": "2",
+     "language": "cze",
+     "codec": "AAC",
+     "channels": "2",
+     "ad": true
+    },
+    {
+     "id": "3",
+     "language": "mul",
+     "codec": "AAC",
+     "channels": "2",
+     "ad": false
+    },
+    {
+     "id": "4",
+     "language": "cze",
+     "codec": "AC3",
+     "channels": "6",
+     "ad": false
+    }
+   ]
+  },
+  "playerConfig": {
+   "maxQuality": null,
+   "maxAutoQuality": null
+  },
+  "previewImageUrl": "https://img.example.invalid/porad.jpg",
+  "title": "Testovací pořad 1",
+  "assetId": "CT1",
+  "channel": "CH_1",
+  "time": 1792265367767
+ }
+}

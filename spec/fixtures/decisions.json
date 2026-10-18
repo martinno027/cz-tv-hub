@@ -1,0 +1,93 @@
+{
+ "comment": "Golden cases for the programme decision rules in spec/apps.md. Times are UTC. Both apps must pass all of them in unit tests.",
+ "now": "2026-10-17T18:00:00Z",
+ "timeshiftWindowSeconds": 10800,
+ "startMarginSeconds": 30,
+ "programmes": [
+  {
+   "name": "archived",
+   "start": "2026-10-17T08:00:00Z",
+   "end": "2026-10-17T09:00:00Z",
+   "isPlayableNow": true,
+   "expect": {
+    "action": "vod"
+   }
+  },
+  {
+   "name": "no_rights_old",
+   "start": "2026-10-17T09:00:00Z",
+   "end": "2026-10-17T10:00:00Z",
+   "isPlayableNow": false,
+   "expect": {
+    "action": "vod_unavailable"
+   }
+  },
+  {
+   "name": "recent_unarchived",
+   "start": "2026-10-17T16:00:00Z",
+   "end": "2026-10-17T17:00:00Z",
+   "isPlayableNow": false,
+   "expect": {
+    "action": "startover",
+    "offsetSeconds": 3570
+   }
+  },
+  {
+   "name": "airing",
+   "start": "2026-10-17T17:30:00Z",
+   "end": "2026-10-17T19:00:00Z",
+   "isPlayableNow": true,
+   "expect": {
+    "action": "startover",
+    "offsetSeconds": 8970
+   }
+  },
+  {
+   "name": "future",
+   "start": "2026-10-17T20:00:00Z",
+   "end": "2026-10-17T21:00:00Z",
+   "isPlayableNow": false,
+   "expect": {
+    "action": "future"
+   }
+  },
+  {
+   "name": "airing_long",
+   "start": "2026-10-17T13:00:00Z",
+   "end": "2026-10-17T19:00:00Z",
+   "isPlayableNow": true,
+   "expect": {
+    "action": "startover",
+    "offsetSeconds": 0
+   }
+  },
+  {
+   "name": "archived_recent",
+   "start": "2026-10-17T16:00:00Z",
+   "end": "2026-10-17T17:00:00Z",
+   "isPlayableNow": true,
+   "expect": {
+    "action": "startover",
+    "offsetSeconds": 3570
+   }
+  },
+  {
+   "name": "archived_just_outside_buffer",
+   "start": "2026-10-17T14:59:00Z",
+   "end": "2026-10-17T15:30:00Z",
+   "isPlayableNow": true,
+   "expect": {
+    "action": "vod"
+   }
+  },
+  {
+   "name": "unavailable_just_outside_buffer",
+   "start": "2026-10-17T14:59:00Z",
+   "end": "2026-10-17T15:30:00Z",
+   "isPlayableNow": false,
+   "expect": {
+    "action": "vod_unavailable"
+   }
+  }
+ ]
+}

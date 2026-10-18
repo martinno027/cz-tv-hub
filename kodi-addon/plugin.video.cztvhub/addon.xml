@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.cztvhub" name="Televize – živě a zpětně" version="0.3.1" provider-name="cz-tv-hub">
+  <requires>
+    <import addon="xbmc.python" version="3.0.0"/>
+  </requires>
+  <extension point="xbmc.python.pluginsource" library="main.py">
+    <provides>video</provides>
+  </extension>
+  <extension point="xbmc.service" library="service.py"/>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="cs_CZ">Živé vysílání, Zpět v čase a archiv České televize</summary>
+    <description lang="cs_CZ">Oficiální streamy ČT, které nabízí iVysílání: živé kanály, přehrání pořadu od začátku (až 3 hodiny zpět) a archiv. Připraví také kanály a program pro TV průvodce Kodi (PVR IPTV Simple Client). Funguje v ČR doma i mimo domov. Jen pro osobní použití.</description>
+    <summary lang="en_GB">Live, start-over and archive of Ceska televize</summary>
+    <description lang="en_GB">Official Ceska televize streams as offered by iVysilani. Personal use only.</description>
+    <platform>all</platform>
+    <license>Personal use only</license>
+  </extension>
+</addon>

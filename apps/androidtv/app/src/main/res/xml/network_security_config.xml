@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP exists only for the household's own DVB gateway ("Anténa") on the LAN or the
+  Tailscale tailnet. Android cannot express IP ranges here, and LAN gateways are usually reached by
+  a plain IP (192.168.x.x, 10.x, 100.64.0.0/10 on the tailnet), so cleartext is permitted in the
+  base config and restricted in code instead: DvbConfig.normalizeAddress() accepts only private
+  hosts (RFC 1918, 100.64/10, link-local, loopback, *.local, *.ts.net, *.home.arpa, single-label
+  names). Česká televize is only ever contacted over HTTPS (api.ceskatelevize.cz and its CDN URLs).
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">ceskatelevize.cz</domain>
+    </domain-config>
+</network-security-config>

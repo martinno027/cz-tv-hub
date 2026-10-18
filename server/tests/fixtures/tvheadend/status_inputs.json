@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {"uuid": "5a5b5c5d", "input": "Silicon Labs Si2168 #0 : DVB-T #0", "stream": "474MHz in DVB-T Network",
+     "subs": 2, "weight": 300, "pids": [0, 1, 16, 17, 18], "signal": 46000, "signal_scale": 1, "ber": 0, "snr": 30000,
+     "snr_scale": 1, "unc": 0, "bps": 3500000, "te": 0, "cc": 0, "ec_bit": 0, "tc_bit": 0, "ec_block": 0, "tc_block": 0},
+    {"uuid": "6a6b6c6d", "input": "Silicon Labs Si2168 #1 : DVB-T #1", "stream": "", "subs": 0, "weight": 0,
+     "signal": 0, "ber": 0, "snr": 0, "unc": 0, "bps": 0}
+  ],
+  "totalCount": 2
+}

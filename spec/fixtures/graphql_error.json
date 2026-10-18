@@ -1,0 +1,11 @@
+{
+ "status": 200,
+ "body": {
+  "errors": [
+   {
+    "message": "Omlouváme se, došlo k chybě na naší straně."
+   }
+  ],
+  "data": null
+ }
+}

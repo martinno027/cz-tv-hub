@@ -1,0 +1,11 @@
+{
+ "status": 200,
+ "body": {
+  "id": 102,
+  "streamUrls": {
+   "main": null,
+   "timeshift": null,
+   "isBlocked": true
+  }
+ }
+}

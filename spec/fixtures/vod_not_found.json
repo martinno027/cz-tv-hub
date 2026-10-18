@@ -1,0 +1,25 @@
+{
+ "status": 404,
+ "body": {
+  "error": {
+   "type": "ResourceNotFoundError"
+  },
+  "message": {
+   "isPlayable": false,
+   "status": {
+    "name": "OTHER",
+    "params": null,
+    "expiresAt": null
+   },
+   "labels": {
+    "generalError": "OTHER",
+    "button": "Nelze přehrát",
+    "textShort": "Video není k dispozici",
+    "textTVP": "Video není k dispozici",
+    "textLong": "Omlouváme se, ale video nemáme k dispozici. Vyberte si prosím jiné video z naší nabídky.",
+    "additionalText": null,
+    "longDescription": null
+   }
+  }
+ }
+}

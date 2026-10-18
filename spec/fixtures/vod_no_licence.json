@@ -1,0 +1,25 @@
+{
+ "status": 403,
+ "body": {
+  "error": {
+   "type": "ResourcePlayabilityError"
+  },
+  "message": {
+   "isPlayable": false,
+   "status": {
+    "name": "MISSING_LICENCE_NOW",
+    "params": null,
+    "expiresAt": "2026-10-19T09:07:40+02:00"
+   },
+   "labels": {
+    "generalError": "MISSING_LICENCE_NOW",
+    "button": "Nelze přehrát",
+    "textShort": "ČT nemá práva pro internet",
+    "textTVP": "ČT nemá práva pro internet",
+    "textLong": "ČT nemá práva pro internet",
+    "additionalText": null,
+    "longDescription": "Smyšlený popis pořadu pro testy."
+   }
+  }
+ }
+}

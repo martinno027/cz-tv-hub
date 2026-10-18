@@ -1,0 +1,12 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Installed as /etc/avahi/services/cztvhub.service. Advertised on the LAN interface only:
+     install-dvb.sh sets allow-interfaces / deny-interfaces=tailscale0 in avahi-daemon.conf. -->
+<service-group>
+  <name replace-wildcards="yes">Televize (%h)</name>
+  <service>
+    <type>_cztvhub._tcp</type>
+    <port>8098</port>
+    <txt-record>path=/dvb/</txt-record>
+  </service>
+</service-group>

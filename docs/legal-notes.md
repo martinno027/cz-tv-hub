@@ -1,0 +1,34 @@
+# Legal notes (not legal advice)
+
+cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed by or connected to Česká televize.
+"ČT", "ČT1", "ČT2", "ČT24", "ČT sport", "ČT :D", "ČT art" and "iVysílání" are trademarks of Česká televize.
+
+## Internet streams of Česká televize
+- Only the public live streams, the "Zpět v čase" buffer and the iVysílání archive that Česká televize offers to
+  everyone through its own web player are used.
+- Play only. CT's FAQ: "Video materiály na iVysílání lze pouze přehrát, stahování jeho obsahu není legální cestou
+  možné." There is no download or record feature for CT internet streams, and there never will be.
+- No DRM circumvention, no geo-block circumvention, no token or IP-check circumvention. Items CT marks as DRM-only
+  (`UNSUPPORTED_DRM`) or without internet rights (`MISSING_LICENCE_*`) are shown as unavailable with CT's own message,
+  plus a pointer to CT's official iVysílání app. DRM is never requested and CT's licence server is never used.
+- A programme that began less than 3 hours ago is played from CT's official "Zpět v čase" buffer, which CT serves to
+  everyone. This is decided by time only, never as a reaction to an archive error.
+- CT's API is not documented for third parties; it can change or be restricted at any time. Respect CT's terms of use
+  and keep requests polite (signed URLs are cached for at most 60 s).
+
+## DVB-T2 (antenna)
+- Only free-to-air channels received by your own tuner at home. Encrypted multiplexes are never decrypted
+  (no CA/CI module or softcam circumvention).
+- Recordings are a private copy for personal use within one household (§ 30 zákona č. 121/2000 Sb.; levies are
+  included in storage media prices). They stay on the Raspberry Pi's local disk, are deleted automatically after the
+  retention period (default 3 days, maximum 14) and cannot be downloaded or exported.
+- Remote viewing over Tailscale is meant for members of the same household only (Tailscale ACLs, no Funnel, no node
+  sharing). Relaying broadcasts outside the home is a legal grey area; you decide whether to enable it and you are
+  responsible for that decision. Another household needs its own tuner.
+
+## Publishing and use
+- The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,
+  playlists or EPG exports and runs no public server. You build and run it yourself, for your own household only.
+- Do not host it for others, expose it to the public internet or share access outside your household.
+- Do not add third-party or pirate sources.
+- The Czech TV licence fee (televizní poplatek) remains your responsibility.

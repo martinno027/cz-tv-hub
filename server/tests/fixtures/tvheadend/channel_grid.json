@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {"uuid": "0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c", "enabled": true, "autoname": true, "name": "Nova HD", "number": 3,
+     "icon": "picon://1_0_19_1A4_C8_20F6_EEEE0000_0_0_0.png", "icon_public_url": "imagecache/7", "epgauto": true,
+     "epggrab": [], "dvr_pre_time": 0, "dvr_pst_time": 0, "epg_running": -1, "services": ["5d8c1f0e2b4a6c8e0a2c4e6f8a0b2c4d"],
+     "tags": ["a1b2c3d4e5f60718293a4b5c6d7e8f90"], "bouquet": ""},
+    {"uuid": "9f8e7d6c5b4a39281706f5e4d3c2b1a0", "enabled": true, "autoname": true, "name": "ČT1 HD", "number": 1,
+     "icon": "", "icon_public_url": "imagecache/3", "epgauto": true, "services": ["1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"],
+     "tags": [], "bouquet": ""},
+    {"uuid": "1234567890abcdef1234567890abcdef", "enabled": false, "name": "Disabled", "number": 99,
+     "icon_public_url": "", "services": [], "tags": []},
+    {"uuid": "abcdefabcdefabcdefabcdefabcdef12", "enabled": true, "name": "Prima HD", "number": 0,
+     "icon_public_url": "", "services": [], "tags": []}
+  ],
+  "total": 4
+}

@@ -1,0 +1,62 @@
+# Source of truth for the Xcode project. Regenerate with: xcodegen generate
+name: Televize
+options:
+  bundleIdPrefix: cz.cztvhub
+  deploymentTarget:
+    tvOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Put your Apple Developer team id here (or pick the team in Xcode > Signing & Capabilities).
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+packages:
+  CTCore:
+    path: CTCore
+targets:
+  Televize:
+    type: application
+    platform: tvOS
+    sources:
+      - path: Televize
+    dependencies:
+      - package: CTCore
+    info:
+      path: Televize/Info.plist
+      properties:
+        CFBundleDisplayName: Televize
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities: [arm64]
+        UIUserInterfaceStyle: Dark
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Aplikace hledá ve vaší domácí síti bránu Anténa (DVB-T2).
+        NSBonjourServices: [_cztvhub._tcp]
+        # The gateway speaks plain HTTP on the home LAN / the household's tailnet only.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+    settings:
+      base:
+        PRODUCT_NAME: Televize
+        PRODUCT_BUNDLE_IDENTIFIER: cz.cztvhub.tv
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "3"
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+schemes:
+  Televize:
+    build:
+      targets:
+        Televize: all
+    run:
+      config: Debug
+    archive:
+      config: Release

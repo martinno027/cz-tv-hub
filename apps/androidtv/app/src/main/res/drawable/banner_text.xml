@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <!-- Simple TV set glyph -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="8"
+        android:pathData="M60,50 h96 a8,8 0 0 1 8,8 v56 a8,8 0 0 1 -8,8 h-96 a8,8 0 0 1 -8,-8 v-56 a8,8 0 0 1 8,-8 z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M88,134 h40 v8 h-40 z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M96,70 l32,16 l-32,16 z" />
+    <!-- Wordmark-free bars standing in for a label -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M188,66 h80 v12 h-80 z" />
+    <path android:fillColor="#B3FFFFFF" android:pathData="M188,88 h60 v8 h-60 z" />
+    <path android:fillColor="#B3FFFFFF" android:pathData="M188,104 h70 v8 h-70 z" />
+</vector>

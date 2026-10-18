@@ -1,0 +1,22 @@
+{
+ "status": 200,
+ "body": {
+  "enabled": true,
+  "retentionDays": 3,
+  "tuners": [
+   {
+    "name": "Fake DVB-T2 tuner #1",
+    "inUse": false
+   },
+   {
+    "name": "Fake DVB-T2 tuner #2",
+    "inUse": false
+   }
+  ],
+  "disk": {
+   "freeBytes": 23895060480,
+   "totalBytes": 494384795648
+  },
+  "tvheadendReachable": true
+ }
+}

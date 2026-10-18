@@ -1,0 +1,1384 @@
+{
+ "status": 200,
+ "body": {
+  "date": "2026-10-18",
+  "events": [
+   {
+    "id": "300497862",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 62",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T06:00:00Z",
+    "end": "2026-10-18T07:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497863",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Zprávy",
+    "subtitle": "Díl 63",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T07:00:00Z",
+    "end": "2026-10-18T08:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497864",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 64",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T08:00:00Z",
+    "end": "2026-10-18T09:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497865",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 65",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T09:00:00Z",
+    "end": "2026-10-18T10:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497866",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Pohádka",
+    "subtitle": "Díl 66",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T10:00:00Z",
+    "end": "2026-10-18T11:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497867",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 67",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T11:00:00Z",
+    "end": "2026-10-18T12:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497868",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Hudební klip",
+    "subtitle": "Díl 68",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T12:00:00Z",
+    "end": "2026-10-18T13:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497869",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Soutěž",
+    "subtitle": "Díl 69",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T13:00:00Z",
+    "end": "2026-10-18T14:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497870",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 70",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T14:00:00Z",
+    "end": "2026-10-18T15:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497871",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Zprávy",
+    "subtitle": "Díl 71",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T15:00:00Z",
+    "end": "2026-10-18T16:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497872",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 72",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T16:00:00Z",
+    "end": "2026-10-18T17:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497873",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 73",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T17:00:00Z",
+    "end": "2026-10-18T18:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497874",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Pohádka",
+    "subtitle": "Díl 74",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T18:00:00Z",
+    "end": "2026-10-18T19:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497875",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 75",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T19:00:00Z",
+    "end": "2026-10-18T20:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497876",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Hudební klip",
+    "subtitle": "Díl 76",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T20:00:00Z",
+    "end": "2026-10-18T21:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497877",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Soutěž",
+    "subtitle": "Díl 77",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T21:00:00Z",
+    "end": "2026-10-18T22:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497878",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 78",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T22:00:00Z",
+    "end": "2026-10-18T23:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497879",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Zprávy",
+    "subtitle": "Díl 79",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T23:00:00Z",
+    "end": "2026-10-19T00:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497880",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 80",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-19T00:00:00Z",
+    "end": "2026-10-19T01:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497881",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 81",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Sport",
+    "start": "2026-10-19T01:00:00Z",
+    "end": "2026-10-19T02:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "300497882",
+    "channel": "6305cb90c435e2dd0c152ef77fb58987",
+    "title": "Pohádka",
+    "subtitle": "Díl 82",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Prima HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-19T02:00:00Z",
+    "end": "2026-10-19T03:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497862",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 62",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T06:00:00Z",
+    "end": "2026-10-18T07:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497863",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Hudební klip",
+    "subtitle": "Díl 63",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T07:00:00Z",
+    "end": "2026-10-18T08:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497864",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Soutěž",
+    "subtitle": "Díl 64",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T08:00:00Z",
+    "end": "2026-10-18T09:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497865",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 65",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T09:00:00Z",
+    "end": "2026-10-18T10:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497866",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Zprávy",
+    "subtitle": "Díl 66",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T10:00:00Z",
+    "end": "2026-10-18T11:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497867",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 67",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T11:00:00Z",
+    "end": "2026-10-18T12:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497868",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 68",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T12:00:00Z",
+    "end": "2026-10-18T13:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497869",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Pohádka",
+    "subtitle": "Díl 69",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T13:00:00Z",
+    "end": "2026-10-18T14:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497870",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 70",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T14:00:00Z",
+    "end": "2026-10-18T15:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497871",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Hudební klip",
+    "subtitle": "Díl 71",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T15:00:00Z",
+    "end": "2026-10-18T16:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497872",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Soutěž",
+    "subtitle": "Díl 72",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T16:00:00Z",
+    "end": "2026-10-18T17:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497873",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 73",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T17:00:00Z",
+    "end": "2026-10-18T18:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497874",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Zprávy",
+    "subtitle": "Díl 74",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T18:00:00Z",
+    "end": "2026-10-18T19:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497875",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 75",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T19:00:00Z",
+    "end": "2026-10-18T20:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497876",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 76",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T20:00:00Z",
+    "end": "2026-10-18T21:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497877",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Pohádka",
+    "subtitle": "Díl 77",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T21:00:00Z",
+    "end": "2026-10-18T22:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497878",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 78",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T22:00:00Z",
+    "end": "2026-10-18T23:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497879",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Hudební klip",
+    "subtitle": "Díl 79",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T23:00:00Z",
+    "end": "2026-10-19T00:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497880",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Soutěž",
+    "subtitle": "Díl 80",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Zábava",
+    "start": "2026-10-19T00:00:00Z",
+    "end": "2026-10-19T01:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497881",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 81",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Kultura",
+    "start": "2026-10-19T01:00:00Z",
+    "end": "2026-10-19T02:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "200497882",
+    "channel": "8055611d53e599c368c6c8ae118ba354",
+    "title": "Zprávy",
+    "subtitle": "Díl 82",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu Nova HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-19T02:00:00Z",
+    "end": "2026-10-19T03:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "dvr:185a4840a5d3f95fbe885ad76f623d15",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 12",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T03:00:00Z",
+    "end": "2026-10-18T03:45:00Z",
+    "recording": {
+     "id": "185a4840a5d3f95fbe885ad76f623d15",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:2e5f2bb2adb7d157ba4f64e50926dbde",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Zprávy",
+    "subtitle": "Díl 13",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T03:45:00Z",
+    "end": "2026-10-18T04:30:00Z",
+    "recording": {
+     "id": "2e5f2bb2adb7d157ba4f64e50926dbde",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:4c7f3396fe3ef2c3f5c0f943bd539f93",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 14",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T04:30:00Z",
+    "end": "2026-10-18T05:15:00Z",
+    "recording": {
+     "id": "4c7f3396fe3ef2c3f5c0f943bd539f93",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:6f9a8826ce504e82786e21605a73114e",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 15",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T05:15:00Z",
+    "end": "2026-10-18T06:00:00Z",
+    "recording": {
+     "id": "6f9a8826ce504e82786e21605a73114e",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "100663817",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 17",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T06:45:00Z",
+    "end": "2026-10-18T07:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663818",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Hudební klip",
+    "subtitle": "Díl 18",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T07:30:00Z",
+    "end": "2026-10-18T08:15:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663819",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Soutěž",
+    "subtitle": "Díl 19",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T08:15:00Z",
+    "end": "2026-10-18T09:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663820",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 20",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T09:00:00Z",
+    "end": "2026-10-18T09:45:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663821",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Zprávy",
+    "subtitle": "Díl 21",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T09:45:00Z",
+    "end": "2026-10-18T10:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663822",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 22",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T10:30:00Z",
+    "end": "2026-10-18T11:15:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663823",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 23",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T11:15:00Z",
+    "end": "2026-10-18T12:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663824",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Pohádka",
+    "subtitle": "Díl 24",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T12:00:00Z",
+    "end": "2026-10-18T12:45:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663825",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 25",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T12:45:00Z",
+    "end": "2026-10-18T13:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663826",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Hudební klip",
+    "subtitle": "Díl 26",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T13:30:00Z",
+    "end": "2026-10-18T14:15:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663827",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Soutěž",
+    "subtitle": "Díl 27",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T14:15:00Z",
+    "end": "2026-10-18T15:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663828",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 28",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T15:00:00Z",
+    "end": "2026-10-18T15:45:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663829",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Zprávy",
+    "subtitle": "Díl 29",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T15:45:00Z",
+    "end": "2026-10-18T16:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663830",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 30",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T16:30:00Z",
+    "end": "2026-10-18T17:15:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663831",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 31",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T17:15:00Z",
+    "end": "2026-10-18T18:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663832",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Pohádka",
+    "subtitle": "Díl 32",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T18:00:00Z",
+    "end": "2026-10-18T18:45:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663833",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 33",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T18:45:00Z",
+    "end": "2026-10-18T19:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663834",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Hudební klip",
+    "subtitle": "Díl 34",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T19:30:00Z",
+    "end": "2026-10-18T20:15:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663835",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Soutěž",
+    "subtitle": "Díl 35",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T20:15:00Z",
+    "end": "2026-10-18T21:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663836",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 36",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T21:00:00Z",
+    "end": "2026-10-18T21:45:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663837",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Zprávy",
+    "subtitle": "Díl 37",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T21:45:00Z",
+    "end": "2026-10-18T22:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663838",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 38",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T22:30:00Z",
+    "end": "2026-10-18T23:15:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663839",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 39",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T23:15:00Z",
+    "end": "2026-10-19T00:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663840",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Pohádka",
+    "subtitle": "Díl 40",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-19T00:00:00Z",
+    "end": "2026-10-19T00:45:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663841",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 41",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-19T00:45:00Z",
+    "end": "2026-10-19T01:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663842",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Hudební klip",
+    "subtitle": "Díl 42",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-19T01:30:00Z",
+    "end": "2026-10-19T02:15:00Z",
+    "recording": null
+   },
+   {
+    "id": "100663843",
+    "channel": "a3869728823ad4f43749fd4b865ce38c",
+    "title": "Soutěž",
+    "subtitle": "Díl 43",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT2 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-19T02:15:00Z",
+    "end": "2026-10-19T03:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "dvr:69a468cc56b08f3e17198e7397576761",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Soutěž",
+    "subtitle": "Díl 18",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T03:00:00Z",
+    "end": "2026-10-18T03:30:00Z",
+    "recording": {
+     "id": "69a468cc56b08f3e17198e7397576761",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:896b2c862042aeeee7644d2e58325a59",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 19",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T03:30:00Z",
+    "end": "2026-10-18T04:00:00Z",
+    "recording": {
+     "id": "896b2c862042aeeee7644d2e58325a59",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:ed6e5fce731ab3ba7ca17e6da2a4c5cc",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Zprávy",
+    "subtitle": "Díl 20",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T04:00:00Z",
+    "end": "2026-10-18T04:30:00Z",
+    "recording": {
+     "id": "ed6e5fce731ab3ba7ca17e6da2a4c5cc",
+     "state": "failed"
+    }
+   },
+   {
+    "id": "dvr:1b36d9450ec28b1e0b5f1dd769666038",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 21",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T04:30:00Z",
+    "end": "2026-10-18T05:00:00Z",
+    "recording": {
+     "id": "1b36d9450ec28b1e0b5f1dd769666038",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:30fdaf5bbe023168ac9dbb9d1f0102a7",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 22",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T05:00:00Z",
+    "end": "2026-10-18T05:30:00Z",
+    "recording": {
+     "id": "30fdaf5bbe023168ac9dbb9d1f0102a7",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:469d7f60a0a5375f7a6dd147a4686c09",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Pohádka",
+    "subtitle": "Díl 23",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T05:30:00Z",
+    "end": "2026-10-18T06:00:00Z",
+    "recording": {
+     "id": "469d7f60a0a5375f7a6dd147a4686c09",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "dvr:b78bcbaa893cfa623208e2efbab5f165",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 24",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T06:00:00Z",
+    "end": "2026-10-18T06:30:00Z",
+    "recording": {
+     "id": "b78bcbaa893cfa623208e2efbab5f165",
+     "state": "completed"
+    }
+   },
+   {
+    "id": "995725",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Hudební klip",
+    "subtitle": "Díl 25",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T06:30:00Z",
+    "end": "2026-10-18T07:00:00Z",
+    "recording": {
+     "id": "d41b6dc51791242dca7924965190f724",
+     "state": "recording"
+    }
+   },
+   {
+    "id": "995726",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Soutěž",
+    "subtitle": "Díl 26",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T07:00:00Z",
+    "end": "2026-10-18T07:30:00Z",
+    "recording": {
+     "id": "410150c1778f410e5f4b24ca41e9dde8",
+     "state": "scheduled"
+    }
+   },
+   {
+    "id": "995727",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 27",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T07:30:00Z",
+    "end": "2026-10-18T08:00:00Z",
+    "recording": {
+     "id": "d10f475d56b320ca543ed92b9596bedc",
+     "state": "scheduled"
+    }
+   },
+   {
+    "id": "995728",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Zprávy",
+    "subtitle": "Díl 28",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T08:00:00Z",
+    "end": "2026-10-18T08:30:00Z",
+    "recording": {
+     "id": "f5baf678e447e9c2ee39ae8d80a77201",
+     "state": "scheduled"
+    }
+   },
+   {
+    "id": "995729",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 29",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T08:30:00Z",
+    "end": "2026-10-18T09:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995730",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 30",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T09:00:00Z",
+    "end": "2026-10-18T09:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995731",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Pohádka",
+    "subtitle": "Díl 31",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T09:30:00Z",
+    "end": "2026-10-18T10:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995732",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 32",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T10:00:00Z",
+    "end": "2026-10-18T10:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995733",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Hudební klip",
+    "subtitle": "Díl 33",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T10:30:00Z",
+    "end": "2026-10-18T11:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995734",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Soutěž",
+    "subtitle": "Díl 34",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T11:00:00Z",
+    "end": "2026-10-18T11:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995735",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 35",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T11:30:00Z",
+    "end": "2026-10-18T12:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995736",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Zprávy",
+    "subtitle": "Díl 36",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T12:00:00Z",
+    "end": "2026-10-18T12:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995737",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 37",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T12:30:00Z",
+    "end": "2026-10-18T13:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995738",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 38",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T13:00:00Z",
+    "end": "2026-10-18T13:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995739",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Pohádka",
+    "subtitle": "Díl 39",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T13:30:00Z",
+    "end": "2026-10-18T14:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995740",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 40",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T14:00:00Z",
+    "end": "2026-10-18T14:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995741",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Hudební klip",
+    "subtitle": "Díl 41",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T14:30:00Z",
+    "end": "2026-10-18T15:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995742",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Soutěž",
+    "subtitle": "Díl 42",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T15:00:00Z",
+    "end": "2026-10-18T15:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995743",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 43",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T15:30:00Z",
+    "end": "2026-10-18T16:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995744",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Zprávy",
+    "subtitle": "Díl 44",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T16:00:00Z",
+    "end": "2026-10-18T16:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995745",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 45",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T16:30:00Z",
+    "end": "2026-10-18T17:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995746",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 46",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T17:00:00Z",
+    "end": "2026-10-18T17:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995747",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Pohádka",
+    "subtitle": "Díl 47",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T17:30:00Z",
+    "end": "2026-10-18T18:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995748",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 48",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T18:00:00Z",
+    "end": "2026-10-18T18:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995749",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Hudební klip",
+    "subtitle": "Díl 49",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T18:30:00Z",
+    "end": "2026-10-18T19:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995750",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Soutěž",
+    "subtitle": "Díl 50",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T19:00:00Z",
+    "end": "2026-10-18T19:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995751",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 51",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T19:30:00Z",
+    "end": "2026-10-18T20:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995752",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Zprávy",
+    "subtitle": "Díl 52",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-18T20:00:00Z",
+    "end": "2026-10-18T20:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995753",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 53",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-18T20:30:00Z",
+    "end": "2026-10-18T21:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995754",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 54",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Sport",
+    "start": "2026-10-18T21:00:00Z",
+    "end": "2026-10-18T21:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995755",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Pohádka",
+    "subtitle": "Díl 55",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-18T21:30:00Z",
+    "end": "2026-10-18T22:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995756",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 56",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-18T22:00:00Z",
+    "end": "2026-10-18T22:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995757",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Hudební klip",
+    "subtitle": "Díl 57",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-18T22:30:00Z",
+    "end": "2026-10-18T23:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995758",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Soutěž",
+    "subtitle": "Díl 58",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zábava",
+    "start": "2026-10-18T23:00:00Z",
+    "end": "2026-10-18T23:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995759",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Kulturní magazín",
+    "subtitle": "Díl 59",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Kultura",
+    "start": "2026-10-18T23:30:00Z",
+    "end": "2026-10-19T00:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995760",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Zprávy",
+    "subtitle": "Díl 60",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Zprávy",
+    "start": "2026-10-19T00:00:00Z",
+    "end": "2026-10-19T00:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995761",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Film: Testovací obrazec",
+    "subtitle": "Díl 61",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Film / drama",
+    "start": "2026-10-19T00:30:00Z",
+    "end": "2026-10-19T01:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995762",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Sportovní přenos",
+    "subtitle": "Díl 62",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Sport",
+    "start": "2026-10-19T01:00:00Z",
+    "end": "2026-10-19T01:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995763",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Pohádka",
+    "subtitle": "Díl 63",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Pro děti",
+    "start": "2026-10-19T01:30:00Z",
+    "end": "2026-10-19T02:00:00Z",
+    "recording": null
+   },
+   {
+    "id": "995764",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Dokument o anténách",
+    "subtitle": "Díl 64",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Vzdělávání / věda",
+    "start": "2026-10-19T02:00:00Z",
+    "end": "2026-10-19T02:30:00Z",
+    "recording": null
+   },
+   {
+    "id": "995765",
+    "channel": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "title": "Hudební klip",
+    "subtitle": "Díl 65",
+    "description": "Testovací pořad falešného TVHeadendu na kanálu ČT1 HD.",
+    "genre": "Hudba",
+    "start": "2026-10-19T02:30:00Z",
+    "end": "2026-10-19T03:00:00Z",
+    "recording": null
+   }
+  ]
+ }
+}

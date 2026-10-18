@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+*.log
+.claude/settings.local.json
+dist/
+.DS_Store
+*.zip
+*.apk
+*.aab
+*.ipa

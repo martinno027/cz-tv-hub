@@ -1,0 +1,28 @@
+[Unit]
+Description=cz-tv-hub (Ceska televize playlist/redirect service, DVB-T2 gateway)
+After=network-online.target tvheadend.service
+Wants=network-online.target
+
+[Service]
+User=cztvhub
+Environment=PYTHONPATH=/opt/cztvhub/src
+# DVB stays off unless enabled in the config; without [dvb] enabled = true this is the CT-only server.
+ExecStart=/usr/bin/python3 -m cztvhub serve --config /etc/cztvhub/cztvhub.conf
+Restart=always
+RestartSec=3
+# Temporary HLS (hls_dir); if you move hls_dir to the recordings disk, add that path here.
+StateDirectory=cztvhub
+ReadWritePaths=/var/lib/cztvhub
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

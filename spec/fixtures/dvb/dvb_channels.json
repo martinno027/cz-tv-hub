@@ -1,0 +1,31 @@
+{
+ "status": 200,
+ "body": {
+  "channels": [
+   {
+    "id": "cb2de4250e92ae9a4c549f7e48885ff8",
+    "number": 1,
+    "name": "ČT1 HD",
+    "icon": "/dvb/icon/cb2de4250e92ae9a4c549f7e48885ff8"
+   },
+   {
+    "id": "a3869728823ad4f43749fd4b865ce38c",
+    "number": 2,
+    "name": "ČT2 HD",
+    "icon": null
+   },
+   {
+    "id": "8055611d53e599c368c6c8ae118ba354",
+    "number": 3,
+    "name": "Nova HD",
+    "icon": null
+   },
+   {
+    "id": "6305cb90c435e2dd0c152ef77fb58987",
+    "number": 4,
+    "name": "Prima HD",
+    "icon": null
+   }
+  ]
+ }
+}

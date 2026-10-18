@@ -1,0 +1,165 @@
+{
+ "status": 200,
+ "body": {
+  "externalId": "226411010101016",
+  "title": "Testovací pořad 15",
+  "originalTitle": null,
+  "episodeTitle": "Testovací pořad 16",
+  "showTitle": "Testovací pořad 17",
+  "mediaType": "video",
+  "targetGroup": null,
+  "programmeTypeEBU": "050",
+  "pegiRating": null,
+  "pegiRatingLink": null,
+  "pegiRatingInfo": null,
+  "duration": 11228.16,
+  "streams": [
+   {
+    "subtitles": [
+     {
+      "language": "ces",
+      "kind": "captions",
+      "files": [
+       {
+        "url": "https://cdn.example.invalid/subtitles1786411666/ff/ed4a/ffed4a3f-614b-4765-b470-22499f131025.json",
+        "format": "json"
+       },
+       {
+        "url": "https://cdn.example.invalid/subtitles1786411666/0a/75cd/0a75cd86-0cfe-4f05-80d7-d771c06d638a.ttml",
+        "format": "ttml"
+       },
+       {
+        "url": "https://cdn.example.invalid/subtitles1786411666/c3/0e05/c30e0551-f1c5-47bb-9f99-a13bb5e7bce5.vtt",
+        "format": "vtt"
+       }
+      ]
+     }
+    ],
+    "forceSubtitles": null,
+    "url": "https://cdn.example.invalid/cdn/uri/get/?token=TOKEN&userId=USER&contentId=1000&streamType=hls&quality=1080p&contentType=vod&region=1&drmOnly=false&qualityCount=5",
+    "audioDescriptionUrl": null,
+    "duration": 11228.16,
+    "profileVersion": 2,
+    "availableQualities": [
+     {
+      "quality": "180p",
+      "weight": 0,
+      "codec": "H264",
+      "fps": 25
+     },
+     {
+      "quality": "360p",
+      "weight": 0,
+      "codec": "H264",
+      "fps": 25
+     },
+     {
+      "quality": "540p",
+      "weight": 0,
+      "codec": "H264",
+      "fps": 50
+     },
+     {
+      "quality": "720p",
+      "weight": 60,
+      "codec": "H264",
+      "fps": 50
+     },
+     {
+      "quality": "1080p",
+      "weight": 70,
+      "codec": "H264",
+      "fps": 50
+     }
+    ],
+    "audioTracks": [
+     {
+      "trackId": "4084648481",
+      "language": "cze",
+      "codec": "AAC-LC",
+      "channels": 2,
+      "ad": true
+     },
+     {
+      "trackId": "71563633",
+      "language": "mul",
+      "codec": "AAC-LC",
+      "channels": 2,
+      "ad": false
+     },
+     {
+      "trackId": "4084648487",
+      "language": "cze",
+      "codec": "AAC-LC",
+      "channels": 2,
+      "ad": false
+     }
+    ],
+    "audioDescriptionType": "internal"
+   }
+  ],
+  "previewImageUrl": "https://img.example.invalid/porad.jpg",
+  "labeling": [],
+  "availableQualities": [
+   {
+    "quality": "180p",
+    "weight": 0,
+    "codec": "H264",
+    "fps": 25
+   },
+   {
+    "quality": "360p",
+    "weight": 0,
+    "codec": "H264",
+    "fps": 25
+   },
+   {
+    "quality": "540p",
+    "weight": 0,
+    "codec": "H264",
+    "fps": 50
+   },
+   {
+    "quality": "720p",
+    "weight": 60,
+    "codec": "H264",
+    "fps": 50
+   },
+   {
+    "quality": "1080p",
+    "weight": 70,
+    "codec": "H264",
+    "fps": 50
+   }
+  ],
+  "playability": {
+   "_id": "68bad503ef6e7d2349991fbe",
+   "sidp": "1096902795",
+   "showProgrammeMetaId": "6488330c53b9a3cbae064942",
+   "episodeProgrammeMetaId": "68bad541d970eacb700a1b39",
+   "mediaId": "68bad50316b3c82d870619c7",
+   "playableInterval": {
+    "playableFrom": "2026-01-01T00:00:00+01:00",
+    "playableTo": null
+   },
+   "isPlayable": true,
+   "status": {
+    "name": "AVAILABLE_VOD",
+    "params": null,
+    "expiresAt": null
+   },
+   "updatedAt": "2026-10-16T23:18:51.546Z"
+  },
+  "vast": {
+   "preRoll": [
+    "https://cz.adocean.pl/ad.xml?id=PUk2UpMyggSxr7s6ba5h4uKHYA8fqGO2xANtrEsoCpb.g7&href=SIDP:6488330c53b9a3cbae064942%20IDEC:226411010101016%20IVYSILANIWEB%20VOD%20hls%20Studio%206%20%7C%20Studio%206%20%7C%201016",
+    "https://cz.adocean.pl/ad.xml?id=zeGbUeMaSKWRzrkc1wgv82KEXt4PAPsSPs_I1TAciP3.M7&href=SIDP:6488330c53b9a3cbae064942%20IDEC:226411010101016%20IVYSILANIWEB%20VOD%20hls%20Studio%206%20%7C%20Studio%206%20%7C%201016"
+   ],
+   "postRoll": [
+    "https://cz.adocean.pl/ad.xml?id=hcCVpVAw7cbvX9nWtEiYeCjvLagAFecQIrUo27rLXPP.i7&href=SIDP:6488330c53b9a3cbae064942%20IDEC:226411010101016%20IVYSILANIWEB%20VOD%20hls%20Studio%206%20%7C%20Studio%206%20%7C%201016"
+   ]
+  },
+  "vodHits": null,
+  "pcmSeen": null
+ }
+}

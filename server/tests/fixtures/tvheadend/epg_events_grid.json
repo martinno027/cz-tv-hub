@@ -1,0 +1,17 @@
+{
+  "totalCount": 3,
+  "entries": [
+    {"eventId": 4711, "episodeId": 4712, "channelName": "ČT1 HD", "channelUuid": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+     "channelNumber": "1", "channelIcon": "imagecache/3", "start": 1792300800, "stop": 1792305000,
+     "title": "Události", "subtitle": "Zpravodajství", "summary": "Krátké shrnutí.",
+     "description": "Hlavní zpravodajská relace.", "genre": [32], "nextEventId": 4713,
+     "dvrUuid": "d1d2d3d4d5d6d7d8d9d0e1e2e3e4e5e6", "dvrState": "recording"},
+    {"eventId": 4713, "channelName": "ČT1 HD", "channelUuid": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+     "channelNumber": "1", "start": 1792305000, "stop": 1792310400, "title": "Film", "summary": "Jen summary.",
+     "genre": [16, 20], "dvrUuid": "f1f2f3f4f5f6f7f8f9f0a1a2a3a4a5a6", "dvrState": "scheduled"},
+    {"eventId": 9001, "channelName": "Nova HD", "channelUuid": "0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c",
+     "channelNumber": "3", "start": 1792300000, "stop": 1792303600, "title": "Televizní noviny"},
+    {"eventId": 9002, "channelUuid": "0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c", "start": 1792303600, "stop": 1792303600,
+     "title": "zero length"}
+  ]
+}

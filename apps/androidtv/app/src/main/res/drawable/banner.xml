@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 home-screen banner: neutral placeholder, no broadcaster branding. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:angle="315" android:startColor="#FF1B2A4A" android:endColor="#FF3D7BFD" />
+        </shape>
+    </item>
+    <item android:drawable="@drawable/banner_text" />
+</layer-list>

@@ -1,0 +1,17 @@
+; cz-tv-hub configuration (see spec/dvb-gateway.md). Keep this file 0600, owned by cztvhub.
+[server]
+host = 0.0.0.0          ; home LAN + Tailscale; never forward this port on the router
+port = 8098
+
+[dvb]
+enabled = @DVB_ENABLED@
+key = @KEY@             ; apps send "Authorization: Bearer <key>"
+retention_days = 3      ; 1..14
+record_channels = all   ; or comma-separated TVHeadend channel names
+hls_dir = /var/lib/cztvhub/hls
+idle_seconds = 30
+
+[tvheadend]
+url = http://127.0.0.1:9981
+user = cztvhub
+password = @TVH_PASSWORD@
