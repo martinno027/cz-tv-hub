@@ -1,7 +1,8 @@
 # CT TV apps: shared specification
 
-Native TV apps that replace Kodi for the family: **Apple TV** (`apps/tvos`, Swift/SwiftUI/AVPlayer) and
-**Android TV** (`apps/androidtv`, Kotlin/Compose for TV/Media3 ExoPlayer). Both follow this document and the
+Native TV apps that replace Kodi for the family: **Apple TV** (`apps/tvos`, Swift/SwiftUI/AVPlayer),
+**Android TV** (`apps/androidtv`, Kotlin/Compose for TV/Media3 ExoPlayer) and **Samsung TV** (`apps/tizen`,
+Tizen 4.0+ web app, plain ES2017 JavaScript/AVPlay). All follow this document and the
 behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `guide.py`).
 
 ## Hard rules (from CLAUDE.md, non-negotiable)
@@ -91,6 +92,8 @@ Golden cases: `spec/fixtures/decisions.json` (unit-test both the action and the 
 
 ## Quality bar
 - Unit tests for API parsing (all fixtures) and decision rules (all golden cases); no network in tests.
-- Builds from the command line (`xcodebuild` / `./gradlew`), runs in the tvOS simulator / Android TV emulator.
+- Builds from the command line (`xcodebuild` / `./gradlew` / `apps/tizen/build.py`), runs in the tvOS simulator /
+  Android TV emulator / a desktop browser (`index.html?demo`, fixtures only) for the Samsung app.
+- Samsung (AVPlay) has no wall-clock seek: start-over uses the computed buffer offset only.
 - Small, readable modules: `api` (client + models), `domain` (decisions, day labels), `ui` (screens), `player`.
 - Remote-friendly focus everywhere; large readable type (10-foot UI); dark theme.

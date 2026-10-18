@@ -22,3 +22,6 @@
    is passed through today).
 9. ~~Remote use via proxy mode~~: not needed, the add-on resolves on the device. Proxy stays opt-in,
    LAN/Tailscale-only and CZ-only if it is ever revisited.
+10. **Samsung TV app** (`apps/tizen`, Tizen 4.0+): done, tested with fixtures and in a desktop browser only. To verify
+    on a real TV: cross-origin CT API calls under the `<access>` policy, AVPlay start-over offset in the timeshift
+    buffer, the gateway key cookie on HLS segments, fMP4/HEVC from the gateway, `tizen` CLI packaging.

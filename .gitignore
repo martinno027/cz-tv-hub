@@ -10,3 +10,7 @@ dist/
 *.apk
 *.aab
 *.ipa
+
+# Samsung TV app: gateway preset written only into builds
+apps/tizen/app/js/local-config.js
+apps/tizen/app/.buildResult/

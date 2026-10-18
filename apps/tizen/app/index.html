@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920">
+  <title>Televize</title>
+  <link rel="stylesheet" href="css/app.css">
+  <!-- Samsung TV web APIs (AVPlay, key registration); missing in a desktop browser, the app falls back. -->
+  <script src="$WEBAPIS/webapis/webapis.js"></script>
+</head>
+<body>
+  <div id="stage">
+    <header id="top">
+      <div id="brand">Televize</div>
+      <nav id="tabs">
+        <div class="tab" data-tab="live">Živě</div>
+        <div class="tab" data-tab="guide">TV průvodce</div>
+        <div class="tab" data-tab="settings">Nastavení</div>
+      </nav>
+      <div id="clock"></div>
+    </header>
+
+    <main>
+      <section id="screen-live" class="screen"></section>
+
+      <section id="screen-guide" class="screen">
+        <div id="days"></div>
+        <div id="detail">
+          <div id="detail-image"></div>
+          <div id="detail-text">
+            <div id="detail-title"></div>
+            <div id="detail-meta"></div>
+            <div id="detail-description"></div>
+          </div>
+        </div>
+        <div id="grid">
+          <div id="grid-message"></div>
+          <div id="grid-header"><div id="grid-ticks"></div></div>
+          <div id="grid-body">
+            <div id="grid-rows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-settings" class="screen">
+        <h1>Anténa (DVB-T2)</h1>
+        <p class="hint">Brána cz-tv-hub na Raspberry Pi doma. Adresa v domácí síti (např. <b>192.168.1.20</b>,
+          <b>cztvhub.local</b>) nebo jméno v Tailscale (<b>pi.tailnet.ts.net</b>). Klíč je v
+          <b>/etc/cztvhub/cztvhub.conf</b> (<b>[dvb] key</b>). Bez nastavení se Anténa nezobrazuje.</p>
+        <label class="field">Adresa brány<input id="set-address" class="focusable" type="text"
+          autocomplete="off" spellcheck="false"></label>
+        <label class="field">Klíč brány<input id="set-key" class="focusable" type="password"
+          autocomplete="off" spellcheck="false"></label>
+        <div class="buttons">
+          <div id="set-save" class="button focusable">Uložit a vyzkoušet</div>
+          <div id="set-clear" class="button focusable">Smazat</div>
+        </div>
+        <div id="set-status"></div>
+        <p class="hint small">Neoficiální projekt, není spojen s Českou televizí. Aplikace přehrává jen oficiální
+          streamy ČT a vlastní anténu, nic nenahrává ani neobchází DRM.</p>
+      </section>
+    </main>
+
+    <div id="toast"></div>
+
+    <div id="dialog" class="hidden">
+      <div class="dialog-box">
+        <div id="dialog-title"></div>
+        <div id="dialog-buttons"></div>
+      </div>
+    </div>
+
+    <div id="player" class="hidden">
+      <object id="avplayer" type="application/avplayer"></object>
+      <video id="html5player" playsinline></video>
+      <div id="player-message"></div>
+      <div id="osd">
+        <div id="osd-title"></div>
+        <div id="osd-bar"><div id="osd-progress"></div></div>
+        <div id="osd-times"><span id="osd-position"></span><span id="osd-state"></span><span id="osd-duration"></span></div>
+        <div id="osd-hint">OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · Zpět konec</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/core/models.js"></script>
+  <script src="js/core/days.js"></script>
+  <script src="js/core/decisions.js"></script>
+  <script src="js/core/api.js"></script>
+  <script src="js/core/layout.js"></script>
+  <script src="js/core/dvb.js"></script>
+  <script src="js/core/schedule.js"></script>
+  <script src="js/core/planner.js"></script>
+  <script src="js/core/entries.js"></script>
+  <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
+  <script src="js/local-config.js"></script>
+  <script src="js/ui/keys.js"></script>
+  <script src="js/ui/settings-store.js"></script>
+  <script src="js/ui/demo.js"></script>
+  <script src="js/ui/player.js"></script>
+  <script src="js/ui/live.js"></script>
+  <script src="js/ui/guide.js"></script>
+  <script src="js/ui/settings.js"></script>
+  <script src="js/ui/app.js"></script>
+</body>
+</html>

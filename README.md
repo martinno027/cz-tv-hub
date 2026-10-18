@@ -16,13 +16,14 @@ Domácí televize ze dvou zdrojů:
 |---|---|
 | `apps/tvos` | Aplikace „Televize“ pro Apple TV (Swift, SwiftUI, AVPlayer) |
 | `apps/androidtv` | Aplikace „Televize“ pro Android TV / Google TV (Kotlin, Compose for TV, Media3) |
+| `apps/tizen` | Aplikace „Televize“ pro televize Samsung (Tizen 4.0+, JavaScript, AVPlay) |
 | `server/` | Služba pro Raspberry Pi: brána k TVHeadend pro anténu, playlist ČT pro domácí síť (`src/`, `tests/`, `deploy/`) |
 | `kodi-addon/` | Doplněk pro Kodi „Televize – živě a zpětně“ včetně TV průvodce |
 | `spec/` | Společná specifikace chování (`apps.md`), API brány (`dvb-gateway.md`) a testovací data (`fixtures/`) |
 | `docs/` | Návody, architektura, právní poznámky, plán |
 
 Návody: [Kodi](docs/kodi-setup.md), [anténa a Raspberry](docs/dvb-setup.md),
-[Apple TV](apps/tvos/README.md), [Android TV](apps/androidtv/README.md).
+[Apple TV](apps/tvos/README.md), [Android TV](apps/androidtv/README.md), [Samsung TV](apps/tizen/README.md).
 
 ## Rychlý start
 
@@ -34,7 +35,8 @@ cd ..
 python3 kodi-addon/build.py                             # ZIP doplňku pro Kodi do dist/
 ```
 
-Aplikace: `apps/tvos` (`cd CTCore && swift test`, projekt přes XcodeGen) a `apps/androidtv` (`./gradlew test assembleDebug`).
+Aplikace: `apps/tvos` (`cd CTCore && swift test`, projekt přes XcodeGen) , `apps/androidtv` (`./gradlew test assembleDebug`)
+a `apps/tizen` (`node --test test/*.test.js`, balení `python3 apps/tizen/build.py`).
 Přispívání: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Služba pro Raspberry potřebuje jen Python 3.11 ze standardní knihovny; pro anténu navíc TVHeadend a ffmpeg (apt).

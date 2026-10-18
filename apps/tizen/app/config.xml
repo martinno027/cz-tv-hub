@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
+        id="https://github.com/martinno027/cz-tv-hub" version="0.1.0" viewmodes="maximized">
+    <tizen:application id="CzTvHubApp.Televize" package="CzTvHubApp" required_version="4.0"/>
+    <name>Televize</name>
+    <description>Oficiální streamy České televize a vlastní anténa. Neoficiální projekt, není spojen s ČT.</description>
+    <content src="index.html"/>
+    <icon src="icon.png"/>
+    <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
+    <tizen:profile name="tv-samsung"/>
+    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable"
+                   encryption="disable" install-location="auto" hwkey-event="enable"/>
+    <!-- CT's API and CDN hosts vary, the household gateway is typed in by the user (LAN / tailnet only,
+         enforced in DvbConfig.normalizeAddress), so the network policy cannot list them. -->
+    <access origin="*" subdomains="true"/>
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+    <tizen:privilege name="http://developer.samsung.com/privilege/avplay"/>
+</widget>

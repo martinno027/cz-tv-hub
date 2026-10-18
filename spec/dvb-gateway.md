@@ -67,6 +67,8 @@ Checked against TVHeadend's source (master, `src/api/api_epg.c`, `api_dvr.c`, `a
 Implemented in `src/cztvhub/dvb/gateway.py`. The bearer key is required on **every** `/dvb/*` request, including
 HLS playlists and media segments, so players must send the header on all requests (AVURLAsset
 `AVURLAssetHTTPHeaderFieldsKey` / Media3 `DefaultHttpDataSource.Factory.setDefaultRequestProperties`).
+Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cztvhub_key=<key>`
+(`setStreamingProperty("COOKIE", …)`); the gateway accepts either.
 - `GET /dvb/status` → `{"enabled": true, "retentionDays": 3, "tuners": [{"name": "...", "inUse": false}],
   "disk": {"freeBytes": 0, "totalBytes": 0}, "tvheadendReachable": true}`
   (always 200; `tuners` is `[]` and `tvheadendReachable` false when TVHeadend does not answer; `disk` = the

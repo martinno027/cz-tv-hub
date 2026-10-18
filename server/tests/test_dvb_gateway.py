@@ -53,6 +53,13 @@ class GatewayTest(unittest.TestCase):
             self.assertIn("Bearer", resp.headers["WWW-Authenticate"])
         self.assertEqual(self.client.calls, [])
 
+    def test_cookie_key_for_players_without_headers(self):
+        resp, _ = self.get("/dvb/channels", headers={"Cookie": "other=1; cztvhub_key=" + KEY})
+        self.assertEqual(resp.status, 200)
+        for cookie in ("cztvhub_key=wrong", "key=" + KEY, "cztvhub_key", '"broken'):
+            resp, _ = self.get("/dvb/channels", headers={"Cookie": cookie})
+            self.assertEqual(resp.status, 401, cookie)
+
     def test_disabled(self):
         self.gw.dvb.enabled = False
         resp, body = self.get("/dvb/channels")

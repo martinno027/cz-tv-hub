@@ -6,6 +6,7 @@ routes are unit-tested without sockets. No download/export endpoint, by design.
 from __future__ import annotations
 
 import hmac
+import http.cookies
 import json
 import re
 import shutil
@@ -27,6 +28,7 @@ from .tvheadend import Channel, TunerBusy, TvheadendClient, TvhError, TvhNotFoun
 UUID = r"[A-Za-z0-9_-]{1,64}"
 LIVE_RE = re.compile(rf"^/dvb/live/({UUID})\.m3u8$")
 RECORDING_RE = re.compile(rf"^/dvb/recording/({UUID})\.m3u8$")
+COOKIE_NAME = "cztvhub_key"
 HLS_RE = re.compile(r"^/dvb/hls/([0-9a-f]{32})/([A-Za-z0-9_.-]+)$")
 ICON_RE = re.compile(rf"^/dvb/icon/({UUID})$")
 RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -96,7 +98,7 @@ class DvbGateway:
     def handle(self, path: str, query: Mapping[str, str], headers: Mapping[str, str]) -> Response:
         if not self.dvb.enabled:
             return error(404, "DVB není zapnuté")
-        if not self._authorized(headers.get("Authorization") or ""):
+        if not self._authorized(headers.get("Authorization") or "", headers.get("Cookie") or ""):
             return error(401, "Chybí nebo nesedí klíč", {"WWW-Authenticate": 'Bearer realm="cztvhub"'})
         try:
             return self._route(path, query, headers)
@@ -113,10 +115,15 @@ class DvbGateway:
             self.log(f"dvb: {path}: {exc}")
             return error(502, TvhError.user_message)
 
-    def _authorized(self, header: str) -> bool:
-        scheme, _, token = header.partition(" ")
-        if scheme.lower() != "bearer" or not self.dvb.key:
+    def _authorized(self, header: str, cookie: str = "") -> bool:
+        """Bearer key, or the same key as cookie ``cztvhub_key`` (Samsung AVPlay cannot send headers)."""
+        if not self.dvb.key:
             return False
+        scheme, _, token = header.partition(" ")
+        if scheme.lower() != "bearer":
+            token = _cookie_key(cookie)
+            if token is None:
+                return False
         return hmac.compare_digest(token.strip().encode("utf-8"), self.dvb.key.encode("utf-8"))
 
     def _route(self, path: str, query: Mapping[str, str], headers: Mapping[str, str]) -> Response:
@@ -283,3 +290,13 @@ class DvbGateway:
                     return Response(206, data[first:last + 1], content_type, headers)
             return Response(416, b"", content_type, {"Content-Range": f"bytes */{size}"})
         return Response(200, data, content_type, headers)
+
+
+def _cookie_key(header: str) -> str | None:
+    cookies = http.cookies.SimpleCookie()
+    try:
+        cookies.load(header)
+    except http.cookies.CookieError:
+        return None
+    morsel = cookies.get(COOKIE_NAME)
+    return morsel.value if morsel is not None else None
