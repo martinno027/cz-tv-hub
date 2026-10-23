@@ -131,7 +131,8 @@ Approved by the user on 2026-10-23 (CLAUDE.md hard rules, `docs/legal-notes.md`;
   starts after 10 s (60 s while no tuner is free). DVB-T2 audio is HE-AAC in LATM (`aac_latm`, seen 2026-10-23 on
   Nova: two Czech tracks, HE-AAC and HE-AACv2), which MP4 cannot carry, so it is re-encoded (`-aac_coder fast`,
   128 kbit/s, one ffmpeg thread per recorder). Ten recorded channels overloaded a Pi 4 (load 29, TVHeadend stopped
-  answering), so at most `[dvb] max_recordings` channels (default 3) record at once; `/admin` refuses more, and
+  answering); after the cheaper encoding one channel costs ~20 % of a core. An optional cap `[dvb] max_recordings`
+  (default 0 = none, the household watches the load) limits channels recorded at once and `/admin` refuses more; and
   recording is refused while `buffer_dir` is on the system disk (SD card) unless `buffer_on_system_disk = true` (dev). Subtitles are not recorded yet (teletext → WebVTT needs a check of
   real broadcasts and the Pi's ffmpeg first).
 - **Config**: `[dvb] buffer_dir` (default `/var/lib/cztvhub/buffer`; on the Pi the recordings disk, e.g.

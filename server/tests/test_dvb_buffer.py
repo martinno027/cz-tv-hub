@@ -225,3 +225,21 @@ class RecordingIdTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoCapTest(GuardTest):
+    def test_no_cap_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive, started = self.archive(tmp, allow=True, limit=0)
+            archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
+            archive.sync()
+            self.assertEqual(len(started), 6)
+
+
+class NoCapTest(GuardTest):
+    def test_no_cap_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive, started = self.archive(tmp, allow=True, limit=0)
+            archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
+            archive.sync()
+            self.assertEqual(len(started), 6)

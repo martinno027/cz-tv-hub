@@ -103,7 +103,7 @@ class Archive:
     def __init__(self, store: BufferStore, recorders: RecorderManager, settings: Settings, thumbs: Thumbnails,
                  default_days: int, now: Callable[[], float] = time.time, log: Callable[[str], None] = print,
                  offered: Callable[[], set[str] | None] | None = None,
-                 is_programme: Callable[[str, int, int], bool] | None = None, max_recordings: int = 3,
+                 is_programme: Callable[[str, int, int], bool] | None = None, max_recordings: int = 0,
                  allow_system_disk: bool = False):
         self.store, self.recorders, self.settings, self.thumbs = store, recorders, settings, thumbs
         self.default_days, self.now, self.log = default_days, now, log
@@ -477,8 +477,9 @@ class Archive:
             return None
         if self.can_record() is not None:
             return set()  # never onto the SD card, whatever the settings say
-        # never more than the Pi manages, whatever the settings say (the admin page refuses more anyway)
-        return set(sorted(self.record_channels() & offered)[:self.max_recordings])
+        wanted = sorted(self.record_channels() & offered)
+        # an optional cap ([dvb] max_recordings, 0 = none); the admin page refuses more anyway
+        return set(wanted[:self.max_recordings] if self.max_recordings > 0 else wanted)
 
     def sync(self) -> None:
         wanted = self._wanted()

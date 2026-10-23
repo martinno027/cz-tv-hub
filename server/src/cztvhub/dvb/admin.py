@@ -285,8 +285,11 @@ class AdminSite:
 
     def _storage(self) -> Response:
         """"Přehled nahrávek": per recorded channel hours, how far back, size, measured bitrate, gaps."""
-        names = {c.uuid: c.name for c in self.gateway.client.channels(include_disabled=True)}
-        return json_response(200, self.gateway.archive.overview(names))
+        rows = {r["id"]: r for r in self.admin.overview()}
+        data = self.gateway.archive.overview({i: r["name"] for i, r in rows.items()})
+        for channel in data["channels"]:
+            channel["multiplexes"] = rows[channel["id"]]["multiplexes"] if channel["id"] in rows else []
+        return json_response(200, data)
 
     def _record(self, ids: list[str], on: bool) -> Response:
         """Switch the continuous recording of channels (spec/dvb-gateway.md "Continuous recording")."""
@@ -303,7 +306,7 @@ class AdminSite:
                 return error(400, reason)
             limit = self.gateway.archive.max_recordings
             total = len(self.gateway.archive.record_channels() | set(ids))
-            if total > limit:
+            if limit > 0 and total > limit:
                 return error(400, f"Raspberry zvládne nahrávat nejvýš {limit} kanály najednou (každý stojí výkon "
                                   f"na převod zvuku); vybráno by bylo {total}. Limit je [dvb] max_recordings.")
         done = self.gateway.archive.set_record(ids, on)
@@ -453,6 +456,8 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
 .tabs button[aria-selected=true] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .rec { display: inline-flex; gap: 6px; align-items: center; margin-left: 10px; }
 .rec input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.mux { display: inline-block; font-size: 12px; font-weight: 500; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 10px; padding: 0 8px; margin-left: 8px; vertical-align: 1px; white-space: nowrap; }
 .legal { font-size: 13px; color: var(--muted); border-left: 3px solid var(--accent); padding: 6px 12px; margin: 0 0 16px; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line);
   border-radius: 10px; overflow: hidden; font-size: 14px; }
@@ -478,7 +483,7 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
 <div id="msg" role="status" aria-live="polite"></div>
 <section id="storage" hidden>
   <div class="totals" id="totals"></div>
-  <table><thead><tr><th>Kanál</th><th>Stav</th><th class="n">Uloženo</th><th>Zpět do</th><th class="n">Velikost</th>
+  <table><thead><tr><th>Kanál</th><th>Multiplex</th><th>Stav</th><th class="n">Uloženo</th><th>Zpět do</th><th class="n">Velikost</th>
     <th class="n">Datový tok</th><th class="n">Výpadky</th></tr></thead><tbody id="storage-rows"></tbody></table>
   <p class="help">Když místo dochází, maže se nejstarších 10 minut z kanálu, který má uloženo nejvíc hodin, takže
   každý nahrávaný kanál drží zhruba stejný počet posledních hodin. Na disku zůstává rezerva 10 % (nejméně 5 GB);
@@ -541,6 +546,10 @@ function showTab(storage) {
 tabChannels.addEventListener("click", function () { showTab(false); });
 tabStorage.addEventListener("click", function () { showTab(true); });
 
+function muxLabel(names) {
+  // TVHeadend names multiplexes by frequency ("514MHz"); one tuner receives one multiplex at a time
+  return (names || []).map(function (n) { return n.replace(/^(\d+(?:\.\d+)?)\s*MHz$/i, "$1 MHz"); }).join(", ");
+}
 function hours(h) {
   if (h == null) return "–";
   if (h < 1) return Math.round(h * 60) + " min";
@@ -566,11 +575,12 @@ function loadStorage() {
     body.textContent = "";
     if (!data.channels.length) {
       var tr = el("tr"), td = el("td", null, "Nic se nenahrává. Zapněte „Nahrávat“ u kanálů v záložce Kanály.");
-      td.colSpan = 7; tr.appendChild(td); body.appendChild(tr);
+      td.colSpan = 8; tr.appendChild(td); body.appendChild(tr);
     }
     data.channels.forEach(function (c) {
       var tr = el("tr");
       tr.appendChild(el("td", null, c.name));
+      tr.appendChild(el("td", null, muxLabel(c.multiplexes) || "–"));
       tr.appendChild(el("td", c.recording ? null : "warn", c.recording ? c.state : "nenahrává se (záznam se smaže)"));
       tr.appendChild(el("td", "n", hours(c.hours)));
       tr.appendChild(el("td", null, when(c.oldest)));
@@ -625,7 +635,7 @@ function renderStatus(data) {
   if (s.disk && s.disk.totalBytes) item("Disk:", gb(s.disk.freeBytes) + " volno z " + gb(s.disk.totalBytes));
   var d = data.retentionDays;
   var rec = rows.filter(function (c) { return c.record; }).length;
-  item("Nahrávání:", (rec ? channels(rec) : "žádný kanál") + (data.recording ? " z " + data.recording.max : "") +
+  item("Nahrávání:", (rec ? channels(rec) : "žádný kanál") + (data.recording && data.recording.max ? " z " + data.recording.max : "") +
     ", nejvýše " + d + plural(d, " den", " dny", " dní") + (data.recordingPaused ? " – POZASTAVENO, plný disk" : ""));
   if (data.recording && data.recording.blocked) item("Nahrávání nejde zapnout:", data.recording.blocked);
 }
@@ -740,6 +750,11 @@ function render() {
       info.appendChild(editBox(c));
     } else {
       var name = el("div", "name", c.name);
+      if (c.multiplexes.length) {
+        var badge = el("span", "mux", "multiplex " + muxLabel(c.multiplexes));
+        badge.title = "Jeden tuner přijímá najednou jeden multiplex se všemi jeho kanály";
+        name.appendChild(badge);
+      }
       var pen = el("button", "link", "Přejmenovat");
       pen.disabled = busy;
       pen.setAttribute("aria-label", "Přejmenovat " + c.name);
@@ -753,7 +768,6 @@ function render() {
       if (meta.textContent) meta.appendChild(document.createTextNode(" · "));
       meta.appendChild(el("span", ok ? null : "no", text));
     }
-    if (c.multiplexes.length) flag("multiplex " + c.multiplexes.join(", "), true);
     if (c.offered) {
       flag(c.received ? "příjem zapnutý" : "příjem vypnutý", c.received);
       if (c.recordingRule !== null) flag(c.recordingRule ? "nahrává se" : "nenahrává se", c.recordingRule);

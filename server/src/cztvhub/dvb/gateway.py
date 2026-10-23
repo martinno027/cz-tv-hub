@@ -276,8 +276,10 @@ class DvbGateway:
             reachable = True
         except TvhError:
             tuners, reachable = [], False
+        # the recordings disk (buffer_dir); before it exists, the disk of the temporary playback files
         try:
-            usage = shutil.disk_usage(self.dvb.hls_dir)
+            path = self.dvb.buffer_dir if self.dvb.buffer_dir.is_dir() else self.dvb.hls_dir
+            usage = shutil.disk_usage(path)
             disk = {"freeBytes": usage.free, "totalBytes": usage.total}
         except OSError:
             disk = {"freeBytes": 0, "totalBytes": 0}

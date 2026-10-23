@@ -309,3 +309,49 @@ class AdminHttpTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecordingAdminTest(AdminTest):
+    """"Nahrávat" on /admin: limit, SD-card guard, multiplex shown in "Přehled nahrávek", recordings disk in status."""
+
+    def setUp(self):
+        super().setUp()
+        root = Path(self.tmp.name)
+        self.cfg.dvb.state_dir = root / "state"
+        self.cfg.dvb.buffer_dir = root / "buffer"
+        self.cfg.dvb.max_recordings = 2
+        self.cfg.dvb.buffer_on_system_disk = True
+        self.gateway = DvbGateway(self.cfg, client=self.client, hls=self.hls, log=lambda m: None)
+        self.addCleanup(self.gateway.archive.recorders.stop_all)
+        self.site = AdminSite(self.cfg, self.gateway)
+
+    def record(self, ids, on=True):
+        return self.request("POST", "/admin/api/channels", POST, {"ids": ids, "record": on})
+
+    def test_limit_and_multiplex_in_overview(self):
+        resp, data = self.record([CT1])
+        self.assertEqual(resp.status, 200, data)
+        resp, data = self.record([CT2, NOVA])
+        self.assertEqual(resp.status, 400)
+        self.assertIn("nejvýš 2", data["error"])
+        _, data = self.request("GET", "/admin/api/storage")
+        row = next(c for c in data["channels"] if c["id"] == CT1)
+        self.assertEqual(row["multiplexes"], ["626MHz"])
+        _, data = self.request("GET", "/admin/api/channels")
+        self.assertEqual(data["recording"], {"max": 2, "blocked": None})
+        self.assertTrue(next(c for c in data["channels"] if c["id"] == CT1)["record"])
+
+    def test_system_disk_refused(self):
+        self.gateway.archive.allow_system_disk = False  # the temp dir is on the system disk
+        resp, data = self.record([CT1])
+        self.assertEqual(resp.status, 400)
+        self.assertIn("buffer_dir", data["error"])
+
+    def test_status_reports_the_recordings_disk(self):
+        from unittest import mock
+        self.cfg.dvb.buffer_dir.mkdir(parents=True)
+        seen = []
+        real = __import__("shutil").disk_usage
+        with mock.patch("cztvhub.dvb.gateway.shutil.disk_usage", side_effect=lambda p: seen.append(p) or real(p)):
+            self.gateway.status()
+        self.assertEqual(seen, [self.cfg.dvb.buffer_dir])
