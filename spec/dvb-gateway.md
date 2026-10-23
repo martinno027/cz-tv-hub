@@ -162,6 +162,11 @@ gateway serves the init segment with identity edit lists and adds each track's `
 `tests/test_dvb_avsync.py` checks a flash + beep test stream for joins in both directions and mid-GOP
 (within 60 ms, edit lists ignored).
 
+## Open GOP (no `EXT-X-INDEPENDENT-SEGMENTS`)
+ČT's DVB-T2 HEVC (1080p50) has no IDR pictures: every segment starts with a CRA followed by ~7 RASL pictures that
+reference the previous segment (`dvb-diag --frames`, 2026-10-23). The playlists therefore do not claim independent
+segments, so players decode across segment boundaries instead of restarting (which showed brief artefacts).
+
 ## Thumbnails (approved by the user on 2026-10-23; see `docs/legal-notes.md`)
 One still per recording so the viewer sees what a programme is ("it does not have to be current, just show what is
 on"). Implemented in `src/cztvhub/dvb/thumbs.py`.

@@ -94,12 +94,15 @@ def build_ffmpeg_command(out_dir: Path, codecs: Codecs, live: bool, ffmpeg: str 
         cmd += ["-c:a", "aac", "-b:a", "192k", "-ac", "2"]
     cmd += ["-f", "hls", "-hls_time", str(hls_time), "-hls_segment_type", "fmp4",
             "-hls_fmp4_init_filename", INIT, "-hls_segment_filename", str(out_dir / SEGMENT_PATTERN)]
+    # No independent_segments: DVB-T2 HEVC (ČT) uses an open GOP, every segment starts with a CRA whose
+    # RASL pictures reference the previous segment, so claiming EXT-X-INDEPENDENT-SEGMENTS let players
+    # restart decoding at a segment boundary and show artefacts (seen 2026-10-23, `dvb-diag --frames`).
     if live:
         cmd += ["-hls_list_size", str(list_size), "-hls_delete_threshold", "3",
-                "-hls_flags", "delete_segments+independent_segments+temp_file"]
+                "-hls_flags", "delete_segments+temp_file"]
     else:
         cmd += ["-hls_list_size", "0", "-hls_playlist_type", "event",
-                "-hls_flags", "independent_segments+temp_file"]
+                "-hls_flags", "temp_file"]
     cmd.append(str(out_dir / PLAYLIST))
     return cmd
 

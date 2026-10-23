@@ -73,6 +73,7 @@ class CommandTest(unittest.TestCase):
         self.assertIn("-hls_time 2", joined)  # short live segments: faster start
         self.assertIn("-hls_list_size 20", joined)
         self.assertIn("delete_segments", joined)
+        self.assertNotIn("independent_segments", joined)  # open-GOP HEVC: segments depend on the previous one
         self.assertNotIn("-hls_playlist_type", joined)
         self.assertEqual(cmd[-1], "/x/index.m3u8")
         self.assertIn("/x/seg_%05d.m4s", cmd)
