@@ -20,14 +20,31 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    Select → full-screen live playback.
 2. **TV průvodce** (the main screen feature): classic EPG grid, channels as rows, time on the horizontal axis
    (e.g. 30-min ticks, ~2 h visible), a "now" line, programme cells sized by duration. Range: 7 days back,
-   2 days ahead; day picker (Dnes, Včera, Zítra, `po 12. 10.` …). Opens scrolled to now. D-pad/Siri Remote focus
-   navigation moves cell to cell; focused cell shows detail (title, episode, time, genre, description, image).
+   2 days ahead; day picker (Dnes, Včera, Zítra, `po 12. 10.` …). **Every open of the guide** (app start included,
+   also between 00:00 and 05:00) shows **now**: the grid of the broadcast day containing now (`openDay`, golden
+   cases `spec/fixtures/guide_days_cases.json`) with focus on the programme airing now in the first row. D-pad/Siri
+   Remote focus navigation moves cell to cell; focused cell shows detail (title, episode, time, genre, description, image).
+   **Today follows the clock**: "today" for labels and the day strip is the calendar day (Prague) of now, recomputed at
+   least every minute while the app runs (after midnight "Dnes" moves on by itself, and a programme airing at 0:10
+   says "Dnes 0:10", never "Zítra").
+   **Fixed detail layout**: the detail area has a constant height and every element a constant place whatever the
+   programme, so nothing moves while the viewer clicks through cells: image (fixed size), title (one line,
+   truncated), **episode line always reserved** (empty when there is none), meta line (channel · day time · genre),
+   status line (reserved, empty when there is none), description (a fixed number of lines, reserved), the "Otevřít v
+   iVysílání" button at a fixed place top right.
    Select a cell → action from **Decision rules**. Past cells clearly playable, unavailable ones dimmed.
    **Anténa thumbnails**: the detail's image of an Anténa programme is the gateway thumbnail
    (`spec/dvb-gateway.md` "Thumbnails") when the gateway reports `thumbnails: true` and the TV's switch "Náhledy
    anténních pořadů" (Nastavení → Server, default on) is on, else the antenna placeholder. Load it with the key
-   (header; Samsung: fetch with the header into a blob URL), memory cache only, never a disk cache; request it only
-   for the focused programme (after the focus rests ~0.3 s), never for every cell.
+   (header; Samsung: fetch with the header into a blob URL), memory cache only, never a disk cache.
+   **Image prefetch** (CT images and Anténa thumbnails alike): when the guide opens and whenever the focus has moved
+   more than 1 h or 3 rows from the last prefetch point, queue the images of the programmes in the rows from 3 above to
+   8 below the focused row that overlap ±3 h around the focused time, nearest to the focus first (by rows, then by
+   time). The focused programme's image goes ahead of the queue at once. Queued requests that left the window are
+   dropped (one already running finishes). At most 4 CT image requests and **2 gateway thumbnail requests** at a time
+   (the gateway runs at most 2 ffmpeg). In-memory LRU in the app (about 300 images), never disk. Anténa thumbnails
+   only for `completed`/`recording` entries while thumbnails are on; a `404` is not asked again for the guide's
+   lifetime (`completed`) or for 60 s (`recording`).
    **ČT images for Anténa ČT channels**: an Anténa channel that broadcasts a ČT programme gets the official ČT image
    (and nothing else) from the CT schedule the app already loads, so no recording is needed. Rules (golden cases
    `spec/fixtures/ct_antenna_match.json`, all three apps):
@@ -42,9 +59,11 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
      image is fetched like the CT internet images (no key, CT's CDN), memory cache only.
    **Across days**: the guide scrolls on past a day's edge. Right on the last cell of a row (the one reaching the
    broadcast day's end, 05:00) opens the next day (if it is in the range) with focus on that row's cell at the new
-   day's start; left on the first cell opens the previous day with focus on that row's cell at its end. The day strip
-   always highlights the day the grid shows (so "Dnes" is no longer highlighted after scrolling into "Zítra"); the
-   "Live column first" mode ends on a day change. At the range's ends nothing happens. tvOS has no event for a
+   day's start; left on the first cell opens the previous day with focus on that row's cell at its end. **The day strip
+   highlights the calendar day of the focused programme's start** (`chipDay`; Hercule Poirot at 22:15 → "Dnes", the
+   next cell at 0:10 → "Zítra", inside the same grid), and up from the first row lands on that highlighted chip.
+   **Selecting a chip** (`select`): "Dnes" = the grid containing now with focus on now (as on open); any other day =
+   that broadcast day, scrolled to 20:00. The "Live column first" mode ends on a day change. At the range's ends nothing happens. tvOS has no event for a
    left/right press without a target, so its rows end with a focusable "Zítra ›" cell and start with "‹ Včera" /
    "‹ Dnes" (none at the range ends); Android TV and Samsung react to the key at the row's edge directly. The grid
    covers exactly the broadcast day 05:00–05:00 Prague (programmes crossing 05:00 are clipped).
@@ -54,14 +73,12 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    edge. Compute rows, time axis and cell geometry once per data change, not per focus move; a focus move must not
    re-render the grid (only the detail). Left/right must never jump to another row because the next cell was not built.
    Target: smooth D-pad on the device with 60 channels (the fake TVHeadend: `cztvhub dvb-fake --channels 60`).
-   **Live column first**: on today's guide, up/down moves to the programme **airing now** in the next row (like
+   **Live column first**: on the grid that contains now (`openDay`, not the calendar date: after midnight that is
+   the previous broadcast day), up/down moves to the programme **airing now** in the next row (like
    zapping), whatever the cells' widths, **whenever the focused programme is airing now** (also after left/right
    moves) and, when the guide opens, until the first left/right. A row with nothing airing gets the cell (or
    focusable "Mimo vysílání" gap) under the now line. From a programme that is not airing, up/down keeps the time
    as before. Other days use normal grid navigation.
-   **airing now** in the next row (like zapping), whatever the cells' widths; a row with nothing airing gets the
-   cell (or focusable "Mimo vysílání" gap) under the now line. The first left/right ends this mode until the guide is
-   opened or today's day is loaded again; other days use normal grid navigation.
 3. **Player**: full-screen, native controls. **Title in the player's info bar**: the programme, not the channel. Live (CT and
    Anténa): title = the programme airing now (from the guide data the app already has), subtitle/second line = the
    channel name (e.g. "ČT1" / "CT 1 PHA HD T2"); it changes by itself when the next programme starts (re-check at

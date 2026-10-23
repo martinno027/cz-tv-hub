@@ -1,0 +1,99 @@
+{
+ "_doc": "Guide days (spec/apps.md TV průvodce). Times are UTC; days are Prague dates. openDay = broadcast day (05:00-05:00 Prague) containing now; chipDay = calendar day of a programme start; select = grid day and anchor for a chip ('now' or a UTC time).",
+ "openDay": [
+  {
+   "name": "evening",
+   "now": "2026-10-23T19:00:00Z",
+   "day": "2026-10-23"
+  },
+  {
+   "name": "just before midnight",
+   "now": "2026-10-23T21:59:00Z",
+   "day": "2026-10-23"
+  },
+  {
+   "name": "after midnight: previous broadcast day",
+   "now": "2026-10-23T22:20:00Z",
+   "day": "2026-10-23"
+  },
+  {
+   "name": "04:50 still previous day",
+   "now": "2026-10-24T02:50:00Z",
+   "day": "2026-10-23"
+  },
+  {
+   "name": "05:10 new day",
+   "now": "2026-10-24T03:10:00Z",
+   "day": "2026-10-24"
+  },
+  {
+   "name": "DST end night 04:30 CET",
+   "now": "2026-10-25T03:30:00Z",
+   "day": "2026-10-24"
+  },
+  {
+   "name": "DST end 05:05 CET",
+   "now": "2026-10-25T04:05:00Z",
+   "day": "2026-10-25"
+  }
+ ],
+ "chipDay": [
+  {
+   "name": "22:15 evening",
+   "time": "2026-10-23T20:15:00Z",
+   "day": "2026-10-23"
+  },
+  {
+   "name": "0:10 next calendar day",
+   "time": "2026-10-23T22:10:00Z",
+   "day": "2026-10-24"
+  },
+  {
+   "name": "04:00 next calendar day",
+   "time": "2026-10-24T02:00:00Z",
+   "day": "2026-10-24"
+  },
+  {
+   "name": "23:59",
+   "time": "2026-10-24T21:59:00Z",
+   "day": "2026-10-24"
+  }
+ ],
+ "select": [
+  {
+   "name": "Dnes after midnight: grid of the previous broadcast day, at now",
+   "chip": "2026-10-24",
+   "now": "2026-10-23T22:20:00Z",
+   "day": "2026-10-23",
+   "anchor": "now"
+  },
+  {
+   "name": "Dnes in the evening",
+   "chip": "2026-10-23",
+   "now": "2026-10-23T19:00:00Z",
+   "day": "2026-10-23",
+   "anchor": "now"
+  },
+  {
+   "name": "other day: 20:00",
+   "chip": "2026-10-21",
+   "now": "2026-10-23T19:00:00Z",
+   "day": "2026-10-21",
+   "anchor": "2026-10-21T18:00:00Z"
+  },
+  {
+   "name": "Včera after midnight",
+   "chip": "2026-10-23",
+   "now": "2026-10-23T22:20:00Z",
+   "day": "2026-10-23",
+   "anchor": "2026-10-23T18:00:00Z"
+  },
+  {
+   "name": "other day across DST end: 20:00 CET",
+   "chip": "2026-10-25",
+   "now": "2026-10-24T19:00:00Z",
+   "day": "2026-10-25",
+   "anchor": "2026-10-25T19:00:00Z"
+  }
+ ]
+}

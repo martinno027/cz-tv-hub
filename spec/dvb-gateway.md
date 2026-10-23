@@ -252,7 +252,7 @@ on"). Implemented in `src/cztvhub/dvb/thumbs.py`.
   streams. Frame position: `t = min(300 s, 20 % of the recorded duration)` after the start, as a byte offset from
   the file size per recorded second. ffmpeg reads stdin and writes one JPEG to stdout (`-frames:v 1`, width ≤ 480,
   fixed quality); no file outputs. No client parameters (no seek, no series).
-- Cache: memory only, at most 200 entries; an entry is kept for the life of the recording once `t` reached 300 s or
+- Cache: memory only, at most 600 entries (the apps prefetch around the guide focus, spec/apps.md "Image prefetch"); an entry is kept for the life of the recording once `t` reached 300 s or
   the recording finished, else refreshed after 60 s. Every request checks the DVR entry first (cache hit included);
   a gone entry drops its cache entry. Switching thumbnails off clears the cache. At most 2 ffmpeg at a time,
   10 s timeout.
@@ -261,6 +261,8 @@ on"). Implemented in `src/cztvhub/dvb/thumbs.py`.
 - Apps: the guide detail of an Anténa programme with `recording.state` `completed`/`recording` shows the thumbnail
   when the gateway reports `thumbnails: true` and the TV's own switch (Nastavení → Server, "Náhledy anténních
   pořadů", default on) is on; otherwise the antenna placeholder. Images are kept in memory only (no disk cache).
+  The apps ask for the focused programme first, then prefetch a bounded window around the focus (3 rows above,
+  8 below, ±3 h), nearest first, at most 2 requests at a time (spec/apps.md "Image prefetch"); never the whole guide.
 
 ## App behaviour for "Anténa" programmes
 Channels appear as a second group "Anténa" in Živě and in the TV guide (rows after the CT internet channels).
