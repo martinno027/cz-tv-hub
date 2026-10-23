@@ -30,7 +30,7 @@ from .hls import (INIT, LIVE_START_SECONDS, Codecs, EmptySource, HlsManager, Hls
 from .retention import RetentionLoop
 from .sources import GrowingRecording
 from .epgstore import EpgHistory, merge_past
-from .thumbs import Settings, Thumbnails
+from .thumbs import Settings, Thumbnails, ThumbsBusy
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
 UUID = r"[A-Za-z0-9_-]{1,64}"
@@ -53,6 +53,8 @@ EPG_AHEAD_SECONDS = 3 * 86400
 PLAYLIST_TIMEOUT = 25.0
 VOD_WAIT_SECONDS = 5.0  # short finished recordings are fully remuxed by then and served as VOD
 ZAP_IDLE_SECONDS = 8.0  # a live session nobody polled for this long no longer has a viewer
+THUMB_RETRY_AFTER = 5  # seconds; both ffmpeg slots stayed busy (several TVs prefetching)
+THUMB_DVR_SECONDS = 5.0  # one DVR list for all thumbnail requests; a deleted recording is gone within this
 JSON = "application/json; charset=utf-8"
 M3U8 = "application/vnd.apple.mpegurl"
 MEDIA_TYPES = {".m4s": "video/iso.segment", ".mp4": "video/mp4"}
@@ -118,6 +120,9 @@ class DvbGateway:
         self._channels: list[Channel] = []
         self._channels_at = float("-inf")
         self._channels_lock = threading.Lock()
+        self._thumb_dvr: list[DvrEntry] = []
+        self._thumb_dvr_at = float("-inf")
+        self._thumb_dvr_lock = threading.Lock()
 
     # -- lifecycle -------------------------------------------------------------------------
     def start(self) -> None:
@@ -208,6 +213,14 @@ class DvbGateway:
                 self._channels = self.client.channels()
                 self._channels_at = time.monotonic()
             return self._channels
+
+    def _thumb_dvr_entries(self) -> list[DvrEntry]:
+        """TVHeadend's DVR list for thumbnail requests, fetched at most every 5 s (prefetching TVs)."""
+        with self._thumb_dvr_lock:
+            if self.thumbs.clock() - self._thumb_dvr_at >= THUMB_DVR_SECONDS:
+                self._thumb_dvr = self.client.dvr_entries("grid")
+                self._thumb_dvr_at = self.thumbs.clock()
+            return self._thumb_dvr
 
     def _recording_source(self, channel: str):
         """The only input of the continuous recording: TVHeadend's stream of an antenna channel on this Pi
@@ -443,7 +456,14 @@ class DvbGateway:
         return self._playlist(session)
 
     def thumbnail(self, dvr_uuid: str) -> Response:
-        """One still of a recording (spec/dvb-gateway.md "Thumbnails"); checked against TVHeadend every time."""
+        """One still of a recording (spec/dvb-gateway.md "Thumbnails"); checked against TVHeadend every time.
+        Busy ffmpeg slots answer 503 + Retry-After, so the apps ask again instead of remembering a 404."""
+        try:
+            return self._thumbnail(dvr_uuid)
+        except ThumbsBusy:
+            return error(503, "Náhledy se právě připravují", {"Retry-After": str(THUMB_RETRY_AFTER)})
+
+    def _thumbnail(self, dvr_uuid: str) -> Response:
         if not self.thumbs.enabled:
             raise HttpError(404, "Náhledy jsou vypnuté")
         if parse_recording_id(dvr_uuid):
@@ -451,7 +471,7 @@ class DvbGateway:
             if data is None:
                 raise HttpError(404, "Náhled není k dispozici")
             return Response(200, data, "image/jpeg", {"Cache-Control": "private, no-store"})
-        entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
+        entry = next((e for e in self._thumb_dvr_entries() if e.uuid == dvr_uuid), None)
         state = epg.recording_state(entry.sched_status) if entry else ""
         if entry is None or state not in ("completed", "recording") \
                 or entry.channel not in {c.uuid for c in self._channel_list()}:
@@ -599,6 +619,8 @@ class DvbGateway:
         """Derived data never outlives its recording: ad breaks, in-memory thumbnails."""
         entries = self.client.dvr_entries("grid") + self.client.dvr_entries("grid_finished") + \
             self.client.dvr_entries("grid_failed")
+        with self._thumb_dvr_lock:
+            self._thumb_dvr_at = float("-inf")
         self.thumbs.prune(e.uuid for e in entries)
         if self.ads.enabled:
             self._prune_breaks(entries)
