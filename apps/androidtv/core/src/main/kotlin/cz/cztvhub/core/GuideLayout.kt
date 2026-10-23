@@ -44,6 +44,18 @@ object GuideLayout {
         return slots
     }
 
+    /**
+     * Index of the slot under [moment] (programme or "Mimo vysílání" filler), else the next one,
+     * else the last one; null for an empty row. Used to walk the guide's "now" column
+     * (spec/apps.md "Live column first") and to keep a time position on up/down.
+     */
+    fun <T : Timed> slotAt(slots: List<Slot<T>>, moment: Instant): Int? {
+        val under = slots.indexOfFirst { !moment.isBefore(it.start) && moment.isBefore(it.end) }
+        if (under >= 0) return under
+        val next = slots.indexOfFirst { it.start.isAfter(moment) }
+        return if (next >= 0) next else slots.indices.lastOrNull()
+    }
+
     /** Axis ticks every [step], starting at [axisStart]. */
     fun ticks(axisStart: Instant, axisEnd: Instant, step: Duration = Duration.ofMinutes(30)): List<Instant> =
         generateSequence(axisStart) { it.plus(step) }.takeWhile { !it.isAfter(axisEnd) }.toList()

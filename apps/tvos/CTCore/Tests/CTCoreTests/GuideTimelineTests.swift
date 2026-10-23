@@ -21,6 +21,22 @@ final class GuideTimelineTests: XCTestCase {
         XCTAssertEqual(timeline.x(for: utc("2026-10-18T05:30:00Z")), timeline.width, accuracy: 0.001)
     }
 
+    func testFocusableSegmentUnderNow() {
+        let timeline = GuideTimeline(start: utc("2026-10-17T05:00:00Z"), end: utc("2026-10-17T07:00:00Z"), pointsPerSecond: 0.1)
+        let a = programme("a", "2026-10-17T05:00:00Z", "2026-10-17T05:50:00Z")
+        let b = programme("b", "2026-10-17T05:52:00Z", "2026-10-17T07:00:00Z")
+        let segments = timeline.segments(for: [a, b])  // a (300), gap 2 min (12), b
+        XCTAssertEqual(timeline.focusableSegment(at: utc("2026-10-17T05:10:00Z"), in: segments, minGapWidth: 60), 0)
+        XCTAssertEqual(timeline.focusableSegment(at: utc("2026-10-17T06:30:00Z"), in: segments, minGapWidth: 60), 2)
+        // inside the narrow (unfocusable) gap → the next programme
+        XCTAssertEqual(timeline.focusableSegment(at: utc("2026-10-17T05:51:00Z"), in: segments, minGapWidth: 60), 2)
+        // a wide gap is focusable itself; empty row and past the end
+        let wide = timeline.segments(for: [a])
+        XCTAssertEqual(timeline.focusableSegment(at: utc("2026-10-17T06:30:00Z"), in: wide, minGapWidth: 60), 1)
+        XCTAssertNil(timeline.focusableSegment(at: utc("2026-10-17T06:00:00Z"), in: [GuideTimeline.Segment<Programme>](), minGapWidth: 60))
+        XCTAssertEqual(timeline.focusableSegment(at: utc("2026-10-17T09:00:00Z"), in: segments, minGapWidth: 60), 2)
+    }
+
     func testEmptyFallsBackToWholeDay() {
         let day = BroadcastDay(year: 2026, month: 10, day: 17)
         let timeline = GuideTimeline(spans: [], fallbackDay: day, pointsPerSecond: 1)

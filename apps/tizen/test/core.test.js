@@ -319,3 +319,22 @@ test('entries: CT cells look and select per the rules', () => {
   assert.deepEqual(future, { type: 'notice', text: CT.Messages.FUTURE });
   assert.equal(CT.Entries.progress(airing, now), 1 / 3);
 });
+
+test('GuideLayout.liveSlot picks the programme airing now, else the slot under now', () => {
+  const L = CT.GuideLayout;
+  const M = 60 * 1000;
+  const base = t('2026-10-23T12:00:00Z');
+  // a 1-min programme widened to 3 min, then a gap, then a long one
+  const items = [
+    { start: base, end: base + M, title: 'short' },
+    { start: base + 20 * M, end: base + 60 * M, title: 'long' }
+  ];
+  const slots = L.row(items, base, base + 90 * M);
+  assert.equal(slots[L.liveSlot(slots, base + 30 * M)].item.title, 'long');
+  assert.equal(slots[L.liveSlot(slots, base + 30 * 1000)].item.title, 'short');
+  // widened part of the short slot: nothing airs, the slot under now is the widened short one
+  assert.equal(slots[L.liveSlot(slots, base + 2 * M)].item.title, 'short');
+  assert.equal(slots[L.liveSlot(slots, base + 10 * M)].item, null); // "Mimo vysílání"
+  assert.equal(L.liveSlot(slots, base + 120 * M), -1);
+  assert.equal(L.liveSlot([], base), -1);
+});

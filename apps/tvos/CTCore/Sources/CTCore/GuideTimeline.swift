@@ -34,6 +34,36 @@ public struct GuideTimeline: Sendable, Equatable {
 
     public var width: Double { end.timeIntervalSince(start) * pointsPerSecond }
 
+    /// "Live column first" (spec/apps.md): index of the segment under `date` in a row's `segments`
+    /// (which start at `start`), or of the nearest focusable one when that segment is a gap narrower
+    /// than `minGapWidth` (not focusable). Nil when the row has nothing focusable.
+    public func focusableSegment<Item>(at date: Date, in segments: [Segment<Item>], minGapWidth: Double) -> Int? {
+        func isFocusable(_ segment: Segment<Item>) -> Bool {
+            if case .gap(let width) = segment { return width >= minGapWidth }
+            return true
+        }
+        let target = x(for: date)
+        var left = 0.0
+        var under = segments.count - 1
+        for (index, segment) in segments.enumerated() {
+            let width: Double
+            switch segment {
+            case .gap(let w): width = w
+            case .item(_, let w): width = w
+            }
+            if target < left + width { under = index; break }
+            left += width
+        }
+        guard under >= 0 else { return nil }
+        // the segment itself, else the nearest focusable one (the later one first on a tie)
+        for distance in 0..<segments.count {
+            for index in [under + distance, under - distance] where segments.indices.contains(index) {
+                if isFocusable(segments[index]) { return index }
+            }
+        }
+        return nil
+    }
+
     public func x(for date: Date) -> Double {
         min(max(date, start), end).timeIntervalSince(start) * pointsPerSecond
     }

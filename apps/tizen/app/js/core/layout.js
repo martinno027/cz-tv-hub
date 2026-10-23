@@ -41,6 +41,20 @@
       return slots;
     },
 
+    /**
+     * "Live column first" (spec/apps.md): index of the slot whose programme airs at `now` (by its own
+     * times, not the widened slot), else the slot (or filler) under `now`; -1 when `now` is off the row.
+     */
+    liveSlot: function (slots, now) {
+      var i;
+      for (i = 0; i < slots.length; i++) {
+        var item = slots[i].item;
+        if (item && item.start <= now && now < item.end) return i;
+      }
+      for (i = 0; i < slots.length; i++) if (slots[i].start <= now && now < slots[i].end) return i;
+      return -1;
+    },
+
     /** Axis ticks every `stepMs` (default 30 min), starting at `axisStart`. */
     ticks: function (axisStart, axisEnd, stepMs) {
       var step = stepMs || 30 * MINUTE;

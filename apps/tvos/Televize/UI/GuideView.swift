@@ -65,6 +65,21 @@ private struct GuideLayout {
     var timeline = GuideTimeline(start: .distantPast, end: .distantPast, pointsPerSecond: GuideView.pointsPerSecond)
     var segments: [[GuideTimeline.Segment<GuideEntry>]] = []
     var entries: [String: GuideEntry] = [:]
+    /// Row index of every focusable cell id (programmes and "Mimo vysílání" gaps).
+    var rowOf: [String: Int] = [:]
+
+    static func gapID(row: GuideRow, index: Int) -> String { "gap|\(row.id)|\(index)" }
+
+    /// Focus id of the cell under the now line in `row` ("Live column first", spec/apps.md).
+    func cellID(row: Int, at date: Date) -> String? {
+        guard rows.indices.contains(row),
+              let index = timeline.focusableSegment(at: date, in: segments[row], minGapWidth: GuideView.minFocusableGap)
+        else { return nil }
+        switch segments[row][index] {
+        case .item(let entry, _): return entry.id
+        case .gap: return Self.gapID(row: rows[row], index: index)
+        }
+    }
 }
 
 /// "TV průvodce": EPG grid with channels as rows and time on the horizontal axis.
@@ -76,7 +91,7 @@ struct GuideView: View {
     static let headerHeight: CGFloat = 44
     static let rowHeight: CGFloat = 80
     static let rowSpacing: CGFloat = 8
-    static let minFocusableGap: CGFloat = 60
+    nonisolated static let minFocusableGap: CGFloat = 60
 
     fileprivate struct ScrollRequest: Equatable {
         let id = UUID()
@@ -93,6 +108,10 @@ struct GuideView: View {
     @State private var loadError: String?
     @State private var layout = GuideLayout()
     @State private var focusedEntry: GuideEntry?
+    /// "Live column first": up/down follows what is airing until the first left/right (today only).
+    @State private var liveColumn = false
+    /// The cell focus is being moved to by the live column (its focus change is not a user move).
+    @State private var redirectID: String?
     @State private var defaultFocusID: String?
     @State private var scrollRequest: ScrollRequest?
     @State private var choice: Choice?
@@ -125,9 +144,10 @@ struct GuideView: View {
         }
         .task(id: LoadKey(day: day, gateway: model.gateway)) { await load() }
         .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
-        .onChange(of: focusedID) { _, id in
+        .onChange(of: focusedID) { old, id in
             guard let id else { return }
-            focusedEntry = layout.entries[id]
+            followLiveColumn(from: old, to: id)
+            focusedEntry = layout.entries[focusedID ?? id]
         }
         .confirmationDialog(
             choice?.entry.title ?? "",
@@ -187,13 +207,20 @@ struct GuideView: View {
     private func rebuildLayout() {
         let rows = buildRows()
         let timeline = GuideTimeline(spans: rows.flatMap(\.entries), fallbackDay: day, pointsPerSecond: Self.pointsPerSecond)
+        let segments = rows.map { timeline.segments(for: $0.entries, splitGapsAtTicks: true) }
         var entries: [String: GuideEntry] = [:]
-        for row in rows {
-            for entry in row.entries { entries[entry.id] = entry }
+        var rowOf: [String: Int] = [:]
+        for (index, row) in rows.enumerated() {
+            for entry in row.entries {
+                entries[entry.id] = entry
+                rowOf[entry.id] = index
+            }
+            for (gap, segment) in segments[index].enumerated() {
+                if case .gap = segment { rowOf[GuideLayout.gapID(row: row, index: gap)] = index }
+            }
         }
-        layout = GuideLayout(version: layout.version + 1, rows: rows, timeline: timeline,
-                             segments: rows.map { timeline.segments(for: $0.entries, splitGapsAtTicks: true) },
-                             entries: entries)
+        layout = GuideLayout(version: layout.version + 1, rows: rows, timeline: timeline, segments: segments,
+                             entries: entries, rowOf: rowOf)
     }
 
     // MARK: grid
@@ -282,10 +309,29 @@ struct GuideView: View {
         let target = firstRow.first { $0.isAiring(at: anchor) } ?? firstRow.first { $0.start >= anchor } ?? firstRow.last
         defaultFocusID = target?.id
         focusedEntry = target
+        liveColumn = day == today
         let tick = layout.timeline.tickIndex(for: anchor.addingTimeInterval(-30 * 60))
         // Let the new rows lay out before scrolling.
         let rowID = anchorRow?.id == rows.first?.id ? nil : anchorRow?.id
         Task { @MainActor in scrollRequest = ScrollRequest(tick: tick, rowID: rowID) }
+    }
+
+    /// Up/down (or coming down from the day strip) lands on the programme airing now in that row
+    /// until the viewer first moves left or right.
+    private func followLiveColumn(from old: String?, to id: String) {
+        if id == redirectID {
+            redirectID = nil
+            return
+        }
+        guard liveColumn, day == today, let row = layout.rowOf[id] else { return }
+        if let old, layout.rowOf[old] == row {
+            liveColumn = false  // a move within the row: normal grid navigation from now on
+            return
+        }
+        if let target = layout.cellID(row: row, at: Date()), target != id {
+            redirectID = target
+            focusedID = target
+        }
     }
 
     private func select(_ entry: GuideEntry) {
@@ -428,7 +474,7 @@ private struct GuideGrid: View, Equatable {
                             .stickyLeading()
                     }
                     .buttonStyle(GuideCellStyle(state: .offAir))
-                    .focused(focusedID, equals: "gap|\(row.id)|\(index)")
+                    .focused(focusedID, equals: GuideLayout.gapID(row: row, index: index))
                     .padding(.horizontal, 3)
                 case .item(let entry, let width):
                     let state = entry.state(at: now)

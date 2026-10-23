@@ -64,4 +64,19 @@ class GuideLayoutTest {
         assertEquals(t("03:30"), GuideLayout.axisStart(listOf(p("x", "03:59", "05:00"))))
         assertEquals(listOf(t("20:00"), t("20:30"), t("21:00")), GuideLayout.ticks(t("20:00"), t("21:10")))
     }
+
+    @Test fun slotAtFindsTheCellUnderTheNowLine() {
+        val slots = GuideLayout.row(listOf(p("a", "20:30", "21:00"), p("b", "21:30", "22:00")), axisStart, axisEnd)
+        assertEquals("a", slots[GuideLayout.slotAt(slots, t("20:45"))!!].item?.idec)
+        // nothing airing: the "Mimo vysílání" filler under the line
+        val gap = GuideLayout.slotAt(slots, t("21:10"))!!
+        assertNull(slots[gap].item)
+        assertEquals(t("21:00"), slots[gap].start)
+        // the boundary belongs to the programme that starts there
+        assertEquals("b", slots[GuideLayout.slotAt(slots, t("21:30"))!!].item?.idec)
+        // outside the axis: the next slot, else the last
+        assertEquals(0, GuideLayout.slotAt(slots, t("19:00")))
+        assertEquals(slots.lastIndex, GuideLayout.slotAt(slots, t("23:30")))
+        assertNull(GuideLayout.slotAt(emptyList<GuideLayout.Slot<Programme>>(), t("20:45")))
+    }
 }

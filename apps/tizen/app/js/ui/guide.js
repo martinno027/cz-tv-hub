@@ -38,6 +38,7 @@
     this.focusRow = 0;
     this.focusSlot = 0;
     this.anchor = 0; // the focused moment, kept when moving up/down
+    this.liveMode = false; // today, before any left/right: up/down lands on what airs now
     this.scrollX = 0;
     this.scrollRow = 0;
     this.plans = {}; // day -> {ct: plan | null, ctError, dvb: plan | null}
@@ -55,6 +56,24 @@
   /** Opens on today (or yesterday's broadcast day after midnight) the first time it is shown. */
   GuideScreen.prototype.show = function () {
     if (!this.day) this.selectDay(CT.Days.today(this.app.now));
+    else this.liveMode = this.isToday();
+  };
+
+  GuideScreen.prototype.isToday = function () {
+    var now = this.app.now;
+    return this.day === CT.Days.today(now) && now >= this.axisStart && now <= this.axisEnd;
+  };
+
+  /** Slot to focus in `rowIndex` after up/down: the airing programme in live mode, else under the anchor. */
+  GuideScreen.prototype.verticalSlot = function (rowIndex) {
+    if (this.liveMode) {
+      var live = CT.GuideLayout.liveSlot(this.rows[rowIndex].slots, this.app.now);
+      if (live >= 0) {
+        this.anchor = this.app.now;
+        return live;
+      }
+    }
+    return this.slotAt(rowIndex, this.anchor);
   };
 
   GuideScreen.prototype.selectDay = function (day) {
@@ -198,7 +217,8 @@
     this.scrollX = Math.max(0, px(anchor - axisStart - 30 * MINUTE));
     this.focusRow = Math.min(this.focusRow, this.rows.length - 1);
     if (this.scrollRow > this.focusRow) this.scrollRow = this.focusRow;
-    this.focusSlot = this.slotAt(this.focusRow, anchor);
+    this.liveMode = this.isToday();
+    this.focusSlot = this.liveMode ? this.verticalSlot(this.focusRow) : this.slotAt(this.focusRow, anchor);
     this.zone = this.zone === 'days' && this.app.inContent() ? 'days' : 'grid';
     this.applyFocus();
   };
@@ -326,6 +346,7 @@
         var slots = this.rows[this.focusRow].slots;
         var next = this.focusSlot + (key === 'left' ? -1 : 1);
         if (next < 0 || next >= slots.length) break;
+        this.liveMode = false; // the viewer browses the timeline now
         this.focusSlot = next;
         this.anchor = Math.max(slots[next].start, viewStartTime) + MINUTE;
         break;
@@ -336,19 +357,19 @@
           break;
         }
         this.focusRow--;
-        this.focusSlot = this.slotAt(this.focusRow, this.anchor);
+        this.focusSlot = this.verticalSlot(this.focusRow);
         break;
       case 'down':
         if (this.focusRow < this.rows.length - 1) {
           this.focusRow++;
-          this.focusSlot = this.slotAt(this.focusRow, this.anchor);
+          this.focusSlot = this.verticalSlot(this.focusRow);
         }
         break;
       case 'chup':
       case 'chdown': {
         var page = this.visibleRows() * (key === 'chup' ? -1 : 1);
         this.focusRow = Math.max(0, Math.min(this.rows.length - 1, this.focusRow + page));
-        this.focusSlot = this.slotAt(this.focusRow, this.anchor);
+        this.focusSlot = this.verticalSlot(this.focusRow);
         break;
       }
       case 'enter':

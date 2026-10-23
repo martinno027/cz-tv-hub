@@ -23,6 +23,10 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    2 days ahead; day picker (Dnes, Včera, `po 12. 10.` …). Opens scrolled to now. D-pad/Siri Remote focus
    navigation moves cell to cell; focused cell shows detail (title, episode, time, genre, description, image).
    Select a cell → action from **Decision rules**. Past cells clearly playable, unavailable ones dimmed.
+   **Live column first**: on today's guide, until the viewer presses left or right, up/down moves to the programme
+   **airing now** in the next row (like zapping), whatever the cells' widths; a row with nothing airing gets the
+   cell (or focusable "Mimo vysílání" gap) under the now line. The first left/right ends this mode until the guide is
+   opened or today's day is loaded again; other days use normal grid navigation.
 3. **Player**: full-screen, native controls. Live: seek within the timeshift buffer when started from it.
    Archive: normal VOD seeking. Subtitles/audio tracks from the HLS manifest via native UI if cheap.
    On playback error caused by URL expiry, re-resolve once and resume at the same position.

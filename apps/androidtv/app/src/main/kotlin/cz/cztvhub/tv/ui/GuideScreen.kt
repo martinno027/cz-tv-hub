@@ -97,7 +97,7 @@ private class AppButtonLink {
     var lastCell: FocusRequester = FocusRequester.Default
 }
 
-private class GridNav(var cursor: Instant) {
+private class GridNav(var cursor: Instant, var live: Boolean) {
     var row = -1
     var vertical = false
 }
@@ -382,7 +382,9 @@ private fun EpgGrid(
     }
     // Plain memory, not state (nothing renders from it): the focused cell and the time cursor
     // that up/down keep, so a column of the guide can be walked without drifting.
-    val nav = remember(plan) { GridNav(cursor = anchor) }
+    // "Live column first" (spec/apps.md): on today's guide up/down walk the programmes airing now
+    // until the first left/right; a new plan (guide opened, today reloaded) starts it again.
+    val nav = remember(plan) { GridNav(cursor = anchor, live = Instant.now() in axisStart..axisEnd) }
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     var entered by remember { mutableStateOf(false) }
@@ -433,6 +435,10 @@ private fun EpgGrid(
                             val step = when (event.key) {
                                 Key.DirectionUp -> -1
                                 Key.DirectionDown -> 1
+                                Key.DirectionLeft, Key.DirectionRight -> {
+                                    if (event.type == KeyEventType.KeyDown) nav.live = false
+                                    return@onPreviewKeyEvent false
+                                }
                                 else -> return@onPreviewKeyEvent false
                             }
                             if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -443,7 +449,8 @@ private fun EpgGrid(
                             if (next < 0 && appButton.shown) {
                                 return@onPreviewKeyEvent runCatching { appButton.button.requestFocus() }.isSuccess
                             }
-                            val target = cellRows.getOrNull(next)?.second?.let { cellAt(it, nav.cursor) }
+                            val moment = if (nav.live) Instant.now() else nav.cursor
+                            val target = cellRows.getOrNull(next)?.second?.let { cellAt(it, moment) }
                                 ?: return@onPreviewKeyEvent false
                             nav.vertical = true
                             val moved = runCatching { target.requester.requestFocus() }.isSuccess
@@ -654,9 +661,7 @@ private object EpgBringIntoView : BringIntoViewSpec {
 
 /** The cell airing at [moment], else the next one, else the last one before it. */
 private fun cellAt(cells: List<Cell>, moment: Instant): Cell? =
-    cells.firstOrNull { !moment.isBefore(it.slot.start) && moment.isBefore(it.slot.end) }
-        ?: cells.firstOrNull { it.slot.start.isAfter(moment) }
-        ?: cells.lastOrNull()
+    GuideLayout.slotAt(cells.map { it.slot }, moment)?.let(cells::get)
 
 private fun durationToDp(from: Instant, to: Instant): Dp =
     DP_PER_MINUTE * (Duration.between(from, to).seconds / 60f)
