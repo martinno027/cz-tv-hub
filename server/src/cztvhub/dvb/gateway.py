@@ -20,8 +20,9 @@ from typing import Any, Callable, Mapping
 from ..config import Config
 from . import breaks as ads
 from . import epg
-from .hls import (Codecs, EmptySource, HlsManager, HlsSession, StreamFailed, build_ffmpeg_command, probe_codecs,
-                  rewrite_playlist)
+from . import fmp4
+from .hls import (INIT, Codecs, EmptySource, HlsManager, HlsSession, StreamFailed, build_ffmpeg_command,
+                  probe_codecs, rewrite_playlist)
 from .retention import RetentionLoop
 from .sources import GrowingRecording
 from .thumbs import Settings, Thumbnails
@@ -342,7 +343,7 @@ class DvbGateway:
         if path is None:
             raise HttpError(404, "Segment nenalezen")
         try:
-            data = path.read_bytes()
+            data = self._synced(session, path.name, path.read_bytes())
         except OSError:
             raise HttpError(404, "Segment nenalezen")
         content_type = MEDIA_TYPES.get(path.suffix, "application/octet-stream")
@@ -361,6 +362,19 @@ class DvbGateway:
                     return Response(206, data[first:last + 1], content_type, headers)
             return Response(416, b"", content_type, {"Content-Range": f"bytes */{size}"})
         return Response(200, data, content_type, headers)
+
+    @staticmethod
+    def _synced(session: HlsSession, name: str, data: bytes) -> bytes:
+        """A/V sync (spec/dvb-gateway.md "A/V sync", fmp4.py): neutral edit lists in the init segment,
+        their offsets moved into every fragment's tfdt. Same sizes, so Range requests still fit."""
+        if name == INIT:
+            return fmp4.neutralise_edits(data)
+        if session.shifts is None:
+            try:
+                session.shifts = fmp4.track_shifts((session.directory / INIT).read_bytes())
+            except OSError:
+                return data  # init not written yet (cannot happen for a listed segment)
+        return fmp4.shift_fragments(data, session.shifts)
 
     # -- ad breaks (spec/ad-breaks.md) -----------------------------------------------------
     def get_breaks(self, dvr_uuid: str) -> Response:

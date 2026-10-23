@@ -139,6 +139,15 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   `record_channels` / `[ads] channels` are reported in `changes` (those settings match by name). POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
   (CSRF; the server never answers CORS preflights). Errors: `401`, `403`, `400`, `404` unknown channel, `502`.
 
+## A/V sync of the remuxed HLS (`src/cztvhub/dvb/fmp4.py`)
+DVB muxes carry audio and video with different start times, and a viewer joins mid-stream (video starts at the next
+keyframe). ffmpeg's fMP4 writer starts every track's fragments at 0 and records the real offsets only in the init
+segment's edit lists, which HLS players ignore: the sound was up to ~0.7 s off (found 2026-10-23 on Apple TV). The
+gateway serves the init segment with identity edit lists and adds each track's `empty edit − first media time`
+(plus a common non-negative base) to every fragment's `tfdt`, in place (sizes unchanged, Range still fine).
+`tests/test_dvb_avsync.py` checks a flash + beep test stream for joins in both directions and mid-GOP
+(within 60 ms, edit lists ignored).
+
 ## Thumbnails (approved by the user on 2026-10-23; see `docs/legal-notes.md`)
 One still per recording so the viewer sees what a programme is ("it does not have to be current, just show what is
 on"). Implemented in `src/cztvhub/dvb/thumbs.py`.

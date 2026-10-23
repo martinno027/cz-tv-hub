@@ -137,6 +137,7 @@ class HlsSession:
         self.process: Any = None
         self.error: Exception | None = None
         self.vod: bool | None = None  # decided at the first playlist response of a recording
+        self.shifts: dict[int, int] | None = None  # per-track tfdt shifts for A/V sync (fmp4.py)
         self.source: Source | None = None
         self._chunks: queue.Queue[bytes | None] = queue.Queue(maxsize=QUEUE_CHUNKS)
         self._start_lock = threading.Lock()
