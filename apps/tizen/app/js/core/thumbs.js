@@ -1,15 +1,14 @@
 /*
  * "Anténa" thumbnails in the guide detail (spec/apps.md "Anténa thumbnails", spec/dvb-gateway.md "Thumbnails",
  * approved 2026-10-23): one still per recording from the gateway, shown only when the gateway and this TV both
- * have them on. Kept in memory only (object URLs of blobs; evicted ones are revoked), never in any storage.
+ * have them on. Kept in memory only (object URLs of blobs; evicted ones are revoked), never in any storage;
+ * fetched around the guide focus by CT.ImageLoader (prefetch.js).
  */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
 
   var Thumbs = {
-    /** Focus has to rest this long on a programme before its thumbnail is asked for. */
-    DELAY_MS: 300,
     MAX_ENTRIES: 20,
     /** A growing recording's still is asked again after this (the gateway refreshes early ones). */
     REFRESH_MS: 60 * 1000,
@@ -67,10 +66,14 @@
     while (this.items.length > this.max) this.revoke(this.items.shift().url);
   };
 
-  ThumbCache.prototype.clear = function () {
+  /** Drops every entry, or only those whose id `match(id)` accepts. */
+  ThumbCache.prototype.clear = function (match) {
     var self = this;
-    this.items.forEach(function (item) { self.revoke(item.url); });
-    this.items = [];
+    this.items = this.items.filter(function (item) {
+      if (match && !match(item.id)) return true;
+      self.revoke(item.url);
+      return false;
+    });
   };
 
   CT.Thumbs = Thumbs;

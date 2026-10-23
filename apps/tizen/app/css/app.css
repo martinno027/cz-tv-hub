@@ -241,10 +241,11 @@ main {
   color: #000;
 }
 
+/* Fixed detail layout (spec/apps.md): constant height, every line in its place, empty lines reserved. */
 #detail {
   display: flex;
-  height: 200px;
-  padding: 12px 0;
+  height: 216px;
+  padding: 8px 0;
 }
 
 #detail-image {
@@ -271,33 +272,51 @@ main {
 
 #detail-text {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
 }
 
-#detail-title {
-  font-size: 34px;
-  font-weight: 700;
+#detail-title,
+#detail-episode,
+#detail-meta,
+#detail-status {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-#detail-meta {
+#detail-title {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 42px;
+  height: 42px;
+}
+
+#detail-episode {
   font-size: 24px;
+  line-height: 30px;
+  height: 30px;
+}
+
+#detail-meta,
+#detail-status {
+  font-size: 22px;
+  line-height: 28px;
+  height: 28px;
   color: var(--muted);
-  margin: 8px 0 10px;
 }
 
 #detail-description {
   font-size: 24px;
   line-height: 32px;
-  max-height: 96px;
+  height: 64px; /* two lines, also when shorter */
+  margin-top: 2px;
   overflow: hidden;
 }
 
 #grid {
   position: absolute;
-  top: 276px;
+  top: 292px;
   left: 64px;
   right: 64px;
   bottom: 30px;
