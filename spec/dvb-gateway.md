@@ -294,7 +294,13 @@ restarts). "ČT1 HD" is autorecorded: past 30-min slots are `completed` (each pl
 reaches the Mac as `10.0.2.2`; the tvOS simulator as `127.0.0.1`.
 
 ## Sizing (for buying hardware)
-- MUX 21 carries all CT channels; commercial channels are in other multiplexes. One tuner = one multiplex at a time, so
-  recording every channel needs one tuner per multiplex (+1 for live viewing of another multiplex).
-- HEVC HD ≈ 2–4 Mbit/s per channel ≈ 1–1.8 GB/h. 3 days ≈ 70–130 GB per channel → USB SSD/HDD on the Pi
-  (e.g. 2 TB for ~15 channels). `record_channels` lets you limit it.
+- MUX 21 carries all CT channels; commercial channels are in other multiplexes. One tuner = one multiplex with all its
+  channels, so recording needs one tuner per multiplex; recorded channels play "Živě" from the recording, so an extra
+  tuner is only needed to watch a channel that is not recorded, from another multiplex.
+- Measured on a Pi 4 (2 GB), Raspberry Pi OS 64-bit, WinTV-dualHD, 3 channels for 11 min (2026-10-23): per recorded
+  channel ~12 % of one core on average (6–8 % with one audio track, ~22 % with two HE-AAC tracks; the LATM audio is
+  re-encoded, video copied), ~67 MB RAM, 0.9–1.1 GB/h on disk; TVHeadend ~2 % / 80 MB, the gateway ~5 % / 80 MB;
+  load 0.57, 39 °C, not throttled.
+- Extrapolated: a Pi 4 manages roughly 12–16 channels (memory and the two-track channels are the limit); ~27 channels
+  from 4 multiplexes need 4 tuners, a Pi 5 8 GB (or an Intel N100 mini PC) and ~650 GB per day, i.e. 4 TB for 3 days
+  (2 TB ≈ 2.7 days). The Czech guide (`docs/dvb-setup.md`, "Hardware podle počtu nahrávaných kanálů") has the table.

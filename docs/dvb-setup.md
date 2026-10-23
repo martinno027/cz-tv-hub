@@ -13,13 +13,38 @@ a nedají se stáhnout ani exportovat. Jen pro vaši domácnost (viz [legal-note
     nejen DVB-T.
   - Síťový tuner **HDHomeRun** (verze s DVB-T2): připojí se kabelem do routeru, TVHeadend ho najde sám,
     nepotřebuje ovladače. Dražší, ale nejbezproblémovější, a bývá dvoutunerový.
-- **Kolik tunerů**: jeden tuner = jeden multiplex v jednom okamžiku. Všechny programy ČT jsou v jednom
-  multiplexu (MUX 21), komerční programy v jiných. Chcete-li nahrávat programy ze dvou multiplexů současně,
-  potřebujete dva tunery, a ještě jeden navíc, pokud chcete mezitím sledovat třetí multiplex.
-- **Disk**: HD program v HEVC má asi 1–1,8 GB za hodinu, tedy 70–130 GB na program za 3 dny.
-  Pro ~15 programů stačí USB SSD/HDD 2 TB. Méně místa = v nastavení omezte `record_channels`.
+- **Kolik tunerů**: jeden tuner = jeden multiplex v jednom okamžiku, ale **se všemi jeho kanály**. Všechny
+  programy ČT jsou v jednom multiplexu (MUX 21), komerční programy v jiných (Prima, Nova, další). Potřebujete tolik
+  tunerů, z kolika multiplexů chcete nahrávat. Nahrávané kanály se „Živě“ pouštějí ze záznamu, takže na sledování
+  další tuner nepotřebují; navíc jen tehdy, když chcete sledovat i nenahrávaný kanál z jiného multiplexu.
+- **Disk**: změřeno 0,9–1,1 GB za hodinu na kanál (HD v HEVC, všechny zvukové stopy), tedy ~25 GB na kanál za den.
+  Kolik dní zpětně se vejde, záleží na disku a počtu kanálů (tabulka níže); když místo dojde, brána maže
+  nejstarší záznam rovnoměrně ze všech kanálů.
 - Kodéry/CI moduly a karty pro placené programy nejsou potřeba a nepoužívají se: šifrované multiplexy se
   nikdy nedešifrují.
+
+### Hardware podle počtu nahrávaných kanálů
+
+Naměřeno na Raspberry Pi 4 (2 GB) s Raspberry Pi OS 64-bit a tunerem Hauppauge WinTV-dualHD, 2026-10-23. Jeden
+nahrávaný kanál stojí:
+- **procesor**: průměrně ~12 % jednoho jádra Pi 4 (kanál s jednou zvukovou stopou 6–8 %, kanál se dvěma stopami
+  HE-AAC ~22 %). Zvuk DVB-T2 (HE-AAC v LATM) se musí pro přehrávače převést, video se jen kopíruje;
+- **paměť**: ~67 MB;
+- **disk**: ~1 GB za hodinu.
+
+K tomu TVHeadend (~2 % CPU, ~80 MB) a služba cz-tv-hub (~5 % CPU, ~80 MB). Raspberry má zůstat chladné
+(`vcgencmd get_throttled` = `0x0`) a zátěž (`uptime`) pod počtem jader.
+
+| Kanálů | Tunery | Počítač | Disk pro 3 dny zpětně |
+|---|---|---|---|
+| 1–3 | 1–2 (podle multiplexů) | Raspberry Pi 4, 2 GB | 120 GB ≈ 1,3 dne (3 kanály), 250 GB ≈ 3 dny |
+| 4–12 | 2 (dva multiplexy) | Raspberry Pi 4, 4 GB (2 GB na hraně) | 0,3–1 TB (~75 GB na kanál) |
+| 12–16 | 2–3 | Raspberry Pi 4 na hraně výkonu → raději Pi 5 | 1–2 TB |
+| ~27 (4 multiplexy) | 4 (např. 2× dvojitý USB tuner nebo síťový HDHomeRun se 4 tunery) | Raspberry Pi 5, 8 GB, s aktivním chladičem a zdrojem 27 W, nebo mini PC (např. Intel N100, 16 GB) | 2 TB ≈ 2,7 dne, **4 TB** pro 3 dny |
+
+Odhady pro větší počty kanálů jsou přepočtené z měření tří kanálů; před nákupem je dobré přidávat kanály postupně a
+sledovat zátěž. Více USB tunerů a disk připojte přes **USB hub s vlastním napájením**. Na disk stačí i klasický HDD
+(zápis 27 kanálů je ~7,5 MB/s). Počet nahrávaných kanálů není omezený; volitelný strop je `max_recordings` v `[dvb]`.
 
 ## 2. Instalace
 
