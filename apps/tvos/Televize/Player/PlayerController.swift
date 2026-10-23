@@ -26,6 +26,8 @@ final class PlayerController {
     private var statusObservation: NSKeyValueObservation?
     private var statusHandled = false
     private var failureObserver: NSObjectProtocol?
+    /// Playback diagnostics (time jumps, stalls, access/error log entries), visible in the Xcode console.
+    private var diagnosticObservers: [NSObjectProtocol] = []
     private var timeObserver: Any?
     private var started = false
 
@@ -78,7 +80,9 @@ final class PlayerController {
         #if DEBUG
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 1), queue: .main) { [player] time in
             let date = player.currentItem?.currentDate().map { "\($0)" } ?? "-"
-            playerLog.info("tick rate=\(player.rate) time=\(time.seconds, format: .fixed(precision: 1)) date=\(date, privacy: .public)")
+            let access = player.currentItem?.accessLog()?.events.last
+            let ahead = player.currentItem?.loadedTimeRanges.last.map { CMTimeRangeGetEnd($0.timeRangeValue).seconds - time.seconds } ?? -1
+            playerLog.info("tick rate=\(player.rate) time=\(time.seconds, format: .fixed(precision: 1)) date=\(date, privacy: .public) dropped=\(access?.numberOfDroppedVideoFrames ?? -1) stalls=\(access?.numberOfStalls ?? -1) ahead=\(ahead, format: .fixed(precision: 1))")
         }
         #endif
     }
@@ -94,6 +98,8 @@ final class PlayerController {
         statusObservation = nil
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         failureObserver = nil
+        diagnosticObservers.forEach(NotificationCenter.default.removeObserver)
+        diagnosticObservers = []
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
         adBreakTask?.cancel()
@@ -260,6 +266,29 @@ final class PlayerController {
             let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
             MainActor.assumeIsolated { self?.handleFailure(error) }
         }
+        observeDiagnostics(item)
+    }
+
+    /// What the player does when the picture glitches: jumps in time, stalls, dropped frames, load errors.
+    private func observeDiagnostics(_ item: AVPlayerItem) {
+        diagnosticObservers.forEach(NotificationCenter.default.removeObserver)
+        let center = NotificationCenter.default
+        diagnosticObservers = [
+            center.addObserver(forName: AVPlayerItem.timeJumpedNotification, object: item, queue: .main) { _ in
+                playerLog.info("diag time jumped to \(item.currentTime().seconds, format: .fixed(precision: 2))")
+            },
+            center.addObserver(forName: AVPlayerItem.playbackStalledNotification, object: item, queue: .main) { _ in
+                playerLog.error("diag playback stalled at \(item.currentTime().seconds, format: .fixed(precision: 2))")
+            },
+            center.addObserver(forName: AVPlayerItem.newAccessLogEntryNotification, object: item, queue: .main) { _ in
+                guard let event = item.accessLog()?.events.last else { return }
+                playerLog.info("diag access: stalls=\(event.numberOfStalls) dropped=\(event.numberOfDroppedVideoFrames) segments=\(event.numberOfMediaRequests) observed=\(Int(event.observedBitrate / 1000)) kbit/s buffered-ahead=\(item.loadedTimeRanges.last.map { CMTimeRangeGetEnd($0.timeRangeValue).seconds - item.currentTime().seconds } ?? -1, format: .fixed(precision: 1)) s")
+            },
+            center.addObserver(forName: AVPlayerItem.newErrorLogEntryNotification, object: item, queue: .main) { _ in
+                guard let event = item.errorLog()?.events.last else { return }
+                playerLog.error("diag error: \(event.errorStatusCode) \(event.errorDomain, privacy: .public) \(event.errorComment ?? "", privacy: .public) \(event.uri ?? "", privacy: .public)")
+            },
+        ]
     }
 
     private func applyStartPosition(_ item: AVPlayerItem, source: PlaybackSource, resume: Resume?) async {
