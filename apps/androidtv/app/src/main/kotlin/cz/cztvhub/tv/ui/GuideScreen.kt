@@ -100,16 +100,17 @@ private val DETAIL_HEIGHT = 120.dp
 private const val DESCRIPTION_LINES = 2
 
 /**
- * Focus links of the day strip, the detail panel's "Otevřít v iVysílání" button and the grid (spec/apps.md): up from
- * the grid's first row lands on the highlighted chip, never on the button first; the button is reached from the
- * strip (down) and leads down back to the grid.
+ * Focus links of the day strip, the detail panel's "Otevřít v iVysílání" button and the grid (spec/apps.md). The
+ * vertical order is grid ↔ day strip ↔ button: up from the grid's first row lands on the highlighted chip, up from
+ * the strip on the button (when offered), down from the button on the strip, down from the strip in the grid (one
+ * press, although the button sits between them on screen).
  */
 private class AppButtonLink {
     val button = FocusRequester()
     /** The day strip's highlighted chip. */
     val chip = FocusRequester()
     var shown = false
-    /** Cell to return to when leaving the button downwards. */
+    /** The grid's focused cell, where down from the strip returns. */
     var lastCell: FocusRequester = FocusRequester.Default
 }
 
@@ -348,8 +349,11 @@ private fun DayPicker(today: LocalDate, selection: GuideSelection, appButton: Ap
             Surface(
                 onClick = { onSelect(day) },
                 modifier = (if (isSelected) Modifier.focusRequester(selectedRequester) else Modifier)
-                    // Down from the strip: the detail panel's button when it is offered, else the grid.
-                    .focusProperties { down = if (appButton.shown) appButton.button else FocusRequester.Default },
+                    // Up from the strip: the detail panel's button when it is offered; down: the grid, past the button.
+                    .focusProperties {
+                        up = if (appButton.shown) appButton.button else FocusRequester.Default
+                        down = appButton.lastCell
+                    },
                 shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(18.dp)),
                 scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
                 colors = ClickableSurfaceDefaults.colors(
@@ -459,7 +463,7 @@ private fun DetailPanel(
                 .focusRequester(appButton.button)
                 .focusProperties {
                     canFocus = appButton.shown
-                    down = appButton.lastCell
+                    down = appButton.chip
                 },
         ) { Text(stringResource(R.string.open_ivysilani)) }
     }
@@ -610,6 +614,8 @@ private fun EpgGrid(
     }
 
     LaunchedEffect(plan) {
+        // A rebuilt grid has new cells: down from the day strip lands on its anchor until a cell is focused.
+        if (nav.last == null) appButton.lastCell = anchorRequester
         // "Image prefetch": the window around where the grid opens, before focus enters it.
         if (anchorRow < cellRows.size) focusAt(anchorRow, opensAt)
         snapshotFlow { scroll.maxValue }.first { it in 1 until Int.MAX_VALUE }
