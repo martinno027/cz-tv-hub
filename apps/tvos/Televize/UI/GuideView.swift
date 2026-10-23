@@ -81,6 +81,13 @@ private struct GuideLayout {
         return (row, from, from + Self.width(segments[row][index]))
     }
 
+    /// Start of a focusable cell: the programme's own start (also when clipped at the grid's edge), else the gap's.
+    func startTime(of id: String) -> Date? {
+        if let entry = entries[id] { return entry.start }
+        guard let span = span(of: id) else { return nil }
+        return timeline.start.addingTimeInterval(span.from / timeline.pointsPerSecond)
+    }
+
     static func width(_ segment: GuideTimeline.Segment<GuideEntry>) -> Double {
         switch segment {
         case .gap(let width): return width
@@ -152,9 +159,12 @@ struct GuideView: View {
         let rowID: String?
     }
 
+    /// Bumped by RootView on every open of the guide (tab chosen, app back in front): the guide shows now again.
+    let opens: Int
+
     @Environment(AppModel.self) private var model
-    @State private var today = BroadcastDay(containing: Date())
-    @State private var day = BroadcastDay(containing: Date())
+    /// The grid's broadcast day (05:00–05:00); "today" for labels is the calendar day of the minute's `now`.
+    @State private var day = GuideDays.openDay(now: Date())
     @State private var schedule: ScheduleStore.Schedule = [:]
     @State private var antennaChannels: [DVBChannel] = []
     @State private var antennaEPG: AntennaStore.EPG = [:]
@@ -162,6 +172,10 @@ struct GuideView: View {
     @State private var layout = GuideLayout()
     @State private var window = Window()
     @State private var focusedEntry: GuideEntry?
+    /// Start of the focused cell (programme or gap): the day strip highlights its calendar day (`chipDay`).
+    @State private var focusTime: Date?
+    /// Where the images around the focus were last queued (spec/apps.md "Image prefetch").
+    @State private var prefetchPoint: ImagePrefetch.Point?
     /// "Live column first": up/down follows what is airing until the first left/right (today only).
     @State private var liveColumn = false
     /// The cell focus is being moved to by the live column (its focus change is not a user move).
@@ -170,8 +184,17 @@ struct GuideView: View {
     @State private var scrollRequest: ScrollRequest?
     @State private var choice: Choice?
     @FocusState private var focusedID: String?
+    @FocusState private var focusedChip: BroadcastDay?
     /// "Across days": where focus goes once the next/previous day is loaded.
     @State private var dayAnchor: DayAnchor?
+    /// A chip was selected (or the guide reopened): where the grid opens once its day is loaded.
+    @State private var selection: Selection?
+
+    private struct Selection {
+        let anchor: GuideDays.Anchor
+        /// A chip was selected: focus moves to the anchor cell (on a reopen it stays where it is).
+        let moveFocus: Bool
+    }
 
     private struct DayAnchor {
         let rowID: String
@@ -194,25 +217,30 @@ struct GuideView: View {
     }
 
     var body: some View {
+        // `today` follows the clock: recomputed with `now` every minute (after midnight "Dnes" moves on).
         TimelineView(.periodic(from: .now, by: 60)) { context in
+            let today = BroadcastDay(containing: context.date)
             VStack(alignment: .leading, spacing: 20) {
                 EntryDetail(entry: focusedEntry, today: today, now: context.date, ctSchedule: schedule) {
                     OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
                 }
-                    .frame(height: 203)
-                dayStrip
-                grid(now: context.date)
+                    .frame(height: EntryDetail.height)
+                dayStrip(today: today)
+                grid(now: context.date, today: today)
             }
         }
         .task(id: LoadKey(day: day, gateway: model.gateway)) { await load() }
         .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
+        .onChange(of: opens) { _, _ in reopen() }
         .onChange(of: focusedID) { old, id in
             guard let id else { return }
             if crossDay(from: old, to: id) { return }
             followLiveColumn(from: old, to: id)
             let current = focusedID ?? id
             focusedEntry = layout.entries[current]
+            focusTime = layout.startTime(of: current)
             keepWindow(around: current)
+            prefetchImages(around: current)
         }
         .confirmationDialog(
             choice?.entry.title ?? "",
@@ -309,7 +337,7 @@ struct GuideView: View {
 
     // MARK: grid
 
-    private func grid(now: Date) -> some View {
+    private func grid(now: Date, today: BroadcastDay) -> some View {
         Group {
             if let loadError {
                 VStack(spacing: 24) {
@@ -327,34 +355,41 @@ struct GuideView: View {
             } else {
                 // Equatable: a focus move re-renders GuideView (detail), not the thousands of cells.
                 GuideGrid(layout: layout, window: window, now: now, focusedID: $focusedID, defaultFocusID: defaultFocusID,
-                          scrollRequest: scrollRequest, previousDay: edgeLabel(next: false),
-                          nextDay: edgeLabel(next: true), select: select)
+                          scrollRequest: scrollRequest, previousDay: edgeLabel(next: false, today: today),
+                          nextDay: edgeLabel(next: true, today: today), select: select)
                     .equatable()
             }
         }
     }
 
-    /// Day picker: 7 days back, 2 ahead. Moving up from the grid lands here.
-    private var dayStrip: some View {
-        HStack(spacing: 14) {
-            ForEach(GuideRange.days(today: today), id: \.self) { option in
-                Button(option.label(today: today)) { day = option }
-                    .buttonStyle(DayChipStyle(isSelected: option == day))
+    /// Day picker: 7 days back, 2 ahead. It highlights the calendar day of the focused programme's start
+    /// (`chipDay`: 22:15 "Dnes", the next cell at 0:10 "Zítra" in the same grid; the grid's day when that day has
+    /// no chip); moving up from the grid lands on that chip.
+    private func dayStrip(today: BroadcastDay) -> some View {
+        let days = GuideRange.days(today: today)
+        let highlighted = GuideDays.highlightedChip(focusStart: focusTime ?? Self.bounds(of: day).start, gridDay: day,
+                                                    chips: days)
+        return HStack(spacing: 14) {
+            ForEach(days, id: \.self) { option in
+                Button(option.label(today: today)) { selectDay(option) }
+                    .buttonStyle(DayChipStyle(isSelected: option == highlighted))
+                    .focused($focusedChip, equals: option)
             }
         }
-        // Full width, so moving up from any column of the grid lands in the strip.
+        // Full width, so moving up from any column of the grid lands in the strip, on the highlighted chip
+        // (not whichever chip is above the focused cell).
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
+        .defaultFocus($focusedChip, highlighted, priority: .userInitiated)
     }
 
     // MARK: behaviour
 
     private func load() async {
         let now = Date()
-        today = BroadcastDay(containing: now)
         loadError = nil
         await loadAntenna()
-        await model.thumbnails.refreshStatus()  // at most every 5 min
+        await model.images.refreshStatus()  // at most every 5 min
         do {
             let loaded = try await model.schedules.schedule(for: day)
             schedule = loaded
@@ -365,6 +400,7 @@ struct GuideView: View {
         } catch {
             schedule = [:]
             dayAnchor = nil
+            selection = nil
             rebuildLayout()
             loadError = AppModel.message(for: error)
         }
@@ -381,18 +417,52 @@ struct GuideView: View {
         antennaEPG = (try? await antenna.epg(for: day)) ?? [:]
     }
 
-    /// Scroll to now (today) or to the evening (other days) and pick the cell focus lands on.
+    /// Every open of the guide shows now: the grid containing now (`openDay`, also between 00:00 and 05:00),
+    /// focus on the programme airing now in the first row.
+    private func reopen() {
+        model.images.guideOpened()
+        dayAnchor = nil
+        selection = Selection(anchor: .now, moveFocus: false)
+        let target = GuideDays.openDay(now: Date())
+        if target != day {
+            day = target  // loads it, then positions
+        } else if layout.version > 0 {
+            positionAtAnchor(now: Date())
+        }
+    }
+
+    /// A chip: "Dnes" = the grid containing now at now (as on open), any other day = that day at 20:00.
+    private func selectDay(_ chip: BroadcastDay) {
+        let now = Date()
+        let selected = GuideDays.select(chip: chip, now: now)
+        dayAnchor = nil
+        selection = Selection(anchor: selected.anchor, moveFocus: true)
+        if selected.day != day {
+            liveColumn = false
+            day = selected.day
+        } else if layout.version > 0 {
+            positionAtAnchor(now: now)
+        }
+    }
+
+    /// Scroll to now (the grid containing now) or to the evening (other days), or where a chip selection or
+    /// a day crossing asks for, and pick the cell focus lands on.
     private func positionAtAnchor(now: Date) {
         let crossing = dayAnchor
         dayAnchor = nil
+        let selected = selection
+        selection = nil
         let anchor: Date
         if let crossing {
             let bounds = Self.bounds(of: day)
             anchor = crossing.atEnd ? bounds.end.addingTimeInterval(-60) : bounds.start
-        } else if day == today {
-            anchor = now
         } else {
-            anchor = Calendar.prague.date(byAdding: .hour, value: 20, to: day.startDate()) ?? day.startDate()
+            let opening = day == GuideDays.openDay(now: now) ? GuideDays.Anchor.now : .time(GuideDays.evening(of: day))
+            switch selected?.anchor ?? opening {
+            case .now where day == GuideDays.openDay(now: now): anchor = now
+            case .now: anchor = Self.bounds(of: day).start  // the day moved on meanwhile
+            case .time(let time): anchor = time
+            }
         }
         let rows = layout.rows
         var anchorRow = rows.first
@@ -413,35 +483,34 @@ struct GuideView: View {
         }
         defaultFocusID = targetID
         focusedEntry = targetID.flatMap { layout.entries[$0] }
+        focusTime = targetID.flatMap { layout.startTime(of: $0) } ?? anchor
         if let id = targetID, let span = layout.span(of: id) {
             window = Window.around(row: span.row, from: span.from, to: span.to, rowCount: rows.count)
         } else {
             let x = layout.timeline.x(for: anchor)
             window = Window.around(row: anchorIndex, from: x, to: x, rowCount: rows.count)
         }
-        liveColumn = day == today && crossing == nil
+        // "Live column first" on the grid that contains now (after midnight the previous broadcast day).
+        liveColumn = crossing == nil && anchor == now
+        prefetchPoint = nil
+        if let targetID { prefetchImages(around: targetID) }
         let tick = layout.timeline.tickIndex(for: anchor.addingTimeInterval(crossing?.atEnd == true ? -90 * 60 : -30 * 60))
         // Let the new rows lay out before scrolling.
         let rowID = anchorRow?.id == rows.first?.id ? nil : anchorRow?.id
         Task { @MainActor in
             scrollRequest = ScrollRequest(tick: tick, rowID: rowID)
-            // Focus is still in the grid (on a cell of the old day): move it to the anchor cell.
-            guard crossing != nil, let targetID else { return }
+            // Focus is still in the grid (on a cell of the old day) or on the selected chip: move it to the anchor cell.
+            guard crossing != nil || selected?.moveFocus == true, let targetID else { return }
             try? await Task.sleep(for: .milliseconds(150))
             focusedID = targetID
         }
     }
 
     /// The broadcast day shown by the grid: 05:00 to 05:00 Prague time (local 05:00, also on DST days).
-    static func bounds(of day: BroadcastDay) -> (start: Date, end: Date) {
-        func five(_ day: BroadcastDay) -> Date {
-            Calendar.prague.date(bySettingHour: 5, minute: 0, second: 0, of: day.startDate()) ?? day.startDate()
-        }
-        return (five(day), five(day.adding(days: 1)))
-    }
+    static func bounds(of day: BroadcastDay) -> (start: Date, end: Date) { GuideDays.bounds(of: day) }
 
     /// Label of the "Across days" cell, nil at the ends of the guide's range.
-    private func edgeLabel(next: Bool) -> String? {
+    private func edgeLabel(next: Bool, today: BroadcastDay) -> String? {
         let target = day.adding(days: next ? 1 : -1)
         guard GuideRange.days(today: today).contains(target) else { return nil }
         let label = target.label(today: today)
@@ -479,14 +548,14 @@ struct GuideView: View {
             redirectID = nil
             return
         }
-        guard day == today, let row = layout.rowOf[id] else { return }
+        let now = Date()
+        guard day == GuideDays.openDay(now: now), let row = layout.rowOf[id] else { return }
         if let old, layout.rowOf[old] == row {
             liveColumn = false  // a move within the row: normal grid navigation from now on
             return
         }
         // Up/down follows the airing programmes in the opening mode, and always from an airing programme
         // (spec/apps.md "Live column first"); from any other programme the engine keeps the time.
-        let now = Date()
         let fromAiring = old.flatMap { layout.entries[$0] }?.isAiring(at: now) ?? false
         guard liveColumn || fromAiring else { return }
         if let target = layout.cellID(row: row, at: now), target != id {
@@ -501,6 +570,34 @@ struct GuideView: View {
         let count = layout.rows.count
         if !window.covers(row: span.row, from: span.from, to: span.to, rowCount: count) {
             window = Window.around(row: span.row, from: span.from, to: span.to, rowCount: count)
+        }
+    }
+
+    /// Queues the images around the focused cell once it has moved more than 1 h or 3 rows from the last point
+    /// (spec/apps.md "Image prefetch"); the focused image itself is asked for by the detail, ahead of the queue.
+    private func prefetchImages(around id: String) {
+        guard let span = layout.span(of: id) else { return }
+        let time = layout.timeline.start.addingTimeInterval((span.from + span.to) / 2 / layout.timeline.pointsPerSecond)
+        let point = ImagePrefetch.Point(row: span.row, time: time)
+        guard ImagePrefetch.needsRefresh(from: prefetchPoint, to: point) else { return }
+        prefetchPoint = point
+        let images = model.images
+        let sources = ImagePrefetch.window(rows: layout.rows.map(\.entries), around: point)
+            .compactMap { Self.imageSource($0.item, images: images, ctSchedule: schedule) }
+        images.prefetch(sources)
+    }
+
+    /// The detail image of an entry: the ČT image; for Anténa the matched ČT image, else the gateway thumbnail.
+    static func imageSource(_ entry: GuideEntry, images: GuideImageStore,
+                            ctSchedule: ScheduleStore.Schedule) -> GuideImageStore.Source? {
+        switch entry {
+        case .ct(let programme):
+            return programme.imageURL.map { .ct($0) }
+        case .antenna(let event, let channel):
+            if let url = AntennaCTMatch.programme(for: event, channel: channel, schedule: ctSchedule)?.imageURL {
+                return .ct(url)
+            }
+            return images.thumbnail(for: event)
         }
     }
 
@@ -831,7 +928,12 @@ private struct GuideCell: View {
 
 // MARK: - detail
 
+/// Fixed layout (spec/apps.md): constant height, every line in a constant place whatever the programme, so nothing
+/// moves while the viewer clicks through cells. Empty episode / status lines and short descriptions keep their space.
 private struct EntryDetail: View {
+    static let height: CGFloat = 203
+    static let imageSize = CGSize(width: 360, height: 203)
+
     let entry: GuideEntry?
     let today: BroadcastDay
     let now: Date
@@ -839,42 +941,48 @@ private struct EntryDetail: View {
     /// Anténa ČT channels"); matched only for the focused entry.
     let ctSchedule: ScheduleStore.Schedule
     let openOfficialApp: () -> Void
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         if let entry {
             let state = entry.state(at: now)
             HStack(alignment: .top, spacing: 36) {
                 artwork(entry)
-                    .frame(width: 360, height: 203)
+                    .frame(width: Self.imageSize.width, height: Self.imageSize.height)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(entry.title)
                         .font(.title3.weight(.bold))
                         .lineLimit(1)
-                    if !episode(entry).isEmpty {
-                        Text(episode(entry))
-                            .font(.subheadline)
-                            .lineLimit(1)
-                    }
-                    Text(meta(entry))
+                    line(episode(entry))
+                        .font(.subheadline)
+                    line(meta(entry))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     Label(statusText(entry, state: state), systemImage: state.symbol)
                         .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
                         .foregroundStyle(state == .airing ? .red : (state == .buffer || state == .archive ? .green : .secondary))
                     Text(description(entry))
                         .font(.system(size: 25))
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(2, reservesSpace: true)
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
                 Spacer(minLength: 0)
-                // For CT programmes we cannot play (DRM-only ones show CT's slate in our stream).
-                if case .ct(let programme) = entry, programme.start <= now {
-                    Button(OfficialApp.buttonTitle, action: openOfficialApp)
-                        .font(.system(size: 24, weight: .semibold))
-                }
+                // For CT programmes we cannot play (DRM-only ones show CT's slate in our stream). Its place is
+                // kept when there is none, so the text beside it never changes width.
+                let showsButton = if case .ct(let programme) = entry { programme.start <= now } else { false }
+                Button(OfficialApp.buttonTitle, action: openOfficialApp)
+                    .font(.system(size: 24, weight: .semibold))
+                    .opacity(showsButton ? 1 : 0)
+                    .disabled(!showsButton)
+                    .accessibilityHidden(!showsButton)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // Vertical order grid ↔ day strip ↔ this button: up from any chip reaches it, down from it the strip.
+            .focusSection()
         } else {
             Text("Žádný pořad")
                 .font(.title3)
@@ -883,29 +991,28 @@ private struct EntryDetail: View {
         }
     }
 
+    /// One line that keeps its height when empty.
+    private func line(_ text: String) -> some View {
+        Text(text.isEmpty ? " " : text).lineLimit(1)
+    }
+
     @ViewBuilder
     private func artwork(_ entry: GuideEntry) -> some View {
+        let source = GuideView.imageSource(entry, images: model.images, ctSchedule: ctSchedule)
         switch entry {
-        case .ct(let programme):
-            AsyncImage(url: programme.imageURL) { phase in
-                if let image = phase.image {
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    Color(white: 0.15)
-                }
-            }
-        case .antenna(let event, let channel):
+        case .ct:
+            GuideArtwork(source: source) { Color(white: 0.15) }
+        case .antenna(_, let channel):
             // ČT image (official, matched to the CT schedule) → gateway thumbnail → placeholder
-            if let url = AntennaCTMatch.programme(for: event, channel: channel, schedule: ctSchedule)?.imageURL {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } else {
-                        AntennaArtwork(event: event, channel: channel)
+            GuideArtwork(source: source) {
+                ZStack {
+                    Color(white: 0.15)
+                    VStack(spacing: 8) {
+                        Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 44))
+                        Text(channel.name).font(.headline)
                     }
+                    .foregroundStyle(.secondary)
                 }
-            } else {
-                AntennaArtwork(event: event, channel: channel)
             }
         }
     }
@@ -953,39 +1060,23 @@ private struct EntryDetail: View {
     }
 }
 
-/// Anténa detail image: the gateway thumbnail of the recording (spec/apps.md "Anténa thumbnails"), loaded
-/// once the focus has rested 0.3 s on the programme; the antenna placeholder otherwise.
-private struct AntennaArtwork: View {
-    let event: DVBEvent
-    let channel: DVBChannel
+/// The detail image from the guide's in-memory image store (spec/apps.md "Image prefetch"): usually prefetched,
+/// else asked for at once, ahead of the queue; the placeholder until it is there.
+private struct GuideArtwork<Placeholder: View>: View {
+    let source: GuideImageStore.Source?
+    @ViewBuilder let placeholder: Placeholder
     @Environment(AppModel.self) private var model
-    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
-            Color(white: 0.15)
-            if let image {
+            if let source, let image = model.images.image(source) {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 44))
-                    Text(channel.name).font(.headline)
-                }
-                .foregroundStyle(.secondary)
+                placeholder
             }
         }
-        .task(id: LoadKey(event: event, allowed: model.thumbnails.recordingID(for: event) != nil)) {
-            image = nil
-            guard model.thumbnails.recordingID(for: event) != nil else { return }
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            let loaded = await model.thumbnails.image(for: event)
-            if !Task.isCancelled { image = loaded }
+        .onChange(of: source, initial: true) { _, source in
+            if let source { model.images.want(source) }
         }
-    }
-
-    private struct LoadKey: Equatable {
-        let event: DVBEvent
-        let allowed: Bool
     }
 }

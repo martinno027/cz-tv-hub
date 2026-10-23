@@ -138,6 +138,22 @@ final class ScheduleStoreTests: XCTestCase {
         XCTAssertEqual(graphQLCount(transport), 3, "today is refetched after an hour")
     }
 
+    func testAfterMidnightTheShownBroadcastDayIsStillRefreshed() async throws {
+        let transport = FakeTransport()
+        try transport.on("graphql", fixture: "schedule_ct1_ct24")
+        let clock = MutableClock(utc("2026-10-17T22:20:00Z"))  // 0:20 on the 18th: the guide shows the 17th
+        let store = ScheduleStore(client: CTClient(transport: transport), clock: { clock.now })
+        let shown = BroadcastDay(year: 2026, month: 10, day: 17)
+        _ = try await store.schedule(for: shown)
+        let once = graphQLCount(transport)
+        clock.now = utc("2026-10-17T23:20:01Z")
+        _ = try await store.schedule(for: shown)
+        XCTAssertEqual(graphQLCount(transport), 2 * once, "refetched after an hour like today")
+        clock.now = utc("2026-10-18T05:30:00Z")  // 07:30: a past day now
+        _ = try await store.schedule(for: shown)
+        XCTAssertEqual(graphQLCount(transport), 2 * once, "past days stay cached")
+    }
+
     func testFailingDayDoesNotBreakOthersAndIsRetried() async throws {
         let transport = FakeTransport()
         try transport.on("graphql", fixture: "schedule_ct1_ct24")
