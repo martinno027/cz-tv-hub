@@ -126,9 +126,12 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   `dvb-setup` has run (recording stays a deliberate step). EPG returns once TVHeadend rescans the multiplex.
 - `dvb-setup` keeps rules of disabled channels, disabled, instead of deleting them.
 - `GET /admin` page, `GET /admin/api/channels` → `{"channels": [{"id", "number", "name", "offered", "received",
-  "multiplexes": [names], "recordingRule": null | bool, "recordings": n}], "status": <as /dvb/status>,
-  "recordingSetUp": bool, "retentionDays": n}`; `POST /admin/api/channels/<id>` `{"offered": bool}` →
-  `{"changes": ["…Czech…"]}`. POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
+  "multiplexes": [names], "recordingRule": null | bool, "recordings": n, "now": null | {"title", "subtitle",
+  "genre", "start", "end"}}], "status": <as /dvb/status>, "recordingSetUp": bool, "retentionDays": n}`, sorted by
+  channel number (hidden ones stay in place); `now` = the EPG event airing now (none while not received).
+- `POST /admin/api/channels/<id>` `{"offered": bool}`, or several at once (the page's bulk action, one confirmation)
+  `POST /admin/api/channels` `{"ids": [...] (1..500), "offered": bool}` → `{"changes": ["…Czech…"]}`; unknown ids
+  → `404` before anything changes; multiplex decisions consider all channels of the request together. POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
   (CSRF; the server never answers CORS preflights). Errors: `401`, `403`, `400`, `404` unknown channel, `502`.
 
 ## App behaviour for "Anténa" programmes

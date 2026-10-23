@@ -176,12 +176,12 @@ class DvbGateway:
                 self._channels_at = time.monotonic()
             return self._channels
 
-    def channels_changed(self, hidden: str | None = None) -> None:
-        """After the admin page changed TVHeadend's channels: reload them, end a hidden channel's live stream."""
+    def channels_changed(self, hidden: list[str] | None = None) -> None:
+        """After the admin page changed TVHeadend's channels: reload them, end hidden channels' live streams."""
         with self._channels_lock:
             self._channels_at = float("-inf")
-        if hidden:
-            self.hls.stop_key(f"live:{hidden}")
+        for channel_id in hidden or []:
+            self.hls.stop_key(f"live:{channel_id}")
 
     def status(self) -> Response:
         try:

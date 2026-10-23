@@ -155,6 +155,39 @@ class AdminTest(unittest.TestCase):
         self.hide(CT2)
         self.assertEqual(self.fake.muxes[MUX_CT]["enabled"], 0)
 
+    def bulk(self, ids, offered):
+        resp, data = self.request("POST", "/admin/api/channels", POST, {"ids": ids, "offered": offered})
+        return resp.status, data
+
+    def test_bulk_hide_and_show(self):
+        saves = lambda: [args for path, args in self.opener.calls if path == "idnode/save"]  # noqa: E731
+        status, data = self.bulk([CT1, CT2, PRIMA], False)
+        self.assertEqual(status, 200)
+        self.assertEqual(data["changes"][:2], ["kanály vypnuty: 3", "služby vypnuty: 3"])
+        self.assertIn("multiplex 626MHz vypnut", data["changes"])  # both of its channels went at once
+        self.assertIn("multiplex 690MHz vypnut", data["changes"])
+        self.assertEqual(len(json.loads(saves()[0]["node"])), 3)  # one TVHeadend call for all channels
+        self.assertEqual(self.app_channels(), [NOVA])
+        status, data = self.bulk([CT1, CT2, PRIMA], True)
+        self.assertEqual(data["changes"][:2], ["kanály zapnuty: 3", "služby zapnuty: 3"])
+        self.assertEqual(sorted(self.app_channels()), sorted([CT1, CT2, NOVA, PRIMA]))
+        self.assertEqual({m["enabled"] for m in self.fake.muxes.values()}, {1})
+
+    def test_bulk_validation(self):
+        before = len(self.opener.calls)
+        status, _ = self.bulk([PRIMA, "unknown"], False)
+        self.assertEqual(status, 404)
+        self.assertFalse(any(path == "idnode/save" for path, _ in self.opener.calls[before:]))  # nothing changed
+        for ids in ([], "x", [1], ["../x"], ["a"] * 501):
+            self.assertEqual(self.bulk(ids, False)[0], 400, ids)
+
+    def test_now_playing(self):
+        ct1 = self.row(CT1)
+        self.assertTrue(ct1["now"]["title"])
+        self.assertLess(ct1["now"]["start"], ct1["now"]["end"])
+        self.hide(PRIMA)
+        self.assertIsNone(self.row(PRIMA)["now"])  # multiplex not received: no EPG
+
     def test_hide_cancels_and_deletes_recordings(self):
         scheduled = sorted((e for e in self.fake.entries.values() if e["channel"] == CT1
                             and e["sched_status"] == "scheduled"), key=lambda e: e["start"])
