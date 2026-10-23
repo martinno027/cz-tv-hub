@@ -42,9 +42,11 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    8 below the focused row that overlap ±3 h around the focused time, nearest to the focus first (by rows, then by
    time). The focused programme's image goes ahead of the queue at once. Queued requests that left the window are
    dropped (one already running finishes). At most 4 CT image requests and **2 gateway thumbnail requests** at a time
-   (the gateway runs at most 2 ffmpeg). In-memory LRU in the app (about 300 images), never disk. Anténa thumbnails
+   (the gateway runs at most 2 ffmpeg). In-memory LRU in the app (about 300 images, kept as the downloaded JPEG bytes within a memory budget of at most
+   48 MB; decode only what is on screen), never disk. Anténa thumbnails
    only for `completed`/`recording` entries while thumbnails are on; a `404` is not asked again for the guide's
-   lifetime (`completed`) or for 60 s (`recording`).
+   lifetime (`completed`) or for 60 s (`recording`); a `503` (gateway busy) is not remembered: the item goes back into
+   the queue and is retried after `Retry-After` (5 s) if it is still in the window (the focused one always).
    **ČT images for Anténa ČT channels**: an Anténa channel that broadcasts a ČT programme gets the official ČT image
    (and nothing else) from the CT schedule the app already loads, so no recording is needed. Rules (golden cases
    `spec/fixtures/ct_antenna_match.json`, all three apps):
@@ -61,7 +63,8 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    broadcast day's end, 05:00) opens the next day (if it is in the range) with focus on that row's cell at the new
    day's start; left on the first cell opens the previous day with focus on that row's cell at its end. **The day strip
    highlights the calendar day of the focused programme's start** (`chipDay`; Hercule Poirot at 22:15 → "Dnes", the
-   next cell at 0:10 → "Zítra", inside the same grid), and up from the first row lands on that highlighted chip.
+   next cell at 0:10 → "Zítra", inside the same grid), and up from the first row lands on that highlighted chip (never on the "Otevřít v iVysílání" button first;
+   the button is reached from the strip). Coming back from the player is not a new open: the guide stays where it was.
    **Selecting a chip** (`select`): "Dnes" = the grid containing now with focus on now (as on open); any other day =
    that broadcast day, scrolled to 20:00. The "Live column first" mode ends on a day change. At the range's ends nothing happens. tvOS has no event for a
    left/right press without a target, so its rows end with a focusable "Zítra ›" cell and start with "‹ Včera" /
