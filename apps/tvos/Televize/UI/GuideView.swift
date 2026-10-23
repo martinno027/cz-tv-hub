@@ -363,12 +363,14 @@ struct GuideView: View {
     }
 
     /// Day picker: 7 days back, 2 ahead. It highlights the calendar day of the focused programme's start
-    /// (`chipDay`: 22:15 "Dnes", the next cell at 0:10 "Zítra" in the same grid); moving up from the grid lands
-    /// on that chip.
+    /// (`chipDay`: 22:15 "Dnes", the next cell at 0:10 "Zítra" in the same grid; the grid's day when that day has
+    /// no chip); moving up from the grid lands on that chip.
     private func dayStrip(today: BroadcastDay) -> some View {
-        let highlighted = GuideDays.chipDay(focusTime ?? Self.bounds(of: day).start)
+        let days = GuideRange.days(today: today)
+        let highlighted = GuideDays.highlightedChip(focusStart: focusTime ?? Self.bounds(of: day).start, gridDay: day,
+                                                    chips: days)
         return HStack(spacing: 14) {
-            ForEach(GuideRange.days(today: today), id: \.self) { option in
+            ForEach(days, id: \.self) { option in
                 Button(option.label(today: today)) { selectDay(option) }
                     .buttonStyle(DayChipStyle(isSelected: option == highlighted))
                     .focused($focusedChip, equals: option)

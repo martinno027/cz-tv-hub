@@ -32,6 +32,14 @@ public enum GuideDays {
         BroadcastDay(containing: time, calendar: calendar)
     }
 
+    /// The chip to highlight: `chipDay` of the focused programme's start, or the grid's day when that calendar day
+    /// has no chip (cells after midnight on the range's last day).
+    public static func highlightedChip(focusStart: Date, gridDay: BroadcastDay, chips: [BroadcastDay],
+                                       calendar: Calendar = .prague) -> BroadcastDay {
+        let day = chipDay(focusStart, calendar: calendar)
+        return chips.contains(day) ? day : gridDay
+    }
+
     /// Selecting a chip: "Dnes" opens the grid containing now at now, any other day that day at 20:00.
     public static func select(chip: BroadcastDay, now: Date, calendar: Calendar = .prague) -> (day: BroadcastDay, anchor: Anchor) {
         if chip == BroadcastDay(containing: now, calendar: calendar) {
