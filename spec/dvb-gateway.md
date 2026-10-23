@@ -198,10 +198,18 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   → `404` before anything changes; multiplex decisions consider all channels of the request together.
 - **Rename**: `POST /admin/api/channels/<id>` `{"name": "…"}` or `POST /admin/api/channels` `{"names": {id: name}}`
   (1..64 printable chars, whitespace collapsed) → TVHeadend `name` with `autoname = false` (a rescan keeps it); the
-  apps show it from `/dvb/channels`. Each row carries `shortName`, a TV-style suggestion ("CT 1 PHA HD T2" → "ČT1",
+  apps show it from `/dvb/channels`. Each row carries `originalName`: the name of the channel's first service (what
+  TVHeadend's autoname uses; nothing extra is stored), `null` when it equals `name` or the channel has no service; the
+  page shows it small and dimmed under the name. Each row carries `shortName`, a TV-style suggestion ("CT 1 PHA HD T2" → "ČT1",
   "Nova HD" → "Nova"; the page's "Zkrátit názvy" applies it with one confirmation). Old names still listed in
   `record_channels` / `[ads] channels` are reported in `changes` (those settings match by name). POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
   (CSRF; the server never answers CORS preflights). Errors: `401`, `403`, `400`, `404` unknown channel, `502`.
+- **Filters** above the list, client-side only (no request, nothing stored on the server; kept in the URL hash
+  `#q=…&offered=on|off&rec=on|off&mux=<name>`), combined with AND: text in `name` or `originalName` (case- and
+  diacritics-insensitive, every word must match: "ct" finds "ČT1"), shown/hidden (`offered`), recorded
+  (`record` or `recordingRule == true`) / not, one multiplex (from those in the rows). The page shows "N z M kanálů".
+  Select-all, the bulk buttons and "Zkrátit názvy" act only on visible channels; a filter change drops the selection
+  of channels it hides.
 
 ## EPG history (`src/cztvhub/dvb/epgstore.py`)
 The gateway remembers the EPG events it sees (every 30 min the next 3 days, plus every `/dvb/epg` answer) in

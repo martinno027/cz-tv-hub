@@ -233,9 +233,15 @@ Vypnutý kanál:
 Opětovné zapnutí vše vrátí; nahrává se od dalšího pořadu a program se doplní, až tuner multiplex znovu naladí.
 Více kanálů najednou vypnete nebo zapnete zaškrtnutím a tlačítkem nahoře (jedno potvrzení).
 
+Nad seznamem jsou **filtry**: hledání v názvu (najde i původní název, nezáleží na velikosti písmen ani diakritice –
+„ct“ najde „ČT1“), jen zapnuté / vypnuté, jen nahrávané / nenahrávané a multiplex. Filtry se kombinují, stránka ukazuje
+„N z M kanálů“ a filtr zůstane i po obnovení stránky (je v adrese). Hromadné akce i „Zkrátit názvy“ se týkají jen
+zobrazených kanálů.
+
 **Názvy kanálů**: TVHeadend přebírá názvy z vysílání („CT 1 PHA HD T2“). Tlačítko **Zkrátit názvy** navrhne
 televizní názvy („ČT1“, „ČT24“, „Nova“) a po potvrzení je uloží; jednotlivě je přejmenujete odkazem *Přejmenovat*.
-Názvy se uloží v TVHeadendu a aplikace je ukážou po obnovení. Máte-li v konfiguraci `record_channels` nebo
+Názvy se uloží v TVHeadendu a aplikace je ukážou po obnovení. U přejmenovaného kanálu je pod názvem drobně
+vidět původní název z vysílání. Máte-li v konfiguraci `record_channels` nebo
 `[ads] channels` vypsané názvy kanálů, upravte je na nové.
 Stejně se chová kanál vypnutý ručně v TVHeadendu (*Enabled*).
 
