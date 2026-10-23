@@ -188,6 +188,41 @@ class AdminTest(unittest.TestCase):
         self.hide(PRIMA)
         self.assertIsNone(self.row(PRIMA)["now"])  # multiplex not received: no EPG
 
+    def test_short_names(self):
+        from cztvhub.dvb.admin import short_name
+        cases = {"CT 1 PHA HD T2": "ČT1", "CT 24 HD T2": "ČT24", "CT 1 JM HD T2": "ČT1", "CT sport HD T2": "ČT sport",
+                 "CT :D/art HD T2": "ČT :D/art", "Nova HD": "Nova", "CS Mystery": "CS Mystery", "DB Test 1": "DB Test 1",
+                 "ČT2 HD": "ČT2", "HD": "HD"}
+        self.assertEqual({n: short_name(n) for n in cases}, cases)
+        self.assertEqual(self.row(CT1)["shortName"], "ČT1")
+
+    def rename(self, payload, path="/admin/api/channels"):
+        resp, data = self.request("POST", path, POST, payload)
+        return resp.status, data
+
+    def test_rename(self):
+        status, data = self.rename({"names": {CT1: " ČT1 ", NOVA: "Nova"}})
+        self.assertEqual((status, data["changes"]), (200, ["ČT1 HD → ČT1", "Nova HD → Nova"]))
+        channel = next(c for c in self.fake.channels if c["uuid"] == CT1)
+        self.assertEqual((channel["name"], channel["autoname"]), ("ČT1", False))
+        app = json.loads(self.gateway.handle("/dvb/channels", {}, {"Authorization": "Bearer " + KEY}).body)
+        self.assertEqual([c["name"] for c in app["channels"]][:3], ["ČT1", "ČT2 HD", "Nova"])
+        self.assertEqual(self.rename({"name": "Prima"}, f"/admin/api/channels/{PRIMA}")[1]["changes"],
+                         ["Prima HD → Prima"])
+        self.assertEqual(self.rename({"names": {CT1: "ČT1"}})[1]["changes"], [])  # unchanged
+
+    def test_rename_validation(self):
+        for payload in ({"names": {CT1: ""}}, {"names": {CT1: "x" * 65}}, {"names": {CT1: "a\tb\x00"}},
+                        {"names": {}}, {"names": [CT1]}, {"names": {"../x": "a"}}, {"names": {CT1: 5}}):
+            self.assertEqual(self.rename(payload)[0], 400, payload)
+        self.assertEqual(self.rename({"names": {CT1: "ČT1", "unknown": "x"}})[0], 404)
+        self.assertEqual(next(c for c in self.fake.channels if c["uuid"] == CT1)["name"], "ČT1 HD")
+
+    def test_rename_warns_about_config_names(self):
+        self.cfg.dvb.record_channels = ["ČT1 HD"]
+        changes = self.rename({"names": {CT1: "ČT1"}})[1]["changes"]
+        self.assertIn("record_channels", changes[-1])
+
     def test_hide_cancels_and_deletes_recordings(self):
         scheduled = sorted((e for e in self.fake.entries.values() if e["channel"] == CT1
                             and e["sched_status"] == "scheduled"), key=lambda e: e["start"])

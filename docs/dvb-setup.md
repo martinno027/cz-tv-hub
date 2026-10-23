@@ -180,6 +180,12 @@ Vypnutý kanál:
   vypne se celý multiplex (tuner na něj vůbec neladí, nestahuje ani jeho program).
 
 Opětovné zapnutí vše vrátí; nahrává se od dalšího pořadu a program se doplní, až tuner multiplex znovu naladí.
+Více kanálů najednou vypnete nebo zapnete zaškrtnutím a tlačítkem nahoře (jedno potvrzení).
+
+**Názvy kanálů**: TVHeadend přebírá názvy z vysílání („CT 1 PHA HD T2“). Tlačítko **Zkrátit názvy** navrhne
+televizní názvy („ČT1“, „ČT24“, „Nova“) a po potvrzení je uloží; jednotlivě je přejmenujete odkazem *Přejmenovat*.
+Názvy se uloží v TVHeadendu a aplikace je ukážou po obnovení. Máte-li v konfiguraci `record_channels` nebo
+`[ads] channels` vypsané názvy kanálů, upravte je na nové.
 Stejně se chová kanál vypnutý ručně v TVHeadendu (*Enabled*).
 
 ## 5. Vzdálený přístup: jen vaše domácnost přes Tailscale

@@ -6,6 +6,8 @@ A hidden channel is switched off in TVHeadend itself, so TVHeadend is the only s
   so the tuner does not tune to it at all (no reception, no EPG scan);
 - its cztvhub autorec rule is disabled (``dvb-setup`` keeps it disabled), its scheduled and running
   recordings are cancelled and its finished recordings deleted.
+Channels can be renamed (TVHeadend name, ``autoname`` off so a rescan keeps it); ``short_name()``
+suggests a TV-style name ("CT 1 PHA HD T2" -> "ČT1", matching the CT internet channels).
 Showing the channel again reverses the switches (recordings start with the next programme); showing an
 already offered channel repairs its reception (services / multiplex switched off elsewhere).
 
@@ -33,6 +35,28 @@ ADMIN_USER = "admin"
 CHANNEL_RE = re.compile(r"^/admin/api/channels/([A-Za-z0-9_-]{1,64})$")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BULK = 500
+MAX_NAME = 64
+TECH_TOKENS = {"HD", "SD", "UHD", "4K", "T2", "HEVC", "H265", "H.265", "DVB-T2"}
+CT_REGIONS = {"PHA", "PRAHA", "JM", "SM", "BRNO", "OSTRAVA"}  # regional variants of ČT1
+
+
+def short_name(name: str) -> str:
+    """TV-style channel name: no "HD"/"T2" suffixes, "CT 1 PHA" -> "ČT1" like the CT internet channels."""
+    tokens = [t for t in name.split() if t.upper() not in TECH_TOKENS]
+    if tokens and tokens[0].upper() in ("CT", "ČT"):
+        rest = [t for t in tokens[1:] if t.upper() not in CT_REGIONS]
+        if rest and rest[0].isdigit():
+            tokens = ["ČT" + rest[0]] + rest[1:]
+        else:
+            tokens = ["ČT"] + rest
+    return " ".join(tokens) or name
+
+
+def clean_name(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    name = " ".join(value.split())
+    return name if 0 < len(name) <= MAX_NAME and name.isprintable() else None
 CSRF_HEADER = "X-Cztvhub-Admin"
 HTML = "text/html; charset=utf-8"
 PAGE_HEADERS = {
@@ -72,6 +96,7 @@ class ChannelAdmin:
                 "id": channel.uuid,
                 "number": channel.number,
                 "name": channel.name,
+                "shortName": short_name(channel.name),
                 "offered": channel.enabled,
                 # tuned at all: an enabled service in an enabled multiplex
                 "received": any(s.enabled and muxes.get(s.mux) is not None and muxes[s.mux].enabled == MUX_ENABLE
@@ -112,6 +137,25 @@ class ChannelAdmin:
         done += self._recording(targets, offered)
         names = ", ".join(c.name for c in targets)
         self.log(f"admin: {names} {'shown' if offered else 'hidden'}: {', '.join(done) or 'no change'}")
+        return done
+
+    def rename(self, names: Mapping[str, str]) -> list[str]:
+        """Rename channels ({id: new name}); unknown ids fail before anything changes."""
+        channels = {c.uuid: c for c in self.client.channels(include_disabled=True)}
+        missing = [i for i in names if i not in channels]
+        if missing:
+            raise TvhNotFound(", ".join(missing))
+        changed = [(channels[i], n) for i, n in names.items() if channels[i].name != n]
+        if not changed:
+            return []
+        # autoname off first (property order), else TVHeadend renames it back from the service name
+        self.client.save_node([{"uuid": c.uuid, "autoname": False, "name": n} for c, n in changed])
+        done = [f"{c.name} → {n}" for c, n in changed]
+        configured = {x.casefold() for x in (self.cfg.dvb.record_channels or []) + (self.cfg.ads.channels or [])}
+        stale = [c.name for c, _ in changed if c.name.casefold() in configured]
+        if stale:
+            done.append("pozor, v konfiguraci (record_channels / [ads] channels) jsou staré názvy: " + ", ".join(stale))
+        self.log(f"admin: renamed {', '.join(done)}")
         return done
 
     def _reception(self, targets: list[Channel], channels: list[Channel], offered: bool) -> list[str]:
@@ -218,11 +262,14 @@ class AdminSite:
                                    "retentionDays": self.gateway.dvb.retention_days})
 
     def _set(self, channel_id: str | None, body: bytes) -> Response:
-        """``POST /admin/api/channels/<id>`` {"offered"} or ``POST /admin/api/channels`` {"ids": [...], "offered"}."""
+        """``POST /admin/api/channels/<id>`` {"offered"} | {"name"}, or for several channels
+        ``POST /admin/api/channels`` {"ids": [...], "offered"} | {"names": {id: name}}."""
         try:
             payload: Any = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             payload = None
+        if isinstance(payload, dict) and ("name" in payload or "names" in payload):
+            return self._rename(channel_id, payload)
         if not isinstance(payload, dict) or not isinstance(payload.get("offered"), bool):
             return error(400, 'Očekávám {"offered": true|false}')
         if channel_id is None:
@@ -239,8 +286,22 @@ class AdminSite:
             self.gateway.channels_changed(hidden=None if offered else ids)
         return json_response(200, {"changes": done})
 
+    def _rename(self, channel_id: str | None, payload: dict) -> Response:
+        raw = {channel_id: payload.get("name")} if channel_id else payload.get("names")
+        if not isinstance(raw, dict) or not 0 < len(raw) <= MAX_BULK or \
+                not all(isinstance(i, str) and ID_RE.match(i) for i in raw):
+            return error(400, 'Očekávám {"names": {"<id kanálu>": "název"}}')
+        names = {i: clean_name(n) for i, n in raw.items()}
+        if any(n is None for n in names.values()):
+            return error(400, f"Název musí mít 1 až {MAX_NAME} znaků")
+        try:
+            done = self.admin.rename(names)  # type: ignore[arg-type]
+        finally:
+            self.gateway.channels_changed()
+        return json_response(200, {"changes": done})
 
-PAGE = """<!doctype html>
+
+PAGE = r"""<!doctype html>
 <html lang="cs">
 <head>
 <meta charset="utf-8">
@@ -300,6 +361,12 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
   font-size: 14px; }
 .msg.err { border-color: var(--warn); color: var(--warn); }
 .help { color: var(--muted); font-size: 13px; margin-top: 20px; }
+.name button.link { border: 0; background: none; color: var(--accent); padding: 0 0 0 8px; font-size: 13px;
+  font-weight: 400; }
+.edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.edit input { font: inherit; font-weight: 600; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--accent);
+  background: var(--bg); color: var(--fg); min-width: 0; width: 220px; max-width: 100%; }
+.confirm ul { margin: 4px 0; padding-left: 20px; flex-basis: 100%; }
 </style>
 </head>
 <body>
@@ -314,12 +381,13 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
 </div>
 <p class="help">Vypnutím se zruší plánované nahrávky kanálu a smažou jeho nahrávky. Multiplex se vypne, až
 v něm nezbude žádný zapnutý kanál. Po zapnutí se nahrává od dalšího pořadu; programový průvodce se doplní,
-až tuner multiplex znovu naladí (může trvat desítky minut). Vypnuté kanály nemají program, protože se nepřijímají.</p>
+až tuner multiplex znovu naladí (může trvat desítky minut). Vypnuté kanály nemají program, protože se nepřijímají.
+Nový název kanálu se uloží v TVHeadendu a aplikace ho ukážou po obnovení seznamu kanálů.</p>
 </main>
 <script>
 "use strict";
 var list = document.getElementById("list"), bar = document.getElementById("bar"), msg = document.getElementById("msg");
-var rows = [], selected = {}, pending = null, busy = false;
+var rows = [], selected = {}, pending = null, busy = false, editing = null;
 
 function el(tag, cls, text) {
   var e = document.createElement(tag);
@@ -381,10 +449,27 @@ function renderBar() {
   var on = el("button", null, "Zapnout vybrané");
   off.disabled = busy || !chosen.some(function (c) { return c.offered; });
   on.disabled = busy || !chosen.some(function (c) { return !c.offered || !c.received; });
+  var shorten = (chosen.length ? chosen : rows).filter(function (c) { return c.shortName !== c.name; });
+  var short = el("button", null, chosen.length ? "Zkrátit názvy vybraných" : "Zkrátit názvy");
+  short.disabled = busy || !shorten.length;
+  short.title = "Např. „CT 1 PHA HD T2“ → „ČT1“";
   off.addEventListener("click", function () { pending = "bulk"; render(); });
   on.addEventListener("click", function () { send(chosen, true); });
+  short.addEventListener("click", function () { pending = "short"; render(); });
   bar.appendChild(off);
   bar.appendChild(on);
+  bar.appendChild(short);
+  if (pending === "short") {
+    var box = confirmBox("Přejmenovat " + channels(shorten.length) + "?", function () {
+      var names = {};
+      shorten.forEach(function (c) { names[c.id] = c.shortName; });
+      rename(names, channels(shorten.length));
+    }, "Přejmenovat", false);
+    var ul = el("ul");
+    shorten.forEach(function (c) { ul.appendChild(el("li", null, c.name + " → " + c.shortName)); });
+    box.insertBefore(ul, box.children[1]);
+    bar.appendChild(box);
+  }
   if (pending === "bulk") {
     var victims = chosen.filter(function (c) { return c.offered; });
     var recs = victims.reduce(function (n, c) { return n + c.recordings; }, 0);
@@ -431,7 +516,17 @@ function render() {
     row.appendChild(pick);
     row.appendChild(el("span", "num", c.number > 0 ? String(c.number) : ""));
     var info = el("div");
-    info.appendChild(el("div", "name", c.name));
+    if (editing === c.id) {
+      info.appendChild(editBox(c));
+    } else {
+      var name = el("div", "name", c.name);
+      var pen = el("button", "link", "Přejmenovat");
+      pen.disabled = busy;
+      pen.setAttribute("aria-label", "Přejmenovat " + c.name);
+      pen.addEventListener("click", function () { editing = c.id; pending = null; render(); });
+      name.appendChild(pen);
+      info.appendChild(name);
+    }
     info.appendChild(nowLine(c));
     var meta = el("div", "meta");
     function flag(text, ok) {
@@ -477,10 +572,57 @@ function render() {
   });
 }
 
-function confirmBox(text, action) {
+function editBox(c) {
+  var box = el("div", "edit");
+  var input = el("input");
+  input.value = c.name;
+  input.maxLength = 64;
+  input.setAttribute("aria-label", "Nový název kanálu " + c.name);
+  var save = el("button", null, "Uložit"), cancel = el("button", null, "Zrušit");
+  var hint = c.shortName !== c.name ? el("button", "link", "Návrh: " + c.shortName) : null;
+  function done() { editing = null; render(); }
+  function submit() {
+    var value = input.value.replace(/\s+/g, " ").trim();
+    if (!value || value === c.name) return done();
+    editing = null;
+    var names = {};
+    names[c.id] = value;
+    rename(names, c.name);
+  }
+  save.addEventListener("click", submit);
+  cancel.addEventListener("click", done);
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") submit();
+    if (e.key === "Escape") done();
+  });
+  box.appendChild(input);
+  box.appendChild(save);
+  box.appendChild(cancel);
+  if (hint) {
+    hint.addEventListener("click", function () { input.value = c.shortName; input.focus(); });
+    box.appendChild(hint);
+  }
+  setTimeout(function () { input.focus(); input.select(); }, 0);
+  return box;
+}
+
+function rename(names, label) {
+  busy = true;
+  pending = null;
+  render();
+  say("Přejmenovávám " + label + "…");
+  api("POST", "/admin/api/channels", {names: names}).then(function (data) {
+    say(data.changes.length ? "Přejmenováno: " + data.changes.join(", ") + "." : "Beze změny.");
+    selected = {};
+  }, function (e) {
+    say(label + ": " + e.message, true);
+  }).then(function () { busy = false; return load(); });
+}
+
+function confirmBox(text, action, yesLabel, danger) {
   var box = el("div", "confirm");
   box.appendChild(el("span", null, text));
-  var yes = el("button", "danger", "Vypnout");
+  var yes = el("button", danger === false ? null : "danger", yesLabel || "Vypnout");
   var no = el("button", null, "Zpět");
   yes.addEventListener("click", function () { pending = null; action(); });
   no.addEventListener("click", function () { pending = null; render(); });
@@ -520,7 +662,7 @@ function load() {
 }
 load();
 // keep "now playing" current, but never while the user is in the middle of something
-setInterval(function () { if (!busy && pending === null) load(); }, 60000);
+setInterval(function () { if (!busy && pending === null && editing === null) load(); }, 60000);
 </script>
 </body>
 </html>

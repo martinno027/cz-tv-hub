@@ -131,7 +131,12 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   channel number (hidden ones stay in place); `now` = the EPG event airing now (none while not received).
 - `POST /admin/api/channels/<id>` `{"offered": bool}`, or several at once (the page's bulk action, one confirmation)
   `POST /admin/api/channels` `{"ids": [...] (1..500), "offered": bool}` → `{"changes": ["…Czech…"]}`; unknown ids
-  → `404` before anything changes; multiplex decisions consider all channels of the request together. POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
+  → `404` before anything changes; multiplex decisions consider all channels of the request together.
+- **Rename**: `POST /admin/api/channels/<id>` `{"name": "…"}` or `POST /admin/api/channels` `{"names": {id: name}}`
+  (1..64 printable chars, whitespace collapsed) → TVHeadend `name` with `autoname = false` (a rescan keeps it); the
+  apps show it from `/dvb/channels`. Each row carries `shortName`, a TV-style suggestion ("CT 1 PHA HD T2" → "ČT1",
+  "Nova HD" → "Nova"; the page's "Zkrátit názvy" applies it with one confirmation). Old names still listed in
+  `record_channels` / `[ads] channels` are reported in `changes` (those settings match by name). POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
   (CSRF; the server never answers CORS preflights). Errors: `401`, `403`, `400`, `404` unknown channel, `502`.
 
 ## App behaviour for "Anténa" programmes
