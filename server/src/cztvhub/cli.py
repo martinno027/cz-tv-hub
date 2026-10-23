@@ -1,4 +1,4 @@
-"""Command line entry point: ``python -m cztvhub {serve,playlist,check,dvb-setup,dvb-fake}``."""
+"""Command line entry point: ``python -m cztvhub {serve,playlist,check,dvb-setup,dvb-diag,dvb-fake}``."""
 import argparse
 import signal
 import sys
@@ -59,6 +59,16 @@ def cmd_dvb_setup(args):
         print(f"FAIL {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def cmd_dvb_diag(args):
+    from .dvb.diag import run_diag
+
+    cfg = _config(args)
+    if not cfg.dvb.enabled:
+        print("DVB is not enabled in the config", file=sys.stderr)
+        return 2
+    return run_diag(cfg, args.channel, args.seconds)
 
 
 def cmd_dvb_fake(args):
@@ -150,6 +160,12 @@ def main(argv=None):
     p_setup.add_argument("--config", required=True)
     p_setup.add_argument("--dry-run", action="store_true", help="only print what would change")
     p_setup.set_defaults(func=cmd_dvb_setup)
+
+    p_diag = sub.add_parser("dvb-diag", help="measure Anténa live playback (reception, segments, stalls) on the Pi")
+    p_diag.add_argument("--config", required=True)
+    p_diag.add_argument("--channel", help="TVHeadend channel name (default: the first one)")
+    p_diag.add_argument("--seconds", type=int, default=120)
+    p_diag.set_defaults(func=cmd_dvb_diag)
 
     p_fake = sub.add_parser("dvb-fake", help="fake TVHeadend with test streams for development")
     p_fake.add_argument("--host", default="127.0.0.1")

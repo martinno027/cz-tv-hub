@@ -219,3 +219,7 @@ Bez nastavení je skupina „Anténa“ skrytá.
   volné místo a zda je TVHeadend dostupný.
 - „Tuner je obsazený“: všechny tunery nahrávají nebo vysílají jiný multiplex.
 - Logy: `journalctl -u cztvhub -f` a `journalctl -u tvheadend -f`.
+- Sekání nebo kolečko načítání u Antény: během sledování kanálu na televizi spusťte na Raspberry
+  `sudo -u cztvhub env PYTHONPATH=/opt/cztvhub/src python3 -m cztvhub dvb-diag --config /etc/cztvhub/cztvhub.conf --channel "ČT1"`
+  (název kanálu jako v aplikaci). Za 2 minuty vypíše chyby příjmu z tuneru, pravidelnost úseků a kolikrát by se
+  přehrávač zasekl.

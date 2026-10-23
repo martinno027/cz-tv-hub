@@ -25,6 +25,7 @@ from .hls import (INIT, Codecs, EmptySource, HlsManager, HlsSession, StreamFaile
                   probe_codecs, rewrite_playlist)
 from .retention import RetentionLoop
 from .sources import GrowingRecording
+from .epgstore import EpgHistory, merge_past
 from .thumbs import Settings, Thumbnails
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
@@ -41,6 +42,8 @@ ICON_RE = re.compile(rf"^/dvb/icon/({UUID})$")
 RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 TVH_ICON_RE = re.compile(r"^imagecache/\d+$")
 CHANNEL_CACHE_SECONDS = 60.0
+EPG_COLLECT_SECONDS = 1800.0  # how often the coming days' EPG is remembered
+EPG_AHEAD_SECONDS = 3 * 86400
 PLAYLIST_TIMEOUT = 25.0
 VOD_WAIT_SECONDS = 5.0  # short finished recordings are fully remuxed by then and served as VOD
 ZAP_IDLE_SECONDS = 8.0  # a live session nobody polled for this long no longer has a viewer
@@ -92,6 +95,8 @@ class DvbGateway:
         self.settings = Settings(self.dvb.state_dir)
         self.thumbs = Thumbnails(self.client, self.settings, self.dvb.ffmpeg, now=now, log=log)
         self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log, after=self._after_retention)
+        self.history = EpgHistory(self.dvb.state_dir)
+        self._collector_stop = threading.Event()
         self._worker_sid: str | None = None  # the worker's one recording session (spec/ad-breaks.md)
         self._worker_lock = threading.Lock()
         self._channels: list[Channel] = []
@@ -102,8 +107,10 @@ class DvbGateway:
     def start(self) -> None:
         self.hls.start()
         self.retention.start()
+        threading.Thread(target=self._collect_loop, name="dvb-epg-history", daemon=True).start()
 
     def stop(self) -> None:
+        self._collector_stop.set()
         self.retention.stop()
         self.hls.shutdown()
 
@@ -182,6 +189,32 @@ class DvbGateway:
                 self._channels_at = time.monotonic()
             return self._channels
 
+    # -- EPG history (epgstore.py) -----------------------------------------------------------
+    def _remember(self, events: list, window: tuple[int, int]) -> None:
+        now = self.now()
+        changed = self.history.merge(events, now, window)
+        changed = self.history.prune(now - (self.dvb.retention_days + 1) * 86400) or changed
+        if changed:
+            try:
+                self.history.save()
+            except OSError as exc:
+                self.log(f"dvb: cannot save EPG history: {exc}")
+
+    def collect_epg(self) -> None:
+        """Remember the coming days' programmes (TVHeadend lists them days ahead, then drops them)."""
+        now = int(self.now())
+        window = (now, now + EPG_AHEAD_SECONDS)
+        self._remember(self.client.epg_events(*window), window)
+
+    def _collect_loop(self) -> None:
+        while True:
+            try:
+                self.collect_epg()
+            except TvhError as exc:
+                self.log(f"dvb: EPG history: {exc}")
+            if self._collector_stop.wait(EPG_COLLECT_SECONDS):
+                return
+
     def channels_changed(self, hidden: list[str] | None = None) -> None:
         """After the admin page changed TVHeadend's channels: reload them, end hidden channels' live streams."""
         with self._channels_lock:
@@ -225,8 +258,11 @@ class DvbGateway:
         start, end = epg.day_bounds(day)
         # Channels hidden in the admin page (disabled in TVHeadend) are not offered, nor their recordings.
         offered = {c.uuid for c in self._channel_list()}
-        events = [e for e in self.client.epg_events(start, end) if e.channel in offered]
+        live = self.client.epg_events(start, end)
+        self._remember(live, (start, end))
         entries = [e for e in self.client.dvr_entries("grid") if e.channel in offered]
+        # TVHeadend forgets ended programmes; the remembered ones fill the past (spec "EPG history")
+        events = [e for e in merge_past(live, self.history.between(start, end), entries) if e.channel in offered]
         built = epg.build_epg(events, entries, start, end)
         if self.ads.enabled:
             stored = self.breaks.ids()

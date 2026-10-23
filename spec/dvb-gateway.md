@@ -85,8 +85,9 @@ Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cz
   "description": "...", "genre": "...", "start": "...Z", "end": "...Z", "recording": null |
   {"id": "<dvr entry uuid>", "state": "completed" | "recording" | "scheduled" | "failed"}}]}`
   - Events **overlapping** the day window, sorted by channel then start (an event across 05:00 is in both days).
-  - TVHeadend forgets EPG events once they end, so past programmes come from DVR entries: their `id` is
-    `dvr:<dvr entry uuid>` and `recording` is always set. Treat `id` as an opaque string.
+  - TVHeadend forgets EPG events once they end, so past programmes come from DVR entries (their `id` is
+    `dvr:<dvr entry uuid>` and `recording` is always set) or, without a recording, from the gateway's EPG history
+    (`recording: null`, see "EPG history"). Treat `id` as an opaque string.
   - `genre` is a Czech label from the DVB content nibble ("Zprávy", "Film / drama", …) or `""`.
   - State mapping from TVHeadend: `recording*` → recording, `scheduled` → scheduled, `completed` → completed,
     everything else (`completedError`, `completedRerecord`, `completedWarning` = missed) → failed.
@@ -138,6 +139,19 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   "Nova HD" → "Nova"; the page's "Zkrátit názvy" applies it with one confirmation). Old names still listed in
   `record_channels` / `[ads] channels` are reported in `changes` (those settings match by name). POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
   (CSRF; the server never answers CORS preflights). Errors: `401`, `403`, `400`, `404` unknown channel, `502`.
+
+## EPG history (`src/cztvhub/dvb/epgstore.py`)
+The gateway remembers the EPG events it sees (every 30 min the next 3 days, plus every `/dvb/epg` answer) in
+`<state dir>/epg-history.json`: titles, times, genre only. For the not-yet-started part of a fetched window
+TVHeadend is authoritative (a cancelled or moved programme is dropped). Entries older than `retention_days + 1`
+days are pruned. `/dvb/epg` adds remembered events TVHeadend no longer lists, except where a DVR entry for the
+same channel starts within 2 min (the recording is shown instead), so a past programme without a recording stays
+in the guide ("Pořad nebyl nahrán").
+
+## Diagnostics: `cztvhub dvb-diag --config FILE [--channel NAME] [--seconds 120]`
+Run on the Pi while a TV plays the channel: follows the same live session through the local gateway and prints
+the tuner's signal and error counters (TVHeadend `status/inputs` deltas), the segment lengths / arrival gaps /
+`TARGETDURATION`, and how often a player holding 6, 12 or 20 s would have stalled (`src/cztvhub/dvb/diag.py`).
 
 ## A/V sync of the remuxed HLS (`src/cztvhub/dvb/fmp4.py`)
 DVB muxes carry audio and video with different start times, and a viewer joins mid-stream (video starts at the next
