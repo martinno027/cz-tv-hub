@@ -53,6 +53,9 @@ final class PlayerController {
     private let progressTarget: ResumeTarget?
     private let resumeStore: ResumeStore?
     private var progressObserver: Any?
+    private var title: PlayerTitle
+    private let liveTitle: (@MainActor () async -> PlayerTitle)?
+    private var titleTask: Task<Void, Never>?
     private var backgroundObserver: NSObjectProtocol?
     /// False until the start position has been applied, so the pre-seek position is never saved.
     private var positionApplied = false
@@ -60,10 +63,15 @@ final class PlayerController {
     /// `resolve` fetches a fresh source (new signed URL / new gateway session) after a failure.
     /// `adBreaks` is given only for finished recordings: it enables the "Přeskočit reklamu" button.
     /// `progress` is where to save the "Pokračovat" position (programmes and recordings only).
+    /// `title` is the info bar for programmes; `liveTitle` looks up what is airing now (live), again at
+    /// the programme's end and at least every minute (spec/apps.md "Title in the player's info bar").
     init(source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
          adBreaks: (@Sendable () async throws -> [AdBreak])? = nil,
-         progress: (target: ResumeTarget, store: ResumeStore)? = nil) {
+         progress: (target: ResumeTarget, store: ResumeStore)? = nil,
+         title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil) {
         self.source = source
+        self.title = title ?? PlayerTitle(title: source.title)
+        self.liveTitle = liveTitle
         self.resolve = resolve
         self.fetchAdBreaks = adBreaks
         let tracked = source.mode == .live ? nil : progress
@@ -75,6 +83,7 @@ final class PlayerController {
         guard !started else { return }
         started = true
         load(source, resume: nil)
+        startLiveTitle()
         startAdBreaks()
         startProgressSaving()
         #if DEBUG
@@ -104,6 +113,8 @@ final class PlayerController {
         timeObserver = nil
         adBreakTask?.cancel()
         adBreakTask = nil
+        titleTask?.cancel()
+        titleTask = nil
         if let skipObserver { player.removeTimeObserver(skipObserver) }
         skipObserver = nil
         adBreaks = []
@@ -217,7 +228,7 @@ final class PlayerController {
         // Gateway streams need the bearer key on the playlist and on every segment.
         let options: [String: Any]? = source.headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": source.headers]
         let item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
-        item.externalMetadata = [Self.metadata(.commonIdentifierTitle, source.title)]
+        item.externalMetadata = Self.metadata(for: title)
         positionApplied = false
         player.replaceCurrentItem(with: item)
         observe(item, source: source, resume: resume)
@@ -361,6 +372,32 @@ final class PlayerController {
             let seconds = item.currentTime().seconds
             return seconds.isFinite && seconds > 0 ? .seconds(seconds) : nil
         }
+    }
+
+    // MARK: info bar title
+
+    private func startLiveTitle() {
+        guard let liveTitle else { return }
+        titleTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let next = await liveTitle()
+                guard let self, !Task.isCancelled else { return }
+                if next != self.title {
+                    self.title = next
+                    // in place: the item (and the playback) stays
+                    self.player.currentItem?.externalMetadata = Self.metadata(for: next)
+                    playerLog.info("title \(next.title, privacy: .public) / \(next.subtitle, privacy: .public)")
+                }
+                let wait = next.nextCheck(after: Date()).timeIntervalSinceNow
+                try? await Task.sleep(for: .seconds(max(1, wait)))
+            }
+        }
+    }
+
+    private static func metadata(for title: PlayerTitle) -> [AVMetadataItem] {
+        var items = [metadata(.commonIdentifierTitle, title.title)]
+        if !title.subtitle.isEmpty { items.append(metadata(.iTunesMetadataTrackSubTitle, title.subtitle)) }
+        return items
     }
 
     private static func metadata(_ identifier: AVMetadataIdentifier, _ value: String) -> AVMetadataItem {

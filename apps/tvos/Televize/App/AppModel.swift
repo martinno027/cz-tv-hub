@@ -62,8 +62,22 @@ final class AppModel {
         log.info("play \(String(describing: request), privacy: .public) resume=\(resumeAt ?? -1)")
         let planner = planner
         var target: ResumeTarget?
-        if case .programme(let programme, _) = request { target = .ct(programme) }
-        open(resumeTarget: target) { try await planner.resolve(request, resumeAt: resumeAt) }
+        var title: PlayerTitle?
+        var liveTitle: (@MainActor () async -> PlayerTitle)?
+        switch request {
+        case .programme(let programme, let channel):
+            target = .ct(programme)
+            title = .programme(programme.title, channel: channel.name, episode: programme.episodeTitle)
+        case .live(let channel):
+            let schedules = schedules
+            liveTitle = {
+                let airing = await schedules.onAir(at: Date())[channel.slug]
+                return .live(channel: channel.name, airing: airing.map { ($0.title, $0.end) })
+            }
+        }
+        open(resumeTarget: target, title: title, liveTitle: liveTitle) {
+            try await planner.resolve(request, resumeAt: resumeAt)
+        }
     }
 
     /// Offered "Pokračovat" position of a CT programme, if any.
@@ -82,19 +96,26 @@ final class AppModel {
     func playAntennaLive(_ channel: DVBChannel) {
         guard let client = antenna?.client else { return }
         let url = client.liveURL(channelID: channel.id)
-        open { try await Self.prepare(client, url: url, title: channel.name, mode: .live) }
+        let antenna = antenna
+        let liveTitle: @MainActor () async -> PlayerTitle = {
+            let airing = await antenna?.onAir(at: Date())[channel.id]
+            return .live(channel: channel.name, airing: airing.map { ($0.title, $0.end) })
+        }
+        open(liveTitle: liveTitle) { try await Self.prepare(client, url: url, title: channel.name, mode: .live) }
     }
 
     /// A recording from the gateway; while it is still recording (`finished: false`) this is the
     /// start-over. Only finished recordings offer "Přeskočit reklamu" (spec/ad-breaks.md, v1).
     /// `resumeAt` ("Pokračovat") is seconds into the recording.
-    func playAntennaRecording(id: String, event: DVBEvent, finished: Bool, resumeAt: TimeInterval? = nil) {
+    func playAntennaRecording(id: String, event: DVBEvent, finished: Bool, resumeAt: TimeInterval? = nil,
+                              channelName: String? = nil) {
         guard let client = antenna?.client else { return }
         let url = client.recordingURL(id: id)
         let title = event.title
         var adBreaks: (@Sendable () async throws -> [AdBreak])?
         if finished { adBreaks = { try await client.adBreaks(recordingID: id) } }
-        open(adBreaks: adBreaks, resumeTarget: .antenna(recordingID: id, event: event)) {
+        open(adBreaks: adBreaks, resumeTarget: .antenna(recordingID: id, event: event),
+             title: .programme(event.title, channel: channelName, episode: event.subtitle)) {
             try await client.preparePlaylist(url)
             return .antennaRecording(url: url, title: title, headers: client.config.authorizationHeaders, resumeAt: resumeAt)
         }
@@ -106,6 +127,7 @@ final class AppModel {
     }
 
     private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil, resumeTarget: ResumeTarget? = nil,
+                      title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
                       _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
             log.info("play ignored: still resolving the previous selection")
@@ -123,7 +145,8 @@ final class AppModel {
                 let source = try await resolve()
                 log.info("resolved \(source.title, privacy: .public) mode=\(String(describing: source.mode), privacy: .public) host=\(source.url.host() ?? "", privacy: .public)")
                 let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks,
-                                                  progress: resumeTarget.map { ($0, resume) })
+                                                  progress: resumeTarget.map { ($0, resume) },
+                                                  title: title, liveTitle: liveTitle)
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
                 let session = PlayerSession(controller: controller)
                 self.session = session

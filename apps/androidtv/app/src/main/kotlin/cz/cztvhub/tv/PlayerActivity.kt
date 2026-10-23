@@ -31,7 +31,10 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.ui.PlayerView
+import cz.cztvhub.core.Channels
 import cz.cztvhub.core.CtException
+import cz.cztvhub.core.InfoTitle
+import cz.cztvhub.core.PlayerTitle
 import cz.cztvhub.core.PlayKind
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.PlayTarget
@@ -46,6 +49,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
 
 /**
  * Full-screen playback. The stream is resolved here, on the device, right before playback;
@@ -67,6 +71,12 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var openApp: Button
     private lateinit var errorActions: LinearLayout
     private lateinit var skipAd: Button
+
+    /** Info bar: programme title over the channel, shown with the controller (spec "Title in the player's info bar"). */
+    private lateinit var infoBox: LinearLayout
+    private lateinit var infoTitle: TextView
+    private lateinit var infoSubtitle: TextView
+    private var titleJob: Job? = null
     private var player: ExoPlayer? = null
     private var target: PlayTarget? = null
     private var loadJob: Job? = null
@@ -98,6 +108,30 @@ class PlayerActivity : ComponentActivity() {
             setShowPreviousButton(false)
             controllerShowTimeoutMs = 4000
             keepScreenOn = true
+            setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+                infoBox.visibility = visibility
+            })
+        }
+        infoTitle = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 34f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setShadowLayer(8f, 0f, 2f, Color.BLACK)
+        }
+        infoSubtitle = TextView(this).apply {
+            setTextColor(Color.argb(220, 255, 255, 255))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setShadowLayer(8f, 0f, 2f, Color.BLACK)
+        }
+        infoBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            addView(infoTitle)
+            addView(infoSubtitle)
         }
         message = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -148,6 +182,11 @@ class PlayerActivity : ComponentActivity() {
             setBackgroundColor(Color.BLACK)
             addView(playerView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             addView(skipAd, skipParams)
+            addView(infoBox, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.START,
+            ).apply { setMargins(dp(48), 0, dp(320), dp(120)) })
             addView(messageBox, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
         }
         setContentView(root)
@@ -177,6 +216,7 @@ class PlayerActivity : ComponentActivity() {
         playerView.player = exo
         playerView.requestFocus()
         load(forceRefresh = false, resume = resumeOnStart)
+        startTitles()
         startAdBreaks()
         startProgressSaving()
     }
@@ -189,6 +229,8 @@ class PlayerActivity : ComponentActivity() {
         // Release when hidden; a fresh URL is resolved when the viewer comes back.
         resumeOnStart = currentResume()
         loadJob?.cancel()
+        titleJob?.cancel()
+        titleJob = null
         adBreaksJob?.cancel()
         adBreaksJob = null
         updateSkipAd(null)
@@ -416,6 +458,45 @@ class PlayerActivity : ComponentActivity() {
         val exo = player ?: return
         exo.seekTo((seconds * 1000).toLong())
         updateSkipAd(null)
+    }
+
+    /** Channel name of the request (CT catalogue or the gateway's channel list). */
+    private fun channelName(): String {
+        val id = request.channelId
+        Channels.byId(id)?.let { return it.name }
+        return runCatching { tvApp.dvb()?.channels()?.firstOrNull { it.id == id }?.name }.getOrNull()
+            ?: request.title
+    }
+
+    /** Programme title in the info bar; for live it follows the guide and changes with the next programme. */
+    private fun startTitles() {
+        titleJob?.cancel()
+        titleJob = lifecycleScope.launch {
+            while (isActive) {
+                val now = Instant.now()
+                val (title, end) = withContext(Dispatchers.IO) { currentTitle(now) }
+                infoTitle.text = title.title
+                infoSubtitle.text = title.subtitle
+                infoSubtitle.visibility = if (title.subtitle.isBlank()) View.GONE else View.VISIBLE
+                if (request !is PlayRequest.Live && request !is PlayRequest.DvbLive) break
+                delay(PlayerTitle.nextCheck(now, end).toMillis())
+            }
+        }
+    }
+
+    private fun currentTitle(now: Instant): Pair<InfoTitle, Instant?> {
+        val channel = channelName()
+        return when (val r = request) {
+            is PlayRequest.Live -> {
+                val on = runCatching { tvApp.schedules.onAir(now)[r.channelId]?.current }.getOrNull()
+                PlayerTitle.live(channel, on?.title, on?.episodeTitle.orEmpty()) to on?.end
+            }
+            is PlayRequest.DvbLive -> {
+                val on = runCatching { tvApp.dvb()?.onAir(now)?.get(r.channelId)?.current }.getOrNull()
+                PlayerTitle.live(channel, on?.title, on?.subtitle.orEmpty()) to on?.end
+            }
+            else -> PlayerTitle.programme(r.title, channel) to null
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

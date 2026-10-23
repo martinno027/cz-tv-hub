@@ -62,7 +62,11 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    **airing now** in the next row (like zapping), whatever the cells' widths; a row with nothing airing gets the
    cell (or focusable "Mimo vysílání" gap) under the now line. The first left/right ends this mode until the guide is
    opened or today's day is loaded again; other days use normal grid navigation.
-3. **Player**: full-screen, native controls. Live: seek within the timeshift buffer when started from it.
+3. **Player**: full-screen, native controls. **Title in the player's info bar**: the programme, not the channel. Live (CT and
+   Anténa): title = the programme airing now (from the guide data the app already has), subtitle/second line = the
+   channel name (e.g. "ČT1" / "CT 1 PHA HD T2"); it changes by itself when the next programme starts (re-check at
+   the programme's end, and at least every minute). Without guide data for now: the channel name as before.
+   Start-over, archive and recordings: the programme title, subtitle = channel name (+ episode title if any). Live: seek within the timeshift buffer when started from it.
    Archive: normal VOD seeking. Subtitles/audio tracks from the HLS manifest via native UI if cheap.
    On playback error caused by URL expiry, re-resolve once and resume at the same position.
    Live (no start position) starts playing as soon as the player can, without waiting for a ready state first.

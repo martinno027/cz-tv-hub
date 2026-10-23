@@ -799,6 +799,12 @@ main {
 #osd-title {
   font-size: 40px;
   font-weight: 700;
+  margin-bottom: 6px;
+}
+
+#osd-subtitle {
+  font-size: 26px;
+  opacity: 0.8;
   margin-bottom: 20px;
 }
 

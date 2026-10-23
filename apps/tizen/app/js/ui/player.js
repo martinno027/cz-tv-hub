@@ -223,7 +223,7 @@
     var hasAvPlay = root.webapis && root.webapis.avplay;
     this.backend = hasAvPlay ? new AvPlayBackend(cb) : new Html5Backend(cb);
     $('avplayer').style.display = hasAvPlay ? 'block' : 'none';
-    setInterval(function () { self.updateOsd(); }, 1000);
+    setInterval(function () { self.updateOsd(); self.updateTitle(); }, 1000);
     setInterval(function () { self.saveProgress(); }, RESUME_SAVE_MS);
   }
 
@@ -235,8 +235,34 @@
     this.request = request;
     this.lastReResolveAt = 0;
     $('player').classList.remove('hidden');
-    $('osd-title').textContent = request.title;
+    this.updateTitle();
     this.load(false, null);
+  };
+
+  /** Info bar text; live is re-evaluated every second against the guide data the app keeps fresh. */
+  Player.prototype.updateTitle = function () {
+    var r = this.request;
+    if (!r) return;
+    var app = this.app;
+    var isDvb = r.kind === 'dvbLive' || r.kind === 'dvbRecorded';
+    var channel = null;
+    if (isDvb) {
+      var list = (app.dvbState && app.dvbState.channels) || app.dvbChannels || [];
+      channel = list.filter(function (c) { return c.id === r.channelId; })[0] || null;
+    } else {
+      channel = CT.Channels.byId(r.channelId);
+    }
+    var name = channel ? channel.name : r.title;
+    var t;
+    if (r.kind === 'live') {
+      t = CT.PlayerTitle.live(name, app.ctState && app.ctState.onAir ? app.ctState.onAir[r.channelId] : null, Date.now());
+    } else if (r.kind === 'dvbLive') {
+      t = CT.PlayerTitle.live(name, app.dvbState && app.dvbState.onAir ? app.dvbState.onAir[r.channelId] : null, Date.now());
+    } else {
+      t = CT.PlayerTitle.programme(r.title, name, r.episodeTitle || '');
+    }
+    if ($('osd-title').textContent !== t.title) $('osd-title').textContent = t.title;
+    if ($('osd-subtitle').textContent !== t.subtitle) $('osd-subtitle').textContent = t.subtitle;
   };
 
   /** `resumeMs`: position to continue at after re-resolving (null = the target's own start). */

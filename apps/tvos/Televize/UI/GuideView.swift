@@ -242,10 +242,13 @@ struct GuideView: View {
                     let finished = !choice.isAiring
                     if let resumeAt = choice.resumeAt {
                         Button(ResumeRules.buttonTitle(resumeAt)) {
-                            model.playAntennaRecording(id: recordingID, event: event, finished: finished, resumeAt: resumeAt)
+                            model.playAntennaRecording(id: recordingID, event: event, finished: finished, resumeAt: resumeAt,
+                                                   channelName: channel.name)
                         }
                     }
-                    Button("Od začátku") { model.playAntennaRecording(id: recordingID, event: event, finished: finished) }
+                    Button("Od začátku") {
+                        model.playAntennaRecording(id: recordingID, event: event, finished: finished, channelName: channel.name)
+                    }
                 }
                 if choice.isAiring {
                     Button("Živě") { model.playAntennaLive(channel) }
@@ -518,7 +521,7 @@ struct GuideView: View {
                     model.play(.programme(programme, channel: channel))
                 }
             }
-        case .antenna(let event, _):
+        case .antenna(let event, let channel):
             switch AntennaAction.decide(event, now: now) {
             case .future:
                 model.alertMessage = CTError.notStarted
@@ -529,7 +532,7 @@ struct GuideView: View {
                 if let resumeAt = model.resumeOffer(recordingID: id, event: event) {
                     choice = Choice(entry: entry, resumeAt: resumeAt, isAiring: false)
                 } else {
-                    model.playAntennaRecording(id: id, event: event, finished: true)
+                    model.playAntennaRecording(id: id, event: event, finished: true, channelName: channel.name)
                 }
             case .notRecorded:
                 model.alertMessage = AntennaAction.notRecordedMessage
