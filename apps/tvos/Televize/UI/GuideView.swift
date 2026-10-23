@@ -185,6 +185,10 @@ struct GuideView: View {
     @State private var choice: Choice?
     @FocusState private var focusedID: String?
     @FocusState private var focusedChip: BroadcastDay?
+    @FocusState private var officialAppFocused: Bool
+    /// The last focus move ended on a chip: only then may focus go up to "Otevřít v iVysílání" (grid ↔ strip ↔
+    /// button); reached from the tab bar it passes on to the highlighted chip.
+    @State private var cameFromStrip = false
     /// "Across days": where focus goes once the next/previous day is loaded.
     @State private var dayAnchor: DayAnchor?
     /// A chip was selected (or the guide reopened): where the grid opens once its day is loaded.
@@ -221,7 +225,8 @@ struct GuideView: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let today = BroadcastDay(containing: context.date)
             VStack(alignment: .leading, spacing: 20) {
-                EntryDetail(entry: focusedEntry, today: today, now: context.date, ctSchedule: schedule) {
+                EntryDetail(entry: focusedEntry, today: today, now: context.date, ctSchedule: schedule,
+                            officialAppFocused: $officialAppFocused) {
                     OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
                 }
                     .frame(height: EntryDetail.height)
@@ -232,7 +237,19 @@ struct GuideView: View {
         .task(id: LoadKey(day: day, gateway: model.gateway)) { await load() }
         .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
         .onChange(of: opens) { _, _ in reopen() }
+        .onChange(of: focusedChip) { _, chip in
+            if chip != nil { cameFromStrip = true }
+        }
+        .onChange(of: officialAppFocused) { _, focused in
+            guard focused else { return }
+            if cameFromStrip {
+                cameFromStrip = false
+            } else {
+                focusedChip = highlightedChip(today: BroadcastDay(containing: Date()))
+            }
+        }
         .onChange(of: focusedID) { old, id in
+            if id != nil { cameFromStrip = false }
             guard let id else { return }
             if crossDay(from: old, to: id) { return }
             followLiveColumn(from: old, to: id)
@@ -367,8 +384,7 @@ struct GuideView: View {
     /// no chip); moving up from the grid lands on that chip.
     private func dayStrip(today: BroadcastDay) -> some View {
         let days = GuideRange.days(today: today)
-        let highlighted = GuideDays.highlightedChip(focusStart: focusTime ?? Self.bounds(of: day).start, gridDay: day,
-                                                    chips: days)
+        let highlighted = highlightedChip(today: today)
         return HStack(spacing: 14) {
             ForEach(days, id: \.self) { option in
                 Button(option.label(today: today)) { selectDay(option) }
@@ -381,6 +397,12 @@ struct GuideView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
         .defaultFocus($focusedChip, highlighted, priority: .userInitiated)
+    }
+
+    /// The calendar day of the focused programme's start, or the grid's day when that day has no chip.
+    private func highlightedChip(today: BroadcastDay) -> BroadcastDay {
+        GuideDays.highlightedChip(focusStart: focusTime ?? Self.bounds(of: day).start, gridDay: day,
+                                  chips: GuideRange.days(today: today))
     }
 
     // MARK: behaviour
@@ -940,6 +962,7 @@ private struct EntryDetail: View {
     /// The day's CT schedule, for the ČT image of an Anténa ČT programme (spec/apps.md "ČT images for
     /// Anténa ČT channels"); matched only for the focused entry.
     let ctSchedule: ScheduleStore.Schedule
+    let officialAppFocused: FocusState<Bool>.Binding
     let openOfficialApp: () -> Void
     @Environment(AppModel.self) private var model
 
@@ -975,6 +998,7 @@ private struct EntryDetail: View {
                 // kept when there is none, so the text beside it never changes width.
                 let showsButton = if case .ct(let programme) = entry { programme.start <= now } else { false }
                 Button(OfficialApp.buttonTitle, action: openOfficialApp)
+                    .focused(officialAppFocused)
                     .font(.system(size: 24, weight: .semibold))
                     .opacity(showsButton ? 1 : 0)
                     .disabled(!showsButton)
