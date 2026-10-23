@@ -979,6 +979,8 @@ private struct EntryDetail: View {
                     .accessibilityHidden(!showsButton)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // Vertical order grid ↔ day strip ↔ this button: up from any chip reaches it, down from it the strip.
+            .focusSection()
         } else {
             Text("Žádný pořad")
                 .font(.title3)

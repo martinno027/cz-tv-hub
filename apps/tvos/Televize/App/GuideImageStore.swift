@@ -30,10 +30,11 @@ final class GuideImageStore {
     }
 
     static let tvSwitchKey = "antennaThumbnails"
-    /// Compressed images around the focus (spec: about 300).
+    /// The downloaded JPEG bytes around the focus (spec: about 300, at most 48 MB).
     private static let capacity = 300
-    /// Decoded ones for the detail; decoding all 300 would take hundreds of MB.
-    private static let decodedCapacity = 24
+    private static let byteBudget = 48 * 1024 * 1024
+    /// Decoded only for the detail on screen (and the one just left); 300 decoded images would blow the heap.
+    private static let decodedCapacity = 2
     /// Detail image: 360 × 203 pt, 2× on a 4K TV.
     private static let decodedSize = CGSize(width: 720, height: 406)
     private static let growingMaxAge: TimeInterval = 60
@@ -51,7 +52,8 @@ final class GuideImageStore {
     /// Bumped when the wanted (focused) image is ready, so the detail shows it.
     private(set) var revision = 0
 
-    @ObservationIgnored private var data = LRUCache<String, (data: Data, madeAt: Date)>(capacity: capacity)
+    @ObservationIgnored private var data = LRUCache<String, (data: Data, madeAt: Date)>(capacity: capacity,
+                                                                                         costLimit: byteBudget)
     @ObservationIgnored private var decoded = LRUCache<String, UIImage>(capacity: decodedCapacity)
     @ObservationIgnored private var queue = ImageQueue<Source>()
     @ObservationIgnored private var misses = ThumbnailMisses()
@@ -154,10 +156,17 @@ final class GuideImageStore {
         guard isAllowed(source) else { return }  // switched off meanwhile
         switch result {
         case .image(let body):
-            data.set(source.key, (body, Date()))
+            data.set(source.key, (body, Date()), cost: body.count)
             if source == wanted { decode(source, body) }
         case .missing:
             if case .thumbnail(let id, let final) = source { misses.record(id, final: final, at: Date()) }
+        case .busy(let retryAfter):
+            // gateway busy (503): never remembered; again after Retry-After if still in the window or focused
+            Task {
+                try? await Task.sleep(for: .seconds(retryAfter))
+                guard isAllowed(source), queue.retry(source, lane: source.lane, focused: wanted) else { return }
+                pump()
+            }
         case .failed:
             break
         }

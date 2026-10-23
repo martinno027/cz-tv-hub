@@ -70,12 +70,15 @@ public enum ImageLane: Sendable, Hashable, CaseIterable {
 public struct ImageQueue<Key: Hashable>: Sendable where Key: Sendable {
     public private(set) var pending: [(key: Key, lane: ImageLane)] = []
     public private(set) var running: [Key: ImageLane] = [:]
+    /// The keys of the last window, for retries.
+    public private(set) var window: Set<Key> = []
 
     public init() {}
 
     /// Replaces the pending keys by `window` (already running ones are skipped), keeping a pending `keep`
     /// (the focused key) at the front.
     public mutating func replace(with window: [(key: Key, lane: ImageLane)], keep: Key? = nil) {
+        self.window = Set(window.map(\.key))
         let kept = keep.flatMap { key in pending.first { $0.key == key } }
         var seen = Set(running.keys)
         var next: [(key: Key, lane: ImageLane)] = []
@@ -120,6 +123,21 @@ public struct ImageQueue<Key: Hashable>: Sendable where Key: Sendable {
         running[key] = nil
     }
 
+    /// A busy answer (503) once its `Retry-After` has passed: the focused key goes back to the front, one still
+    /// in the window to the back of the queue, any other is dropped. True when it was queued again.
+    @discardableResult
+    public mutating func retry(_ key: Key, lane: ImageLane, focused: Key?) -> Bool {
+        guard running[key] == nil, !pending.contains(where: { $0.key == key }) else { return true }
+        if key == focused {
+            pending.insert((key, lane), at: 0)
+        } else if window.contains(key) {
+            pending.append((key, lane))
+        } else {
+            return false
+        }
+        return true
+    }
+
     public mutating func removeAll() {
         pending = []
     }
@@ -147,42 +165,49 @@ public struct ThumbnailMisses: Sendable {
     }
 }
 
-/// Least recently used in-memory cache.
+/// Least recently used in-memory cache, bounded by entry count and by total cost (e.g. bytes).
 public struct LRUCache<Key: Hashable, Value> {
     public let capacity: Int
-    private var values: [Key: Value] = [:]
+    public let costLimit: Int
+    private var values: [Key: (value: Value, cost: Int)] = [:]
     private var order: [Key] = []
+    public private(set) var totalCost = 0
 
-    public init(capacity: Int) {
+    public init(capacity: Int, costLimit: Int = .max) {
         self.capacity = capacity
+        self.costLimit = costLimit
     }
 
     public var count: Int { values.count }
 
     /// The value, marked as just used.
     public mutating func get(_ key: Key) -> Value? {
-        guard let value = values[key] else { return nil }
+        guard let entry = values[key] else { return nil }
         touch(key)
-        return value
+        return entry.value
     }
 
     /// The value without marking it used.
-    public func peek(_ key: Key) -> Value? { values[key] }
+    public func peek(_ key: Key) -> Value? { values[key]?.value }
 
-    public mutating func set(_ key: Key, _ value: Value) {
-        values[key] = value
+    /// Stores `value`; an entry costing more than the whole limit is not kept.
+    public mutating func set(_ key: Key, _ value: Value, cost: Int = 0) {
+        remove(key)
+        guard cost <= costLimit else { return }
+        values[key] = (value, cost)
+        totalCost += cost
         touch(key)
-        while order.count > capacity { values[order.removeFirst()] = nil }
+        while order.count > capacity || totalCost > costLimit { remove(order[0]) }
     }
 
     public mutating func remove(_ key: Key) {
-        values[key] = nil
+        guard let entry = values.removeValue(forKey: key) else { return }
+        totalCost -= entry.cost
         order.removeAll { $0 == key }
     }
 
     public mutating func removeAll(where shouldRemove: (Key) -> Bool) {
-        for key in order where shouldRemove(key) { values[key] = nil }
-        order.removeAll(where: shouldRemove)
+        for key in order where shouldRemove(key) { remove(key) }
     }
 
     private mutating func touch(_ key: Key) {

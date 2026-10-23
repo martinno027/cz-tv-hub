@@ -86,6 +86,40 @@ final class ImagePrefetchTests: XCTestCase {
         XCTAssertEqual(queue.start().map(\.key), ["ct8"])
     }
 
+    func testBusyIsRetriedInTheWindowAndAlwaysWhenFocused() {
+        var queue = ImageQueue<String>()
+        queue.replace(with: [("tv1", .gateway), ("tv2", .gateway), ("tv3", .gateway)])
+        XCTAssertEqual(queue.start().map(\.key), ["tv1", "tv2"])
+        // tv1 and tv2 answered 503; meanwhile the window moved on, tv2 left it
+        queue.finish("tv1")
+        queue.finish("tv2")
+        queue.replace(with: [("tv1", .gateway), ("tv3", .gateway), ("tv4", .gateway)])
+        _ = queue.start()  // tv1 again is fine, it was not remembered as missing
+        queue.finish("tv1")
+        queue.finish("tv3")
+        XCTAssertTrue(queue.retry("tv1", lane: .gateway, focused: nil), "still in the window: back in the queue")
+        XCTAssertFalse(queue.retry("tv2", lane: .gateway, focused: nil), "left the window: dropped")
+        XCTAssertTrue(queue.retry("tv9", lane: .gateway, focused: "tv9"), "the focused one always")
+        XCTAssertEqual(queue.pending.map(\.key), ["tv9", "tv4", "tv1"])
+    }
+
+    func testLRUByteBudget() {
+        var cache = LRUCache<String, Int>(capacity: 300, costLimit: 100)
+        cache.set("a", 1, cost: 40)
+        cache.set("b", 2, cost: 40)
+        _ = cache.get("a")
+        cache.set("c", 3, cost: 40)  // over 100: b (least recently used) goes
+        XCTAssertNil(cache.peek("b"))
+        XCTAssertEqual(cache.totalCost, 80)
+        cache.set("a", 4, cost: 10)
+        XCTAssertEqual(cache.totalCost, 50, "replacing an entry replaces its cost")
+        cache.set("huge", 5, cost: 101)
+        XCTAssertNil(cache.peek("huge"))
+        XCTAssertEqual(cache.count, 2)
+        cache.removeAll { _ in true }
+        XCTAssertEqual(cache.totalCost, 0)
+    }
+
     func testThumbnailMisses() {
         var misses = ThumbnailMisses()
         misses.record("done", final: true, at: noon)

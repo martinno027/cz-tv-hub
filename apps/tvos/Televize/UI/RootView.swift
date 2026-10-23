@@ -32,7 +32,8 @@ struct RootView: View {
             if tab == .guide { guideOpens += 1 }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active, tab == .guide { guideOpens += 1 }
+            // back in front on the guide is an open; the player closing is not (the guide stays where it was)
+            if phase == .active, tab == .guide, model.session == nil { guideOpens += 1 }
         }
         // Digits on Živě and the guide start that channel live (spec/apps.md "Number keys").
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in
