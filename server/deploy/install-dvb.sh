@@ -24,15 +24,24 @@ fi
 # Interactive on purpose: the package asks for a TVHeadend administrator name and password.
 sudo apt-get install -y tvheadend
 
-# TVHeadend listens on 127.0.0.1 only (web UI via SSH tunnel, see docs/dvb-setup.md).
-if ! grep -q -- '--bindaddr 127.0.0.1' /etc/default/tvheadend 2>/dev/null; then
-  if grep -q '^TVH_ARGS=' /etc/default/tvheadend 2>/dev/null; then
-    sudo sed -i 's|^TVH_ARGS="\(.*\)"|TVH_ARGS="\1 --bindaddr 127.0.0.1"|' /etc/default/tvheadend
-  else
-    echo 'TVH_ARGS="--bindaddr 127.0.0.1"' | sudo tee -a /etc/default/tvheadend >/dev/null
-  fi
+# TVHeadend listens on 127.0.0.1 only (web UI via SSH tunnel, see docs/dvb-setup.md). The project's package passes
+# OPTIONS from /etc/default/tvheadend to the daemon (older Debian packages used TVH_ARGS).
+defaults=/etc/default/tvheadend
+bind_arg=' --bindaddr 127.0.0.1'
+if grep -q '^OPTIONS=' "$defaults" 2>/dev/null; then
+  grep -q '^OPTIONS=.*--bindaddr 127\.0\.0\.1' "$defaults" \
+    || sudo sed -i "s|^OPTIONS=\"\(.*\)\"|OPTIONS=\"\1$bind_arg\"|" "$defaults"
+elif grep -q '^TVH_ARGS=' "$defaults" 2>/dev/null; then
+  grep -q '^TVH_ARGS=.*--bindaddr 127\.0\.0\.1' "$defaults" \
+    || sudo sed -i "s|^TVH_ARGS=\"\(.*\)\"|TVH_ARGS=\"\1$bind_arg\"|" "$defaults"
+else
+  echo "OPTIONS=\"-u hts -g video$bind_arg\"" | sudo tee -a "$defaults" >/dev/null
 fi
 sudo systemctl restart tvheadend
+sleep 2
+if sudo ss -ltn | grep -qE '(\*|0\.0\.0\.0|\[::\]):9981'; then
+  echo "WARNING: TVHeadend listens on all interfaces; check $defaults (see docs/dvb-setup.md)." >&2
+fi
 
 # cz-tv-hub itself (code, service user, unit); then the config with DVB enabled if it does not exist yet.
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin cztvhub 2>/dev/null || true

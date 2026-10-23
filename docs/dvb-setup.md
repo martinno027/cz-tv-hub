@@ -23,9 +23,45 @@ a nedají se stáhnout ani exportovat. Jen pro vaši domácnost (viz [legal-note
 
 ## 2. Instalace
 
-Na Raspberry (Raspberry Pi OS), v adresáři s tímto repozitářem, s připojeným tunerem a anténou:
+Postup ověřený na Raspberry Pi 4 (2 GB) s Raspberry Pi OS Lite 64-bit (Trixie) a tunerem Hauppauge WinTV-dualHD.
+
+### 2.1 Systém
+1. **Raspberry Pi Imager** → zařízení Raspberry Pi 4/5 → *Raspberry Pi OS (other) → Raspberry Pi OS Lite (64-bit)*.
+2. *Upravit nastavení*: hostname (např. `cztvhub`), vlastní uživatel a heslo, časové pásmo `Europe/Prague`,
+   na kartě Služby zapnout **SSH**. Raspberry připojte do routeru **kabelem**.
+3. Z počítače: `ssh <uživatel>@cztvhub.local`, pak `sudo apt update && sudo apt full-upgrade -y && sudo reboot`.
+4. Volitelně `sudo dpkg-reconfigure locales` (zaškrtněte `cs_CZ.UTF-8`), jinak SSH z Macu vypisuje varování
+   `setlocale: LC_CTYPE`. Neškodná.
+
+### 2.2 Tuner
+Zapojte tuner s anténou a ověřte, že ho Linux vidí:
 
 ```bash
+ls /dev/dvb                                   # adapter0 (u dvojitého tuneru i adapter1)
+dmesg | grep -i -E "dvb|si21|firmware" | tail -20
+```
+
+**Tunery s čipem Silicon Labs Si2168-D60** (Hauppauge WinTV-soloHD/dualHD, PCTV 292e, MyGica T230C…) potřebují
+pro DVB-T2 soubor firmwaru `dvb-demod-si2168-d60-01.fw`, který Debian ani Raspberry Pi OS nemají. Bez něj TVHeadend
+multiplexy najde, ale všechny skončí `FAIL` a v `dmesg` je `firmware file 'dvb-demod-si2168-d60-01.fw' not found`
+(objeví se až při prvním ladění). Instalace z repozitáře LibreELEC s kontrolou součtu:
+
+```bash
+cd /tmp
+curl -fsSLO https://raw.githubusercontent.com/LibreELEC/dvb-firmware/master/firmware/dvb-demod-si2168-d60-01.fw
+echo "5e1c860e95a8d92b2716b0075dd00e55f99c2c368e35340f6b527c366ff27ee7  dvb-demod-si2168-d60-01.fw" | sha256sum -c - \
+  && sudo install -m 0644 dvb-demod-si2168-d60-01.fw /lib/firmware/ && sudo systemctl restart tvheadend
+```
+
+Po dalším ladění má `dmesg | grep si2168` hlásit `downloading firmware from file …` a `firmware version: D 6.0.13`.
+Firmware se nahrává jen do paměti čipu při každém zapnutí; tuner se trvale nemění.
+
+### 2.3 cz-tv-hub a TVHeadend
+
+```bash
+sudo apt install -y git
+git clone https://github.com/martinno027/cz-tv-hub.git
+cd cz-tv-hub
 bash server/deploy/install-dvb.sh
 ```
 
@@ -34,17 +70,22 @@ Skript:
   protože Debian ani Raspberry Pi OS ho v balíčcích nemají; podporované jsou Raspberry Pi OS 64-bit Bookworm a Trixie.
   Při instalaci se TVHeadend zeptá na jméno a heslo **správce** – zvolte si je a poznamenejte (slouží pro webové
   rozhraní, nejsou to údaje uživatele `cztvhub`),
-- nastaví TVHeadend tak, aby poslouchal **jen na 127.0.0.1** (z ostatních počítačů není vidět),
+- nastaví TVHeadend tak, aby poslouchal **jen na 127.0.0.1** (`--bindaddr 127.0.0.1` v proměnné `OPTIONS` souboru
+  `/etc/default/tvheadend`) a ověří to,
 - vytvoří `/etc/cztvhub/cztvhub.conf` (práva 0600) s náhodným **klíčem pro aplikace** a heslem pro
   uživatele TVHeadendu `cztvhub`; obojí vypíše, poznamenejte si je,
 - nainstaluje a spustí službu `cz-tv-hub` (port 8098),
 - zapne ohlašování v domácí síti (mDNS `_cztvhub._tcp`) **jen na rozhraní domácí sítě**, na Tailscale ne
   (`allow-interfaces` / `deny-interfaces=tailscale0` v `/etc/avahi/avahi-daemon.conf`).
 
-**Disk na nahrávky**: připojte USB disk natrvalo (např. do `/srv/tv`, záznam v `/etc/fstab` podle UUID), vytvořte
+Kontrola: `sudo ss -ltnp | grep 998` musí ukázat `127.0.0.1:9981` a `127.0.0.1:9982`, ne `*:9981`.
+
+### 2.4 Disk na nahrávky
+Připojte USB disk natrvalo (např. do `/srv/tv`, záznam v `/etc/fstab` podle UUID), vytvořte
 `/srv/tv/recordings` s vlastníkem `hts` (`sudo install -d -o hts -g video /srv/tv/recordings`) a v TVHeadendu
 (Configuration → Recording → Digital Video Recorder Profiles → výchozí profil) nastavte *Recording system path* na
-tuto složku. Jinak se nahrává na SD kartu, která se rychle zaplní a opotřebuje.
+tuto složku. Jinak se nahrává na SD kartu, která se rychle zaplní a opotřebuje. Nahrávání (kapitola 4) zapínejte
+až s diskem.
 
 Pokud chcete dočasné soubory pro přehrávání na velkém disku, změňte `hls_dir` v konfiguraci a tutéž cestu
 doplňte do `ReadWritePaths=` v `/etc/systemd/system/cztvhub.service`.
@@ -52,23 +93,60 @@ doplňte do `ReadWritePaths=` v `/etc/systemd/system/cztvhub.service`.
 ## 3. První ladění v TVHeadendu
 
 Webové rozhraní TVHeadendu je dostupné jen přímo na Raspberry. Z počítače se k němu dostanete přes SSH
-tunel:
+tunel (okno nechte otevřené):
 
 ```bash
-ssh -L 9981:127.0.0.1:9981 pi@<adresa-raspberry>
+ssh -L 9981:127.0.0.1:9981 <uživatel>@cztvhub.local
 ```
 
-a v prohlížeči otevřete `http://127.0.0.1:9981`. Pak:
+a v prohlížeči otevřete `http://127.0.0.1:9981`. Po restartu Raspberry je potřeba tunel otevřít znovu.
 
-1. Průvodce prvním spuštěním: jazyk čeština, síť **DVB-T**, předladěné multiplexy **Czech Republic**
-   (nebo ruční přidání multiplexů DVB-T2 podle mapy pokrytí na digitalnitelevize.cz),
-   prohledat, „Map all services“.
-2. Configuration → Users → Access Entries a Passwords: vytvořte uživatele **`cztvhub`** s heslem
-   z instalace, povolená síť `127.0.0.1/32`, práva *Web interface*, *Admin*, *Streaming* a
-   *Video recorder* (Admin je potřeba pro stav tunerů a pro `dvb-setup`).
-3. Configuration → General → Base: *HTTP authentication* nastavte na „Both plain and digest“.
-4. Ověřte, že v Configuration → Channel/EPG jsou kanály a po pár minutách i programový průvodce (EPG).
-5. Nic s CA/CI/descramblery nenastavujte. Kanály šifrovaných multiplexů můžete vypnout.
+**Průvodce prvním spuštěním** (jde spustit znovu v Configuration → General → Base → *Start wizard*, ale přidal by
+síť a multiplexy podruhé):
+1. Jazyk čeština.
+2. *Access Control*: **Allowed network `127.0.0.1/32`** (prázdné pole = přístup odkudkoli), jméno a heslo
+   správce, a jako běžného uživatele **`cztvhub`** s heslem z instalace.
+3. *Tuner and Network*: u tunerů typu **DVB-T** zvolte *DVB-T Network* (DVB-T pokrývá i DVB-T2; u více tunerů
+   všechny do stejné sítě). Řádky **IPTV** a **DVB-C** nechte bez sítě – kabel ani IPTV nepotřebujete a stejný
+   fyzický tuner by se o ně přetahoval.
+4. *Predefined Muxes*: **Czech Republic: cz-All** (prohledá všechny kanály, trvá déle).
+5. *Scanning*: počkejte na konec. Výsledek „0 services“ u všech multiplexů = obvykle chybějící firmware (2.2),
+   ne anténa. Po doplnění firmwaru v Configuration → DVB Inputs → Muxes označte vše → *Edit* → *Scan status*
+   `PEND`. Funkční multiplexy mají *Scan result* `OK` (typicky 4 celoplošné + regionální).
+6. *Service Mapping*: když jsou služby, **Map all services**; jinak později v Configuration → DVB Inputs →
+   Services → *Map services → Map all services*.
+
+**Po průvodci:**
+1. Configuration → Users → Access Entries → `cztvhub`: povolená síť `127.0.0.1/32`, práva *Web interface*,
+   **Admin**, *Streaming* a *Video recorder*. Bez *Admin* brána vidí kanály, ale `status` hlásí
+   `"tuners": []` a `"tvheadendReachable": false`.
+2. Configuration → General → Base: *HTTP authentication* nastavte na „Both plain and digest“.
+3. Configuration → Channel / EPG → Channels: zkontrolujte kanály, duplicitní (např. Nova a Nova Cinema jsou ve
+   dvou multiplexech) vypněte (*Enabled*), případně jim dejte čísla – aplikace řadí podle čísla, pak abecedy.
+4. Nic s CA/CI/descramblery nenastavujte. Kanály šifrovaných multiplexů můžete vypnout.
+
+**Kontrola brány** na Raspberry (klíč se načte z konfigurace a nevypíše):
+
+```bash
+KEY=$(sudo sed -n 's/^key *= *\([^ ;]*\).*/\1/p' /etc/cztvhub/cztvhub.conf | head -1)
+curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8098/dvb/status; echo     # tunery, "tvheadendReachable": true
+curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8098/dvb/channels | head -c 600; echo
+```
+
+Hned po startu může být každý tuner `"inUse": true` – TVHeadend stahuje programový průvodce (EPG); za pár minut
+se uvolní.
+
+**Ladění signálu bez TVHeadendu** (když ani po firmwaru nic nechytá): zastavte TVHeadend
+(`sudo systemctl stop tvheadend`), `sudo apt install -y dvb-tools` a projděte kanály 21–48 v DVB-T2:
+
+```bash
+for ch in $(seq 21 48); do
+  printf '[CH%s]\n\tDELIVERY_SYSTEM = DVBT2\n\tFREQUENCY = %s\n\tBANDWIDTH_HZ = 8000000\n\tSTREAM_ID = 0\n\n' \
+    "$ch" "$(( (306 + 8*ch) * 1000000 ))"
+done > /tmp/cz-t2.conf
+dvbv5-scan -a 0 /tmp/cz-t2.conf 2>&1 | grep -E "Lock|Service" | head -60
+sudo systemctl start tvheadend
+```
 
 ## 4. Nahrávání
 
