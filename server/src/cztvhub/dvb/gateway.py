@@ -418,9 +418,13 @@ class DvbGateway:
             return fmp4.neutralise_edits(data)
         if session.shifts is None:
             try:
-                session.shifts = fmp4.track_shifts((session.directory / INIT).read_bytes())
+                init = (session.directory / INIT).read_bytes()
             except OSError:
                 return data  # init not written yet (cannot happen for a listed segment)
+            session.shifts = fmp4.track_shifts(init)
+            session.hevc_track = fmp4.hevc_track(init)
+        # open-GOP HEVC: keyframe after its leading pictures again (ffmpeg HLS muxer bug, fmp4.py)
+        data = fmp4.fix_leading_pictures(data, session.hevc_track)
         return fmp4.shift_fragments(data, session.shifts)
 
     # -- ad breaks (spec/ad-breaks.md) -----------------------------------------------------

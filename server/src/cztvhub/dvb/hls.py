@@ -174,6 +174,7 @@ class HlsSession:
         self.error: Exception | None = None
         self.vod: bool | None = None  # decided at the first playlist response of a recording
         self.shifts: dict[int, int] | None = None  # per-track tfdt shifts for A/V sync (fmp4.py)
+        self.hevc_track: int | None = None  # video track whose open-GOP keyframes get fixed (fmp4.py)
         self.target = LIVE_TARGET  # live: announced TARGETDURATION, only ever grows (should stay 2)
         self.answered = False  # live: the first playlist answer waits for LIVE_START_SECONDS of media
         self.source: Source | None = None

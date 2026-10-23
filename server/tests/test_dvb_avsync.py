@@ -177,3 +177,48 @@ class AvSyncTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+HAVE_X265 = bool(shutil.which("ffmpeg")) and " libx265 " in _encoders()
+
+
+@unittest.skipUnless(HAVE_X265, "ffmpeg with libx265 needed")
+class OpenGopOrderTest(unittest.TestCase):
+    """Open-GOP HEVC (like ČT's DVB-T2): after the gateway's remux + fix the frames must come out in the
+    source's order. ffmpeg's HLS muxer alone presents each fragment's CRA before its leading pictures."""
+
+    def display_order(self, path: Path) -> list[int]:
+        """Decode-order index of the video packets sorted by their container presentation time (as players
+        display them; edit lists ignored)."""
+        out = subprocess.run(["ffprobe", "-v", "error", "-ignore_editlist", "1", "-select_streams", "v:0",
+                              "-show_entries", "packet=pts", "-of", "csv=p=0", str(path)],
+                             capture_output=True, text=True, check=True).stdout
+        pts = [int(x.strip(",")) for x in out.split()]
+        return sorted(range(len(pts)), key=lambda i: (pts[i], i))
+
+    def test_frame_order_matches_the_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "src.ts"
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                            "testsrc2=size=320x180:rate=50,hue=h='floor(t/1.7)*90'", "-t", "8",
+                            "-c:v", "libx265", "-preset", "fast", "-x265-params",
+                            "log-level=error:keyint=64:open-gop=1:bframes=7:b-pyramid=1",
+                            "-f", "mpegts", str(src)], check=True)
+            work = root / "hls"
+            work.mkdir()
+            data = src.read_bytes()
+            subprocess.run(hls.build_ffmpeg_command(work, hls.Codecs("hevc", ""), live=False), input=data,
+                           check=True, capture_output=True)
+            init = (work / hls.INIT).read_bytes()
+            track = fmp4.hevc_track(init)
+            self.assertIsNotNone(track)
+            segments = [p.read_bytes() for p in sorted(work.glob("seg_*.m4s"))]
+            raw, fixed = root / "raw.mp4", root / "fixed.mp4"
+            raw.write_bytes(init + b"".join(segments))
+            fixed.write_bytes(fmp4.neutralise_edits(init) + b"".join(
+                fmp4.fix_leading_pictures(s, track) for s in segments))
+            source = self.display_order(src)
+            self.assertNotEqual(self.display_order(raw), source)  # the muxer bug this guards against
+            self.assertEqual(self.display_order(fixed), source)
+            self.assertIs(fmp4.fix_leading_pictures(segments[1], None), segments[1])  # not HEVC: untouched

@@ -172,6 +172,13 @@ gateway serves the init segment with identity edit lists and adds each track's `
 reference the previous segment (`dvb-diag --frames`, 2026-10-23). The playlists therefore do not claim independent
 segments, so players decode across segment boundaries instead of restarting (which showed brief artefacts).
 
+## Open-GOP keyframe order (`fmp4.fix_leading_pictures`)
+ffmpeg's HLS muxer (9.0.2) writes a too small composition offset for the CRA that starts each fragment of an
+open-GOP HEVC stream, so it was presented before its RASL leading pictures: at every scene cut the TV showed one
+frame of the new shot, then a few of the old one (found 2026-10-23 in a screen recording; ffmpeg's plain MP4 muxer
+gets it right). The gateway rewrites that offset so the CRA is presented right after its last leading picture
+(in place, served init/segments only). `tests/test_dvb_avsync.py` compares the display order with the source.
+
 ## Thumbnails (approved by the user on 2026-10-23; see `docs/legal-notes.md`)
 One still per recording so the viewer sees what a programme is ("it does not have to be current, just show what is
 on"). Implemented in `src/cztvhub/dvb/thumbs.py`.

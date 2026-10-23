@@ -131,3 +131,101 @@ def shift_fragments(segment: bytes, shifts: dict[int, int]) -> bytes:
                 if value < 1 << (8 * n):
                     data[db + 4:db + 4 + n] = struct.pack(fmt, value)
     return bytes(data)
+
+
+# -- open-GOP leading pictures ------------------------------------------------------------------
+# ffmpeg's HLS muxer (seen with 9.0.2) writes a too small composition offset for the keyframe that starts
+# each fragment when the stream has an open GOP (ČT's DVB-T2 HEVC: CRA + RASL leading pictures): the CRA
+# is then presented before its leading pictures, which belong before it. At every scene cut the TV showed
+# one frame of the new shot, then a few frames of the old one, then the new shot ("the picture jerks").
+# Its plain MP4 muxer gets the same data right. fix_leading_pictures() restores the CRA's offset so that
+# it is presented right after its last leading picture, in place.
+IRAP = range(16, 22)  # BLA, IDR, CRA
+LEADING = (6, 7, 8, 9)  # RADL, RASL
+
+
+def _first_slice_type(sample: bytes) -> int | None:
+    """NAL unit type of the first slice of a length-prefixed (4 bytes) HEVC sample."""
+    p = 0
+    while p + 5 <= len(sample):
+        length = struct.unpack(">I", sample[p:p + 4])[0]
+        if length <= 0:
+            return None
+        nal = (sample[p + 4] >> 1) & 0x3F
+        if nal < 32:
+            return nal
+        p += 4 + length
+    return None
+
+
+def video_track(init: bytes) -> int | None:
+    for tb, te in find(init, 0, len(init), [b"moov", b"trak"]):
+        handler = next((init[b + 8:b + 12] for b, _ in find(init, tb, te, [b"mdia", b"hdlr"])), b"")
+        if handler == b"vide":
+            return next((_full_box_u32(init, b, 12, 20) for b, _ in find(init, tb, te, [b"tkhd"])), None)
+    return None
+
+
+def hevc_track(init: bytes) -> int | None:
+    """The video track id if it is HEVC (hvc1/hev1), else None."""
+    track = video_track(init)
+    return track if track is not None and (b"hvc1" in init or b"hev1" in init) else None
+
+
+def fix_leading_pictures(segment: bytes, track: int | None) -> bytes:
+    if track is None:
+        return segment
+    data = None
+    for mb, me in find(segment, 0, len(segment), [b"moof"]):
+        moof_start = mb - 8
+        for tb, te in find(segment, mb, me, [b"traf"]):
+            hd = next(find(segment, tb, te, [b"tfhd"]), None)
+            if hd is None or struct.unpack(">I", segment[hd[0] + 4:hd[0] + 8])[0] != track:
+                continue
+            hflags = int.from_bytes(segment[hd[0] + 1:hd[0] + 4], "big")
+            p = hd[0] + 8 + (8 if hflags & 1 else 0) + (4 if hflags & 2 else 0)
+            default_duration = struct.unpack(">I", segment[p:p + 4])[0] if hflags & 8 else 0
+            p += 4 if hflags & 8 else 0
+            default_size = struct.unpack(">I", segment[p:p + 4])[0] if hflags & 0x10 else 0
+            for rb, _ in find(segment, tb, te, [b"trun"]):
+                version, rflags = segment[rb], int.from_bytes(segment[rb + 1:rb + 4], "big")
+                if not rflags & 0x800:
+                    continue  # no composition offsets at all
+                count = struct.unpack(">I", segment[rb + 4:rb + 8])[0]
+                q, offset, dts = rb + 8, moof_start, 0
+                if rflags & 1:
+                    offset += struct.unpack(">i", segment[q:q + 4])[0]
+                    q += 4
+                if rflags & 4:
+                    q += 4
+                rows = []  # (nal type, dts, cto, position of the cto field, duration)
+                for _ in range(count):
+                    duration, size = default_duration, default_size
+                    if rflags & 0x100:
+                        duration = struct.unpack(">I", segment[q:q + 4])[0]
+                        q += 4
+                    if rflags & 0x200:
+                        size = struct.unpack(">I", segment[q:q + 4])[0]
+                        q += 4
+                    if rflags & 0x400:
+                        q += 4
+                    cto = struct.unpack(">i" if version == 1 else ">I", segment[q:q + 4])[0]
+                    rows.append((_first_slice_type(segment[offset:offset + size]), dts, cto, q, duration))
+                    q += 4
+                    offset += size
+                    dts += duration
+                for i, (nal, dts0, cto0, pos, duration) in enumerate(rows):
+                    if nal not in IRAP:
+                        continue
+                    leading = []
+                    for nal2, dts2, cto2, _, _ in rows[i + 1:]:
+                        if nal2 not in LEADING:
+                            break
+                        leading.append(dts2 + cto2)
+                    if not leading or dts0 + cto0 > max(leading):
+                        continue
+                    wanted = max(leading) + (duration or 1) - dts0
+                    if data is None:
+                        data = bytearray(segment)
+                    data[pos:pos + 4] = struct.pack(">i" if version == 1 else ">I", wanted)
+    return segment if data is None else bytes(data)
