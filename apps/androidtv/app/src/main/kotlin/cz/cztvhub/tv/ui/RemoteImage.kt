@@ -16,10 +16,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import cz.cztvhub.core.CtApi
+import cz.cztvhub.core.ImageQueue
+import cz.cztvhub.core.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URI
+import java.time.Duration
 
 /**
  * In-memory cache of programme images (no disk cache, no image library). Anténa thumbnails go through it too:
@@ -28,7 +31,8 @@ import java.net.URI
  * decodes only the few images the detail actually shows.
  */
 class ImageCache {
-    enum class Fetched { OK, MISSING, FAILED }
+    /** A download's answer; [retryAfter] is the gateway's `Retry-After` when it is busy (`503`). */
+    data class Fetched(val outcome: ImageQueue.Outcome, val retryAfter: Duration = ImageQueue.BUSY_RETRY)
 
     /** A share of the heap, at most 48 MB; every entry counts at least budget/300, so about 300 images at most. */
     private val budget = minOf(Runtime.getRuntime().maxMemory() / 8, 48L shl 20).toInt()
@@ -55,16 +59,18 @@ class ImageCache {
                 when (connection.responseCode) {
                     200 -> {
                         bytes.put(url, connection.inputStream.use { it.readBytes() })
-                        Fetched.OK
+                        Fetched(ImageQueue.Outcome.OK)
                     }
-                    404 -> Fetched.MISSING
-                    else -> Fetched.FAILED
+                    404 -> Fetched(ImageQueue.Outcome.MISSING)
+                    // The gateway's ffmpeg slots are busy: try again later, never "missing".
+                    503 -> Fetched(ImageQueue.Outcome.BUSY, ImageQueue.retryAfter(connection.getHeaderField("Retry-After")))
+                    else -> Fetched(ImageQueue.Outcome.FAILED)
                 }
             } finally {
                 connection.disconnect()
             }
         } catch (_: Exception) {
-            Fetched.FAILED
+            Fetched(ImageQueue.Outcome.FAILED)
         }
     }
 

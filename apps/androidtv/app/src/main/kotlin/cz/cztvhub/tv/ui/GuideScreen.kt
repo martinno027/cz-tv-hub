@@ -76,6 +76,7 @@ import cz.cztvhub.core.Days
 import cz.cztvhub.core.GuideLayout
 import cz.cztvhub.core.GuideWindow
 import cz.cztvhub.core.ImagePrefetch
+import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.dvb.DvbAction
