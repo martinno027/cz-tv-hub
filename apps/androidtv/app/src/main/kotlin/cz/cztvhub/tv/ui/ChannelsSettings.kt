@@ -1,19 +1,26 @@
 package cz.cztvhub.tv.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -28,6 +35,7 @@ import cz.cztvhub.core.Channels
 import cz.cztvhub.tv.R
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
+import androidx.compose.ui.unit.IntSize
 
 /** A row of the settings list: a channel's key and name. */
 private data class ChannelItem(val key: String, val name: String)
@@ -66,12 +74,18 @@ fun ChannelsSection(viewModel: MainViewModel) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupList(prefs: ChannelPrefs, keys: List<String>, names: Map<String, String>, viewModel: MainViewModel) {
     val all = prefs.arrange(keys).all.map { ChannelItem(it, names[it].orEmpty()) }
     // One requester per button and channel, so focus can follow a moved row when its button turns disabled.
     val ups = remember { mutableMapOf<String, FocusRequester>() }
     val downs = remember { mutableMapOf<String, FocusRequester>() }
+    // Focus stays on the moved row's button, so the scroll container never scrolls by itself:
+    // bring the moved row (with a margin) into view after each move.
+    val rows = remember { mutableMapOf<String, BringIntoViewRequester>() }
+    val sizes = remember { mutableMapOf<String, IntSize>() }
+    val margin = with(LocalDensity.current) { 48.dp.toPx() }
     val scope = rememberCoroutineScope()
 
     fun move(item: ChannelItem, by: Int) {
@@ -84,10 +98,15 @@ private fun GroupList(prefs: ChannelPrefs, keys: List<String>, names: Map<String
             target == 0 -> downs[item.key]
             target == all.lastIndex -> ups[item.key]
             else -> null
-        } ?: return
+        }
         scope.launch {
             yield() // let the list recompose first
-            runCatching { requester.requestFocus() }
+            if (requester != null) runCatching { requester.requestFocus() }
+            withFrameNanos { } // and lay out the row at its new place
+            val size = sizes[item.key] ?: IntSize.Zero
+            rows[item.key]?.bringIntoView(
+                Rect(0f, -margin, size.width.toFloat(), size.height + margin),
+            )
         }
     }
 
@@ -97,12 +116,16 @@ private fun GroupList(prefs: ChannelPrefs, keys: List<String>, names: Map<String
                 val hidden = prefs.isHidden(item.key)
                 val up = ups.getOrPut(item.key) { FocusRequester() }
                 val down = downs.getOrPut(item.key) { FocusRequester() }
+                val row = rows.getOrPut(item.key) { BringIntoViewRequester() }
                 val showLabel = stringResource(R.string.channels_show, item.name)
                 val upLabel = stringResource(R.string.channels_up, item.name)
                 val downLabel = stringResource(R.string.channels_down, item.name)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .bringIntoViewRequester(row)
+                        .onSizeChanged { sizes[item.key] = it },
                 ) {
                     Button(
                         onClick = { viewModel.updateChannelPrefs { it.toggle(item.key) } },

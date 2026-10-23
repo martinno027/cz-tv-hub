@@ -66,11 +66,7 @@ private struct SettingsPage: View {
                 .font(.title.weight(.bold))
             switch section {
             case .channels:
-                ScrollView {
-                    ChannelSettingsSection()
-                        .frame(maxWidth: 1100, alignment: .leading)
-                        .padding(.vertical, 20)
-                }
+                ChannelSettingsSection()
             case .server:
                 ServerSettingsSection()
             }

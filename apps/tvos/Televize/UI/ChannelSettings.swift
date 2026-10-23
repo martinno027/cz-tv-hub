@@ -24,13 +24,16 @@ struct ChannelSettingsSection: View {
 
     var body: some View {
         let prefs = model.channelPrefs
+        // The list scrolls itself: focus stays on the moved row's arrow, so tvOS would not scroll for it.
+        ScrollViewReader { proxy in
+        ScrollView {
         VStack(alignment: .leading, spacing: 20) {
             Text("Které kanály tato televize ukazuje v Živě a v TV průvodci, a v jakém pořadí. Platí jen pro toto zařízení.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
             if model.antenna != nil { groupTitle("Internet ČT") }
-            list(prefs.internet().all.map { Item(id: ChannelPrefs.ctKey($0), name: $0.name) })
+            list(prefs.internet().all.map { Item(id: ChannelPrefs.ctKey($0), name: $0.name) }, proxy: proxy)
 
             if model.antenna != nil {
                 groupTitle("Anténa")
@@ -39,7 +42,7 @@ struct ChannelSettingsSection: View {
                 } else if antennaChannels.isEmpty {
                     Text("Načítám kanály antény…").font(.callout).foregroundStyle(.secondary)
                 }
-                list(prefs.antenna(antennaChannels).all.map { Item(id: ChannelPrefs.dvbKey($0), name: $0.name) })
+                list(prefs.antenna(antennaChannels).all.map { Item(id: ChannelPrefs.dvbKey($0), name: $0.name) }, proxy: proxy)
             }
 
             Button("Obnovit výchozí pořadí") {
@@ -48,6 +51,10 @@ struct ChannelSettingsSection: View {
             .disabled(prefs.prefs == ChannelPrefs())
             .padding(.top, 10)
         }
+        .frame(maxWidth: 1100, alignment: .leading)
+        .padding(.vertical, 20)
+        }
+        }
         .task(id: model.gateway) { await loadAntenna() }
     }
 
@@ -55,7 +62,7 @@ struct ChannelSettingsSection: View {
         Text(text).font(.headline).foregroundStyle(.secondary).padding(.top, 10)
     }
 
-    private func list(_ items: [Item]) -> some View {
+    private func list(_ items: [Item], proxy: ScrollViewProxy) -> some View {
         let keys = items.map(\.id)
         return VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
@@ -72,7 +79,7 @@ struct ChannelSettingsSection: View {
                     .accessibilityValue(hidden ? "skrytý" : "zobrazený")
 
                     Button {
-                        move(item.id, by: -1, in: keys)
+                        move(item.id, by: -1, in: keys, proxy: proxy)
                     } label: {
                         Image(systemName: "chevron.up")
                     }
@@ -81,7 +88,7 @@ struct ChannelSettingsSection: View {
                     .accessibilityLabel("Posunout \(item.name) nahoru")
 
                     Button {
-                        move(item.id, by: 1, in: keys)
+                        move(item.id, by: 1, in: keys, proxy: proxy)
                     } label: {
                         Image(systemName: "chevron.down")
                     }
@@ -89,6 +96,7 @@ struct ChannelSettingsSection: View {
                     .focused($focused, equals: .down(item.id))
                     .accessibilityLabel("Posunout \(item.name) dolů")
                 }
+                .id(item.id)
             }
         }
         .focusSection()
@@ -96,8 +104,9 @@ struct ChannelSettingsSection: View {
 
     /// Focus follows the moved row (rows are identified by key); at the edge the pressed button
     /// becomes disabled, so focus goes to the row's other arrow.
-    private func move(_ key: String, by delta: Int, in keys: [String]) {
+    private func move(_ key: String, by delta: Int, in keys: [String], proxy: ScrollViewProxy) {
         model.channelPrefs.update { $0.move(key, by: delta, in: keys) }
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(key, anchor: .center) }
         guard let index = keys.firstIndex(of: key) else { return }
         let newIndex = index + delta
         if delta < 0, newIndex == 0 {
