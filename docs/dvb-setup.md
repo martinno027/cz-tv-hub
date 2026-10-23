@@ -30,13 +30,21 @@ bash server/deploy/install-dvb.sh
 ```
 
 Skript:
-- nainstaluje `tvheadend`, `ffmpeg` a `avahi-daemon`,
+- nainstaluje `ffmpeg` a `avahi-daemon` a **TVHeadend z oficiálního repozitáře projektu TVHeadend** (Cloudsmith),
+  protože Debian ani Raspberry Pi OS ho v balíčcích nemají; podporované jsou Raspberry Pi OS 64-bit Bookworm a Trixie.
+  Při instalaci se TVHeadend zeptá na jméno a heslo **správce** – zvolte si je a poznamenejte (slouží pro webové
+  rozhraní, nejsou to údaje uživatele `cztvhub`),
 - nastaví TVHeadend tak, aby poslouchal **jen na 127.0.0.1** (z ostatních počítačů není vidět),
 - vytvoří `/etc/cztvhub/cztvhub.conf` (práva 0600) s náhodným **klíčem pro aplikace** a heslem pro
   uživatele TVHeadendu `cztvhub`; obojí vypíše, poznamenejte si je,
 - nainstaluje a spustí službu `cz-tv-hub` (port 8098),
 - zapne ohlašování v domácí síti (mDNS `_cztvhub._tcp`) **jen na rozhraní domácí sítě**, na Tailscale ne
   (`allow-interfaces` / `deny-interfaces=tailscale0` v `/etc/avahi/avahi-daemon.conf`).
+
+**Disk na nahrávky**: připojte USB disk natrvalo (např. do `/srv/tv`, záznam v `/etc/fstab` podle UUID), vytvořte
+`/srv/tv/recordings` s vlastníkem `hts` (`sudo install -d -o hts -g video /srv/tv/recordings`) a v TVHeadendu
+(Configuration → Recording → Digital Video Recorder Profiles → výchozí profil) nastavte *Recording system path* na
+tuto složku. Jinak se nahrává na SD kartu, která se rychle zaplní a opotřebuje.
 
 Pokud chcete dočasné soubory pro přehrávání na velkém disku, změňte `hls_dir` v konfiguraci a tutéž cestu
 doplňte do `ReadWritePaths=` v `/etc/systemd/system/cztvhub.service`.

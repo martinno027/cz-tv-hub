@@ -5,7 +5,24 @@ set -euo pipefail
 cd "$(dirname "$0")/.."   # server/ directory: src/ and deploy/ are relative to it
 
 sudo apt-get update
-sudo apt-get install -y tvheadend ffmpeg avahi-daemon
+sudo apt-get install -y ffmpeg avahi-daemon curl
+
+# TVHeadend is not packaged by Debian / Raspberry Pi OS: use the TVHeadend project's own repository (Cloudsmith).
+# Raspberry Pi OS 64-bit: bookworm builds are published as debian/bookworm, trixie builds as raspbian/trixie.
+if ! apt-cache policy tvheadend | grep -q 'Candidate: [0-9]'; then
+  # shellcheck source=/dev/null
+  . /etc/os-release
+  case "${VERSION_CODENAME:-}" in
+    bookworm) tvh_distro=debian ;;
+    trixie) tvh_distro=raspbian ;;
+    *) echo "No TVHeadend packages known for ${PRETTY_NAME:-this system}; see docs/dvb-setup.md." >&2; exit 1 ;;
+  esac
+  curl -1sLf 'https://dl.cloudsmith.io/public/tvheadend/tvheadend/setup.deb.sh' \
+    | sudo env distro="$tvh_distro" codename="$VERSION_CODENAME" bash
+  sudo apt-get update
+fi
+# Interactive on purpose: the package asks for a TVHeadend administrator name and password.
+sudo apt-get install -y tvheadend
 
 # TVHeadend listens on 127.0.0.1 only (web UI via SSH tunnel, see docs/dvb-setup.md).
 if ! grep -q -- '--bindaddr 127.0.0.1' /etc/default/tvheadend 2>/dev/null; then
