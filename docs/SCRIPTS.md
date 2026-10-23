@@ -1,0 +1,144 @@
+# Scripts and commands
+
+Everything in this repo that can be run by hand, with what it is for and how it can go wrong. **A new script or
+command belongs here in the same change.** Server commands run from `server/` (`cd server` first) unless noted.
+
+## Everyday development
+
+<details>
+<summary><code>PYTHONPATH=src python3 -m unittest discover -s tests</code> — server and gateway tests</summary>
+
+The whole server suite (~26 s). Needs no network; tests that run real ffmpeg skip without it (the open-GOP order
+test also needs libx265).
+
+Can go wrong: running it from the repo root instead of `server/` finds no tests (`Ran 0 tests` is not a pass).
+
+</details>
+
+<details>
+<summary><code>PYTHONPATH=src python3 -m cztvhub dvb-fake [--port P] [--channels N] [--tuners N]</code> — fake TVHeadend</summary>
+
+A fake TVHeadend with synthetic HEVC test streams and fake recordings, for developing the gateway and the apps
+without a tuner. `--channels 60` generates a big guide; `--tuners 1` helps to test "tuner busy".
+
+Can go wrong: the default port is 9981. If 9981 is already taken (for example by an SSH tunnel to a real
+TVHeadend), the fake fails to start — and a gateway configured for 9981 then talks to whatever owns that port. Pick
+another port and point a copy of `deploy/cztvhub-dev.conf` at it.
+
+</details>
+
+<details>
+<summary><code>PYTHONPATH=src python3 -m cztvhub serve [--config FILE] [--host H] [--port P]</code> — the server</summary>
+
+Without `--config` the CT-only server (playlist + redirects). With a config with `[dvb] enabled = true` also the
+DVB-T2 gateway (`/dvb/*`) and, with `[admin] password`, the admin page `/admin`. For development:
+`--config deploy/cztvhub-dev.conf` against the fake TVHeadend.
+
+Can go wrong: two servers on one port; a dev config pointing at a real TVHeadend.
+
+</details>
+
+<details>
+<summary><code>PYTHONPATH=src python3 -m cztvhub check</code> — live check of the CT streams</summary>
+
+Resolves every CT channel (live + timeshift) and one archive item against the real CT API. The only command besides
+`serve` and the Kodi add-on that talks to CT. Use it after API changes (skill `verify-streams`), not in tests.
+
+Can go wrong: needs internet in Czechia; CT may change its API without notice.
+
+</details>
+
+<details>
+<summary><code>PYTHONPATH=src python3 -m cztvhub playlist --base-url URL</code> — print the M3U</summary>
+
+Prints the playlist the server would serve, for checking the channel list.
+
+</details>
+
+## Raspberry Pi
+
+<details>
+<summary><code>bash server/deploy/install.sh</code> / <code>bash server/deploy/install-dvb.sh</code> — install or update</summary>
+
+`install.sh` copies the code to `/opt/cztvhub`, installs the systemd unit and restarts the service; an existing
+`/etc/cztvhub/cztvhub.conf` is kept. `install-dvb.sh` also installs TVHeadend (project repository), ffmpeg and
+avahi and creates the config with DVB enabled. Update: `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`.
+
+Can go wrong: `install-dvb.sh` asks for a TVHeadend admin name and password (interactive); TVHeadend must listen on
+127.0.0.1 only — the script checks it and warns.
+
+</details>
+
+<details>
+<summary><code>python3 -m cztvhub dvb-diag --config /etc/cztvhub/cztvhub.conf [--channel NAME] [--seconds S] [--frames]</code> — why Anténa stalls or glitches</summary>
+
+Run on the Pi (as the `cztvhub` user, `PYTHONPATH=/opt/cztvhub/src`) while a TV plays the channel. Follows the same
+live session and reports tuner signal and error counters, segment lengths and gaps, simulated player stalls and,
+with `--frames`, the picture (segment start pictures, open GOP, interlacing, decoder errors; ~2 min kept in memory).
+
+Can go wrong: it is a viewer too — on a channel nobody watches it starts a session and uses a tuner.
+
+</details>
+
+<details>
+<summary><code>python3 -m cztvhub dvb-setup --config /etc/cztvhub/cztvhub.conf [--dry-run]</code> — TVHeadend per-programme recording</summary>
+
+The older per-programme DVR rules in TVHeadend. Installs that use the gateway's continuous recording (`/admin`,
+"Nahrávat") must not run it (`docs/dvb-setup.md`, chapter 4).
+
+</details>
+
+<details>
+<summary><code>journalctl -u cztvhub -f</code> — gateway log</summary>
+
+Includes one line per live start (`dvb: live start …` with the time of each step) and admin actions.
+
+</details>
+
+## Apps
+
+<details>
+<summary>tvOS — <code>cd apps/tvos/CTCore && swift test</code>; <code>cd apps/tvos && xcodegen generate</code>, then Xcode / <code>xcodebuild</code></summary>
+
+Logic tests in the CTCore package; the app is built from `project.yml` with XcodeGen.
+
+Can go wrong: `xcodegen generate` recreates `Televize.xcodeproj` and drops the signing team chosen in Xcode — pick it
+again before running on a device. In the simulator install `Televize.app`, not the UI-test runner.
+
+</details>
+
+<details>
+<summary>Android TV — <code>cd apps/androidtv && ./gradlew test assembleDebug</code></summary>
+
+Needs `JAVA_HOME` (Android Studio's JBR) and `ANDROID_HOME` (the SDK) when not set globally.
+
+</details>
+
+<details>
+<summary>Samsung — <code>cd apps/tizen && node --test test/*.test.js</code>; <code>python3 apps/tizen/build.py [--gateway ADDR --key-file FILE] [--install TV_IP]</code></summary>
+
+Tests include the Chromium 56 syntax guard. UI check in a browser: serve the repo root and open
+`apps/tizen/app/index.html?demo` (`&channels=60` for a big guide). `build.py` packages `dist/Televize.wgt` with the
+Tizen Studio CLI; `--gateway`/`--key-file` preset the gateway in that build only.
+
+Can go wrong: the preset key ends up in the built package — never share or commit `dist/`.
+
+</details>
+
+<details>
+<summary>Kodi add-on — <code>python3 kodi-addon/build.py [--serve --port P]</code></summary>
+
+Builds the add-on ZIP into `dist/`; `--serve` offers it on the LAN for installing on Apple TV / Android TV Kodi.
+
+</details>
+
+## Repository
+
+<details>
+<summary><code>python3 tools/check_public.py [--staged]</code> — public-repo guard</summary>
+
+Fails when a tracked (or staged) file is forbidden or contains forbidden content (generic checks such as private
+keys, plus one regex per line from the file named by the `CZTVHUB_PRIVATE_PATTERNS` environment variable — kept
+outside this repo). Runs in CI and in the pre-commit hook.
+
+</details>
