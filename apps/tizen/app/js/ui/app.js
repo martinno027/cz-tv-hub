@@ -180,7 +180,7 @@
 
     /**
      * One guide image as an object URL (ImageLoader's fetch): a CT image from CT's CDN (no key), or a recording's
-     * gateway thumbnail with the key header. Resolves {status, url}; url null unless an image came back.
+     * gateway thumbnail with the key header. Resolves {status, url, size, retryAfter}; url null unless an image came back.
      */
     fetchImage: function (request) {
       var gateway = request.kind === 'gw';
@@ -188,9 +188,10 @@
       if (gateway && !config) return Promise.resolve({ status: 0, url: null });
       var call = gateway ? { url: config.url(CT.Thumbs.path(request.recordingId)), headers: config.authHeaders() } : { url: request.url };
       return this.blobTransport(call).then(function (r) {
-        if (r.status !== 200) return { status: r.status, url: null };
+        // Retry-After in seconds (the gateway sends 5 with a 503 when busy); a date or nothing = the default.
+        if (r.status !== 200) return { status: r.status, url: null, retryAfter: /^\d+$/.test(r.retryAfter || '') ? Number(r.retryAfter) : 0 };
         if (!r.blob || !(gateway ? /^image\/jpeg/ : /^image\//).test(r.type)) return { status: 415, url: null };
-        return { status: 200, url: root.URL.createObjectURL(r.blob) };
+        return { status: 200, url: root.URL.createObjectURL(r.blob), size: r.blob.size };
       });
     },
 

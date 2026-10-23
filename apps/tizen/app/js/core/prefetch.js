@@ -18,6 +18,10 @@
     /** Requests at a time per kind: CT's CDN, the gateway (it runs at most 2 ffmpeg). */
     LIMITS: { ct: 4, gw: 2 },
     MAX_IMAGES: 300,
+    /** Memory budget of the downloaded images (JPEG bytes as blobs; only the one on screen is decoded). */
+    MAX_BYTES: 48 * 1024 * 1024,
+    /** Gateway busy (503) without a usable Retry-After: try again after this. */
+    BUSY_RETRY_MS: 5000,
     /** A failed image (or a 404 of a growing recording) is asked again after this. */
     RETRY_MS: 60 * 1000,
 
@@ -65,19 +69,24 @@
   /**
    * Fetch queue and memory cache. Requests are {key, kind: 'ct' | 'gw', final, …}; `final` false = may change
    * (a growing recording: its image and its 404 expire after 60 s). `opts`: fetch(request) → Promise of
-   * {status, url} (url = an object URL or null), revoke(url), now(), limits, max.
+   * {status, url, size, retryAfter} (url = an object URL or null, size in bytes, retryAfter in seconds),
+   * revoke(url), now(), setTimeout, limits, max, maxBytes.
    */
   function ImageLoader(opts) {
     this.fetch = opts.fetch;
     this.now = opts.now || Date.now;
     this.limits = opts.limits || Prefetch.LIMITS;
     this.revoke = opts.revoke || function () {};
-    this.cache = new CT.ThumbCache(opts.max || Prefetch.MAX_IMAGES, this.revoke);
+    this.setTimeout = opts.setTimeout || function (fn, ms) { return setTimeout(fn, ms); };
+    this.cache = new CT.ThumbCache(opts.max || Prefetch.MAX_IMAGES, this.revoke, opts.maxBytes || Prefetch.MAX_BYTES);
     this.queue = []; // waiting requests, next first
     this.running = {}; // key -> [callback]
     this.active = {}; // kind -> requests in flight
     this.failed = {}; // key -> time until which it is not asked again
     this.generations = {}; // kind -> count of clear()s, so late answers after a clear are dropped
+    this.busy = {}; // key -> {request, waiting}: answered 503, asked again after Retry-After
+    this.inWindow = {}; // keys of the last prefetch window
+    this.focusKey = null; // the focused programme's image (load)
   }
 
   /** The cached object URL of `key`, or null. */
@@ -94,7 +103,7 @@
   };
 
   ImageLoader.prototype.needed = function (request) {
-    return !this.running[request.key] && !this.isFailed(request.key) && !this.get(request.key);
+    return !this.running[request.key] && !this.busy[request.key] && !this.isFailed(request.key) && !this.get(request.key);
   };
 
   /**
@@ -102,13 +111,15 @@
    * goes ahead of the queue. Returns the cached URL or null.
    */
   ImageLoader.prototype.load = function (request, done) {
+    this.focusKey = request.key;
     var url = this.get(request.key);
     if (url || this.isFailed(request.key)) {
       if (done) done(url, url ? 200 : 0);
       return url;
     }
-    if (this.running[request.key]) {
-      if (done) this.running[request.key].push(done);
+    var waiting = this.running[request.key] || (this.busy[request.key] && this.busy[request.key].waiting);
+    if (waiting) {
+      if (done) waiting.push(done);
       return null;
     }
     this.queue = this.queue.filter(function (q) { return q.key !== request.key; });
@@ -120,6 +131,8 @@
   /** Replaces what waits with `requests` (nearest first); requests already running finish. */
   ImageLoader.prototype.prefetch = function (requests) {
     var self = this;
+    this.inWindow = {};
+    requests.forEach(function (r) { self.inWindow[r.key] = true; });
     this.queue = requests.filter(function (r) { return self.needed(r); }).map(function (r) {
       return { key: r.key, kind: r.kind, final: r.final, request: r, done: null };
     });
@@ -144,7 +157,7 @@
     var generation = this.generations[q.kind] || 0;
     this.active[q.kind] = (this.active[q.kind] || 0) + 1;
     this.running[q.key] = q.done ? [q.done] : [];
-    function finish(status, url) {
+    function finish(status, url, size, retryAfter) {
       self.active[q.kind]--;
       var waiting = self.running[q.key] || [];
       delete self.running[q.key];
@@ -152,7 +165,12 @@
         if (url) self.revoke(url);
         url = null;
       } else if (url) {
-        self.cache.put(q.key, url, self.now(), q.final !== false);
+        self.cache.put(q.key, url, self.now(), q.final !== false, size);
+      } else if (status === 503) {
+        // Gateway busy: never remembered as missing, asked again after Retry-After (the waiting callbacks wait on).
+        self.later(q, waiting, retryAfter);
+        self.pump();
+        return;
       } else {
         self.failed[q.key] = status === 404 && q.final !== false ? Infinity : self.now() + Prefetch.RETRY_MS;
       }
@@ -160,10 +178,32 @@
       self.pump();
     }
     this.fetch(q.request).then(function (r) {
-      finish(r.status, r.url || null);
+      finish(r.status, r.url || null, r.size || 0, r.retryAfter);
     }, function () {
       finish(0, null);
     });
+  };
+
+  /** After a 503: back into the queue after `retryAfter` s (default 5) if still focused or in the window. */
+  ImageLoader.prototype.later = function (q, waiting, retryAfter) {
+    var self = this;
+    var ms = retryAfter > 0 ? retryAfter * 1000 : Prefetch.BUSY_RETRY_MS;
+    var entry = { request: q.request, waiting: waiting };
+    this.busy[q.key] = entry;
+    this.setTimeout(function () {
+      if (self.busy[q.key] !== entry) return; // cleared meanwhile
+      delete self.busy[q.key];
+      var done = function (url, status) { entry.waiting.forEach(function (d) { d(url, status); }); };
+      if (q.key === self.focusKey) {
+        self.queue = self.queue.filter(function (x) { return x.key !== q.key; });
+        self.queue.unshift({ key: q.key, kind: q.kind, final: q.final, request: q.request, done: done });
+      } else if (self.inWindow[q.key] && self.needed(q)) {
+        self.queue.push({ key: q.key, kind: q.kind, final: q.final, request: q.request, done: done });
+      } else {
+        return; // left the window: dropped like any stale queue item
+      }
+      self.pump();
+    }, ms);
   };
 
   /** Forgets images (and failures) of one kind, or all; requests running now are discarded when they end. */
@@ -173,6 +213,7 @@
     this.cache.clear(match);
     this.queue = this.queue.filter(function (q) { return match && !match(q.key); });
     Object.keys(this.failed).forEach(function (key) { if (!match || match(key)) delete self.failed[key]; });
+    Object.keys(this.busy).forEach(function (key) { if (!match || match(key)) delete self.busy[key]; });
     (kind ? [kind] : Object.keys(this.limits)).forEach(function (k) {
       self.generations[k] = (self.generations[k] || 0) + 1;
     });

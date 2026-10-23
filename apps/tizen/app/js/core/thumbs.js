@@ -32,13 +32,16 @@
   };
 
   /**
-   * Small LRU of object URLs: get(id, now) → url | null; put(id, url, now, final). `revoke(url)` is called for
-   * every URL that leaves the cache (eviction, replacement, clear), so blobs do not pile up in memory.
+   * Small LRU of object URLs: get(id, now) → url | null; put(id, url, now, final, size). At most `max` entries
+   * and `maxBytes` of blobs (sizes as given to put). `revoke(url)` is called for every URL that leaves the
+   * cache (eviction, replacement, clear), so blobs do not pile up in memory.
    */
-  function ThumbCache(max, revoke) {
+  function ThumbCache(max, revoke, maxBytes) {
     this.max = max || Thumbs.MAX_ENTRIES;
+    this.maxBytes = maxBytes || Infinity;
+    this.bytes = 0;
     this.revoke = revoke || function () {};
-    this.items = []; // [{id, url, at, final}], oldest first
+    this.items = []; // [{id, url, at, final, size}], oldest first
   }
 
   ThumbCache.prototype.indexOf = function (id) {
@@ -56,14 +59,20 @@
     return item.url;
   };
 
-  ThumbCache.prototype.put = function (id, url, now, final) {
+  ThumbCache.prototype.put = function (id, url, now, final, size) {
     var i = this.indexOf(id);
     if (i >= 0) {
       var old = this.items.splice(i, 1)[0];
+      this.bytes -= old.size;
       if (old.url !== url) this.revoke(old.url);
     }
-    this.items.push({ id: id, url: url, at: now, final: !!final });
-    while (this.items.length > this.max) this.revoke(this.items.shift().url);
+    this.items.push({ id: id, url: url, at: now, final: !!final, size: size || 0 });
+    this.bytes += size || 0;
+    while (this.items.length > 1 && (this.items.length > this.max || this.bytes > this.maxBytes)) {
+      var gone = this.items.shift();
+      this.bytes -= gone.size;
+      this.revoke(gone.url);
+    }
   };
 
   /** Drops every entry, or only those whose id `match(id)` accepts. */
@@ -71,6 +80,7 @@
     var self = this;
     this.items = this.items.filter(function (item) {
       if (match && !match(item.id)) return true;
+      self.bytes -= item.size;
       self.revoke(item.url);
       return false;
     });

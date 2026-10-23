@@ -51,27 +51,29 @@ test('moved: a new window after more than 1 h or 3 rows', () => {
   assert.equal(CT.Prefetch.moved(last, { row: 4, time: 11 * H + M }), true);
 });
 
-/** An ImageLoader whose fetches wait until the test answers them. */
+/** An ImageLoader whose fetches (and timers) wait until the test answers (runs) them. */
 function loader(opts) {
   const pending = [];
   const revoked = [];
+  const timers = [];
   let now = 0;
   const l = new CT.ImageLoader(Object.assign({
     fetch: (req) => new Promise((resolve) => pending.push({ req, resolve })),
     revoke: (url) => revoked.push(url),
-    now: () => now
+    now: () => now,
+    setTimeout: (fn, ms) => timers.push({ fn, ms })
   }, opts || {}));
-  return { l, pending, revoked, setNow: (t) => { now = t; } };
+  return { l, pending, revoked, timers, setNow: (t) => { now = t; } };
 }
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const ct = (n) => ({ key: 'ct:' + n, kind: 'ct', final: true });
 const gw = (n, final) => ({ key: 'gw:' + n, kind: 'gw', final: final !== false });
 
-function answer(p, key, status) {
+function answer(p, key, status, extra) {
   const i = p.pending.findIndex((x) => x.req.key === key);
   const [x] = p.pending.splice(i, 1);
-  x.resolve({ status, url: status === 200 ? 'blob:' + key : null });
+  x.resolve(Object.assign({ status, url: status === 200 ? 'blob:' + key : null }, extra || {}));
 }
 
 test('loader: at most 4 CT and 2 gateway requests at a time, the focused one ahead of the queue', async () => {
@@ -138,4 +140,50 @@ test('loader: an answer arriving after clear() is revoked, not cached', async ()
   assert.deepEqual(p.revoked, ['blob:gw:1']);
   assert.equal(p.l.get('gw:1'), null);
   assert.equal(p.l.get('ct:1'), 'blob:ct:1');
+});
+
+test('loader: a 503 (gateway busy) is retried after Retry-After while in the window, the focused one always', async () => {
+  const p = loader();
+  p.l.prefetch([gw('a'), gw('b')]);
+  answer(p, 'gw:a', 503, { retryAfter: 5 });
+  answer(p, 'gw:b', 503, { retryAfter: 5 });
+  await tick();
+  assert.deepEqual(p.timers.map((t) => t.ms), [5000, 5000]);
+  // not remembered as missing, but not asked again before Retry-After either
+  p.l.prefetch([gw('a'), gw('b'), gw('c')]);
+  assert.deepEqual(p.pending.map((x) => x.req.key), ['gw:c']);
+  answer(p, 'gw:c', 200);
+  await tick();
+  p.timers.splice(0).forEach((t) => t.fn());
+  assert.deepEqual(p.pending.map((x) => x.req.key), ['gw:a', 'gw:b']);
+  // busy again: b left the window, a is focused (and waiting) → only a comes back
+  let shown = null;
+  p.l.load(gw('a'), (url) => { shown = url; });
+  answer(p, 'gw:a', 503, {});
+  answer(p, 'gw:b', 503, { retryAfter: 5 });
+  await tick();
+  assert.equal(p.timers[0].ms, CT.Prefetch.BUSY_RETRY_MS); // no Retry-After → 5 s
+  p.l.prefetch([gw('z')]);
+  answer(p, 'gw:z', 200);
+  await tick();
+  p.timers.splice(0).forEach((t) => t.fn());
+  assert.deepEqual(p.pending.map((x) => x.req.key), ['gw:a']);
+  answer(p, 'gw:a', 200);
+  await tick();
+  assert.equal(shown, 'blob:gw:a');
+  assert.equal(p.l.isFailed('gw:b'), false);
+});
+
+test('loader: the downloaded bytes stay within the memory budget (48 MB)', async () => {
+  assert.equal(CT.Prefetch.MAX_BYTES, 48 * 1024 * 1024);
+  const p = loader({ maxBytes: 100, limits: { ct: 10, gw: 10 } });
+  p.l.prefetch([ct(1), ct(2), ct(3)]);
+  answer(p, 'ct:1', 200, { size: 40 });
+  answer(p, 'ct:2', 200, { size: 40 });
+  answer(p, 'ct:3', 200, { size: 40 });
+  await tick();
+  assert.deepEqual(p.revoked, ['blob:ct:1']);
+  assert.equal(p.l.cache.bytes, 80);
+  p.l.clear();
+  assert.equal(p.l.cache.bytes, 0);
 });
