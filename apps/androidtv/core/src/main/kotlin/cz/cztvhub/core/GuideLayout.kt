@@ -61,6 +61,13 @@ object GuideLayout {
         return if (next >= 0) next else slots.indices.lastOrNull()
     }
 
+    /**
+     * The time up/down aim at in the next row (spec/apps.md "Live column first"): [now] while the initial
+     * live mode lasts or when the cell moved from is airing now (it contains [now]), else the kept [cursor].
+     */
+    fun verticalMoment(live: Boolean, from: Slot<*>?, now: Instant, cursor: Instant): Instant =
+        if (live || (from != null && !now.isBefore(from.start) && now.isBefore(from.end))) now else cursor
+
     /** Axis ticks every [step], starting at [axisStart]. */
     fun ticks(axisStart: Instant, axisEnd: Instant, step: Duration = Duration.ofMinutes(30)): List<Instant> =
         generateSequence(axisStart) { it.plus(step) }.takeWhile { !it.isAfter(axisEnd) }.toList()

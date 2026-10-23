@@ -102,4 +102,20 @@ class GuideLayoutTest {
         assertEquals(slots.lastIndex, GuideLayout.slotAt(slots, t("23:30")))
         assertNull(GuideLayout.slotAt(emptyList<GuideLayout.Slot<Programme>>(), t("20:45")))
     }
+
+    @Test fun verticalMoveFromAnAiringProgrammeAimsAtNow() {
+        val now = t("20:45")
+        val cursor = t("20:10")
+        val airing = GuideLayout.Slot(t("20:30"), t("21:00"), p("a", "20:30", "21:00"))
+        val earlier = GuideLayout.Slot(t("20:00"), t("20:30"), p("e", "20:00", "20:30"))
+        // from an airing programme: the next row's programme at now, even after left/right (live = false)
+        assertEquals(now, GuideLayout.verticalMoment(live = false, from = airing, now = now, cursor = cursor))
+        // from a programme that is not airing: keep the time position
+        assertEquals(cursor, GuideLayout.verticalMoment(live = false, from = earlier, now = now, cursor = cursor))
+        // the initial live mode, or nothing focused yet
+        assertEquals(now, GuideLayout.verticalMoment(live = true, from = earlier, now = now, cursor = cursor))
+        assertEquals(cursor, GuideLayout.verticalMoment(live = false, from = null, now = now, cursor = cursor))
+        // the end is exclusive: a programme that just ended is not airing
+        assertEquals(cursor, GuideLayout.verticalMoment(false, airing, t("21:00"), cursor))
+    }
 }

@@ -65,9 +65,12 @@
     return this.day === CT.Days.today(now) && now >= this.axisStart && now <= this.axisEnd;
   };
 
-  /** Slot to focus in `rowIndex` after up/down: the airing programme in live mode, else under the anchor. */
-  GuideScreen.prototype.verticalSlot = function (rowIndex) {
-    if (this.liveMode) {
+  /**
+   * Slot to focus in `rowIndex` after up/down: the airing programme in live mode or when moving from a
+   * programme that airs now (`from`), else the slot under the anchor.
+   */
+  GuideScreen.prototype.verticalSlot = function (rowIndex, from) {
+    if (CT.GuideLayout.followsNow(this.liveMode, from, this.app.now)) {
       var live = CT.GuideLayout.liveSlot(this.rows[rowIndex].slots, this.app.now);
       if (live >= 0) {
         this.anchor = this.app.now;
@@ -499,13 +502,13 @@
           break;
         }
         this.focusRow--;
-        this.focusSlot = this.verticalSlot(this.focusRow);
+        this.focusSlot = this.verticalSlot(this.focusRow, slot);
         this.verticalMove = true;
         break;
       case 'down':
         if (this.focusRow < this.rows.length - 1) {
           this.focusRow++;
-          this.focusSlot = this.verticalSlot(this.focusRow);
+          this.focusSlot = this.verticalSlot(this.focusRow, slot);
           this.verticalMove = true;
         }
         break;
@@ -513,7 +516,7 @@
       case 'chdown': {
         var page = this.visibleRows() * (key === 'chup' ? -1 : 1);
         this.focusRow = Math.max(0, Math.min(this.rows.length - 1, this.focusRow + page));
-        this.focusSlot = this.verticalSlot(this.focusRow);
+        this.focusSlot = this.verticalSlot(this.focusRow, slot);
         this.verticalMove = true;
         break;
       }

@@ -42,7 +42,11 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    edge. Compute rows, time axis and cell geometry once per data change, not per focus move; a focus move must not
    re-render the grid (only the detail). Left/right must never jump to another row because the next cell was not built.
    Target: smooth D-pad on the device with 60 channels (the fake TVHeadend: `cztvhub dvb-fake --channels 60`).
-   **Live column first**: on today's guide, until the viewer presses left or right, up/down moves to the programme
+   **Live column first**: on today's guide, up/down moves to the programme **airing now** in the next row (like
+   zapping), whatever the cells' widths, **whenever the focused programme is airing now** (also after left/right
+   moves) and, when the guide opens, until the first left/right. A row with nothing airing gets the cell (or
+   focusable "Mimo vysílání" gap) under the now line. From a programme that is not airing, up/down keeps the time
+   as before. Other days use normal grid navigation.
    **airing now** in the next row (like zapping), whatever the cells' widths; a row with nothing airing gets the
    cell (or focusable "Mimo vysílání" gap) under the now line. The first left/right ends this mode until the guide is
    opened or today's day is loaded again; other days use normal grid navigation.

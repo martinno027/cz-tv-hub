@@ -470,18 +470,23 @@ struct GuideView: View {
     }
 
     /// Up/down (or coming down from the day strip) lands on the programme airing now in that row
-    /// until the viewer first moves left or right.
+    /// until the viewer first moves left or right, and afterwards whenever focus comes from an airing programme.
     private func followLiveColumn(from old: String?, to id: String) {
         if id == redirectID {
             redirectID = nil
             return
         }
-        guard liveColumn, day == today, let row = layout.rowOf[id] else { return }
+        guard day == today, let row = layout.rowOf[id] else { return }
         if let old, layout.rowOf[old] == row {
             liveColumn = false  // a move within the row: normal grid navigation from now on
             return
         }
-        if let target = layout.cellID(row: row, at: Date()), target != id {
+        // Up/down follows the airing programmes in the opening mode, and always from an airing programme
+        // (spec/apps.md "Live column first"); from any other programme the engine keeps the time.
+        let now = Date()
+        let fromAiring = old.flatMap { layout.entries[$0] }?.isAiring(at: now) ?? false
+        guard liveColumn || fromAiring else { return }
+        if let target = layout.cellID(row: row, at: now), target != id {
             redirectID = target
             focusedID = target
         }

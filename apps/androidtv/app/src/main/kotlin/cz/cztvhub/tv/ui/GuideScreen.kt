@@ -457,8 +457,9 @@ private fun EpgGrid(
     }
     // Plain memory, not state (nothing renders from it): the focused cell and the time cursor
     // that up/down keep, so a column of the guide can be walked without drifting.
-    // "Live column first" (spec/apps.md): on today's guide up/down walk the programmes airing now
-    // until the first left/right; a new plan (guide opened, today reloaded) starts it again.
+    // "Live column first" (spec/apps.md): on today's guide up/down walk the programmes airing now until
+    // the first left/right (a new plan, i.e. guide opened or today reloaded, starts it again), and
+    // always from a programme that is airing now.
     val nav = remember(plan) {
         // A day change ends "Live column first".
         GridNav(cursor = opensAt, live = edgeStart == null && Instant.now() in axisStart..axisEnd)
@@ -577,7 +578,8 @@ private fun EpgGrid(
                             if (next < 0 && appButton.shown) {
                                 return@onPreviewKeyEvent runCatching { appButton.button.requestFocus() }.isSuccess
                             }
-                            val moment = if (nav.live) Instant.now() else nav.cursor
+                            // From a programme airing now: the next row's airing programme too.
+                            val moment = GuideLayout.verticalMoment(nav.live, nav.last?.slot, Instant.now(), nav.cursor)
                             val target = cellRows.getOrNull(next)?.second?.let { cellAt(it, moment) }
                                 ?: return@onPreviewKeyEvent false
                             focusCell(next, target, vertical = true)

@@ -42,6 +42,19 @@
      * "Live column first" (spec/apps.md): index of the slot whose programme airs at `now` (by its own
      * times, not the widened slot), else the slot (or filler) under `now`; -1 when `now` is off the row.
      */
+    airing: function (slot, now) {
+      var item = slot && slot.item;
+      return !!item && item.start <= now && now < item.end;
+    },
+
+    /**
+     * Whether up/down aims at `now` in the next row ("Live column first"): during the initial live mode,
+     * and always from a programme that is airing now (else the kept time position).
+     */
+    followsNow: function (liveMode, fromSlot, now) {
+      return !!liveMode || GuideLayout.airing(fromSlot, now);
+    },
+
     liveSlot: function (slots, now) {
       var i;
       for (i = 0; i < slots.length; i++) {

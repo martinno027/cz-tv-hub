@@ -352,6 +352,25 @@ test('GuideLayout.liveSlot picks the programme airing now, else the slot under n
   assert.equal(L.liveSlot([], base), -1);
 });
 
+test('GuideLayout.followsNow: up/down from an airing programme aims at now, else keeps the time', () => {
+  const L = CT.GuideLayout;
+  const M = 60 * 1000;
+  const now = t('2026-10-23T12:30:00Z');
+  const airing = { start: now - 10 * M, end: now + 20 * M, item: { start: now - 10 * M, end: now + 20 * M } };
+  const earlier = { start: now - 60 * M, end: now - 10 * M, item: { start: now - 60 * M, end: now - 10 * M } };
+  const gapUnderNow = { start: now - 5 * M, end: now + 5 * M, item: null };
+  // from an airing programme, also after left/right (live mode off)
+  assert.equal(L.followsNow(false, airing, now), true);
+  // from a programme that is not airing, or a "Mimo vysílání" filler: keep the time position
+  assert.equal(L.followsNow(false, earlier, now), false);
+  assert.equal(L.followsNow(false, gapUnderNow, now), false);
+  assert.equal(L.followsNow(false, null, now), false);
+  // the initial live mode
+  assert.equal(L.followsNow(true, earlier, now), true);
+  // the end is exclusive
+  assert.equal(L.followsNow(false, airing, now + 20 * M), false);
+});
+
 test('GuideLayout.window, covers and slotRange keep only the viewport plus a buffer', () => {
   const L = CT.GuideLayout;
   const H = 3600 * 1000;
