@@ -1,7 +1,8 @@
 /*
- * "Nastavení" in two sections, picked with the sub-tabs at the top (left/right): "Kanály" = which channels this
- * TV shows, and in what order (rows [☑ name] [▲] [▼] per group, spec/apps.md); "Server" = gateway address and key
- * for "Anténa" (saving tests the gateway right away) and "O aplikaci".
+ * "Nastavení" is a choice of two sections (spec/apps.md); OK opens the chosen one full screen (the app's tabs are
+ * hidden), Return goes back to the choice. "Kanály" = which channels this TV shows, and in what order (rows
+ * [☑ name] [▲] [▼] per group); "Server" = gateway address and key for "Anténa" (saving tests the gateway right
+ * away) and "O aplikaci".
  */
 (function (root) {
   'use strict';
@@ -22,8 +23,8 @@
     this.app = app;
     this.items = ['set-address', 'set-key', 'set-save', 'set-clear'].map($);
     this.focus = 0;
-    this.section = 'channels'; // 'channels' | 'server'
-    this.zone = 'subtabs'; // 'subtabs' | 'channels' | 'form' (the Server fields and buttons)
+    this.section = 'channels'; // the choice item focused, or the section open: 'channels' | 'server'
+    this.zone = 'choice'; // 'choice' | 'channels' | 'form' (the Server fields and buttons)
     this.chItems = []; // [{key, keys (the group's), controls: [name, up, down], enabled: [bool ×3]}] | {reset, controls}
     this.chRow = 0;
     this.chCol = 0;
@@ -38,20 +39,45 @@
     var s = CT.SettingsStore.load();
     $('set-address').value = s ? s.address : '';
     $('set-key').value = s ? s.key : '';
-    this.zone = 'subtabs';
-    this.showSection(this.section);
+    this.closeSection();
     this.showStatus();
     this.renderChannels();
   };
 
-  SettingsScreen.prototype.showSection = function (section) {
+  /** Opens a section full screen, focus on its first control. */
+  SettingsScreen.prototype.openSection = function (section) {
     this.section = section;
-    Array.prototype.forEach.call(document.querySelectorAll('#set-tabs .subtab'), function (t) {
-      t.classList.toggle('selected', t.dataset.section === section);
-    });
+    this.setOpen(section);
+    if (section === 'channels') {
+      this.zone = 'channels';
+      this.chRow = 0;
+      this.chCol = 0;
+    } else {
+      this.zone = 'form';
+      this.focus = 0;
+    }
+    this.applyFocus();
+  };
+
+  /** Back to the choice, focus on the item of the section just left. */
+  SettingsScreen.prototype.closeSection = function () {
+    this.zone = 'choice';
+    this.setOpen(null);
+    this.applyFocus();
+  };
+
+  SettingsScreen.prototype.setOpen = function (section) {
+    $('stage').classList.toggle('section-open', section !== null);
     $('set-section-channels').classList.toggle('active', section === 'channels');
     $('set-section-server').classList.toggle('active', section === 'server');
     $('screen-settings').scrollTop = 0;
+  };
+
+  /** Called by the app before its own Return handling; true = handled (a section was closed). */
+  SettingsScreen.prototype.onBack = function () {
+    if (this.zone === 'choice') return false;
+    this.closeSection();
+    return true;
   };
 
   /** The "Kanály" lists; keeps focus on the same channel and control across re-renders. */
@@ -125,7 +151,7 @@
     this.app.setChannelPrefs(prefs); // re-renders this list; focus follows the row (same key, same control)
   };
 
-  /** Arrow keys in "Kanály"; leaving the top row goes back to the gateway buttons. */
+  /** Arrow keys in "Kanály" (Return closes the section, see onBack). */
   SettingsScreen.prototype.onChannelsKey = function (key) {
     var item = this.chItems[this.chRow];
     var col;
@@ -133,11 +159,7 @@
       case 'up':
       case 'down': {
         var next = this.chRow + (key === 'up' ? -1 : 1);
-        if (next < 0) {
-          this.zone = 'subtabs';
-          break;
-        }
-        if (next >= this.chItems.length) break;
+        if (next < 0 || next >= this.chItems.length) break;
         this.chRow = next;
         var target = this.chItems[next];
         // a disabled ▲/▼ (first/last row) or the single-control reset row: fall back to the name
@@ -213,8 +235,8 @@
   SettingsScreen.prototype.applyFocus = function () {
     var self = this;
     var active = this.app.inContent();
-    Array.prototype.forEach.call(document.querySelectorAll('#set-tabs .subtab'), function (t) {
-      t.classList.toggle('focused', active && self.zone === 'subtabs' && t.dataset.section === self.section);
+    Array.prototype.forEach.call(document.querySelectorAll('#set-choice .choice'), function (t) {
+      t.classList.toggle('focused', active && self.zone === 'choice' && t.dataset.section === self.section);
     });
     this.items.forEach(function (item, i) {
       item.classList.toggle('focused', active && self.zone === 'form' && i === self.focus);
@@ -249,12 +271,11 @@
       }
       return 'input';
     }
-    if (this.zone === 'subtabs') return this.onSubtabsKey(key);
+    if (this.zone === 'choice') return this.onChoiceKey(key);
     if (this.zone === 'channels') return this.onChannelsKey(key);
     switch (key) {
       case 'up':
-        if (this.focus === 0) this.zone = 'subtabs';
-        else this.focus = this.focus === 3 ? 1 : this.focus - 1;
+        if (this.focus > 0) this.focus = this.focus === 3 ? 1 : this.focus - 1;
         break;
       case 'down':
         this.focus = Math.min(this.focus === 2 ? 2 : this.focus + 1, this.items.length - 1);
@@ -280,28 +301,19 @@
     return true;
   };
 
-  /** The "Kanály" / "Server" switch; up leaves to the app tabs, down/OK enters the section. */
-  SettingsScreen.prototype.onSubtabsKey = function (key) {
+  /** The choice: up/down between Kanály and Server (up from Kanály leaves to the app tabs), OK opens it. */
+  SettingsScreen.prototype.onChoiceKey = function (key) {
     switch (key) {
-      case 'left':
-        if (this.section === 'server') this.showSection('channels');
-        break;
-      case 'right':
-        if (this.section === 'channels') this.showSection('server');
-        break;
       case 'up':
-        return false;
-      case 'down':
-      case 'enter':
-        if (this.section === 'channels') {
-          this.zone = 'channels';
-          this.chRow = 0;
-          this.chCol = 0;
-        } else {
-          this.zone = 'form';
-          this.focus = 0;
-        }
+        if (this.section === 'channels') return false;
+        this.section = 'channels';
         break;
+      case 'down':
+        this.section = 'server';
+        break;
+      case 'enter':
+        this.openSection(this.section);
+        return true;
       default:
         break;
     }

@@ -126,9 +126,12 @@ not shown on this TV.
 - **move(key, by ±1)** swaps the channel with its neighbour in `all` (no-op at the edge); the new `order` = the
   group's `all` followed by the stored keys not in the group. Hiding/showing does not change the order.
   **Obnovit výchozí** clears both lists.
-- **Nastavení is split into two separate sections**, each its own screen/tab reached from the top of Nastavení:
-  **Kanály** (this list) and **Server** (the Anténa gateway: address, key, "Uložit a ověřit", "Odebrat bránu",
-  discovery in the local network; "O aplikaci" at its end). Kanály is first. Nothing of one appears in the other.
+- **Nastavení is a choice of two sections**: the Nastavení screen shows only two large items, **Kanály** (first) and
+  **Server**, each with a one-line description. Selecting one opens that section **full screen** (no tab bar row, no
+  other section): Kanály = this list; Server = the Anténa gateway (address, key, "Uložit a ověřit", "Odebrat bránu",
+  discovery in the local network; "O aplikaci" at its end). The remote's **Back** (Siri Remote Menu/‹, Android
+  Back, Samsung Return) returns to the choice, with focus on the item just left; Back on the choice leaves Nastavení
+  as before.
 - **Settings UI (Kanály)**: per group a list of rows `[☑ ČT1] [▲] [▼]` (left/right moves between the three controls; select on
   the name toggles "zobrazovat", hidden rows dimmed, ▲ on the first / ▼ on the last row disabled), then
   "Obnovit výchozí pořadí". The Anténa list needs the gateway's channels (no gateway → not shown; unreachable →

@@ -25,6 +25,8 @@
     <string name="group_antenna">Anténa</string>
     <string name="settings_tab_channels">Kanály</string>
     <string name="settings_tab_server">Server</string>
+    <string name="settings_channels_detail">Které kanály se zobrazují v Živě a v TV průvodci, a v jakém pořadí</string>
+    <string name="settings_server_detail">Brána Anténa (DVB-T2) na Raspberry Pi: adresa a klíč</string>
     <string name="settings_about">O aplikaci</string>
     <string name="channels_intro">Které kanály tato televize ukazuje v Živě a v průvodci a v jakém pořadí. Ostatní televize mají vlastní nastavení.</string>
     <string name="channels_show">Zobrazovat %1$s</string>

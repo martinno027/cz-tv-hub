@@ -43,18 +43,26 @@
       </section>
 
       <section id="screen-settings" class="screen">
-        <nav id="set-tabs">
-          <div class="subtab" data-section="channels">Kanály</div>
-          <div class="subtab" data-section="server">Server</div>
-        </nav>
+        <div id="set-choice">
+          <div class="choice" data-section="channels">
+            <div class="choice-title">Kanály</div>
+            <div class="choice-detail">Které kanály se zobrazují v Živě a v TV průvodci, a v jakém pořadí</div>
+          </div>
+          <div class="choice" data-section="server">
+            <div class="choice-title">Server</div>
+            <div class="choice-detail">Brána Anténa (DVB-T2) na Raspberry Pi: adresa a klíč</div>
+          </div>
+        </div>
 
         <div id="set-section-channels" class="set-section">
+          <h1 class="page-title">Kanály</h1>
           <p class="hint">Které kanály a v jakém pořadí tato televize ukazuje v Živě a v TV průvodci. OK na názvu kanál
             skryje nebo zobrazí, ▲ ▼ ho posunou. Platí jen pro tuto televizi.</p>
           <div id="set-channels"></div>
         </div>
 
         <div id="set-section-server" class="set-section">
+          <h1 class="page-title">Server</h1>
           <h1>Anténa (DVB-T2)</h1>
           <p class="hint">Brána cz-tv-hub na Raspberry Pi doma. Adresa v domácí síti (např. <b>192.168.1.20</b>,
             <b>cztvhub.local</b>) nebo jméno v Tailscale (<b>pi.tailnet.ts.net</b>). Klíč je v

@@ -1,5 +1,6 @@
 package cz.cztvhub.tv.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -18,9 +19,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +29,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -45,9 +48,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Button
+import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
-import androidx.tv.material3.Tab
-import androidx.tv.material3.TabRow
+import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.dvb.DvbClient
@@ -59,32 +62,79 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** The two Nastavení sections (spec/apps.md: "Nastavení is a choice of two sections"). */
+enum class SettingsSection { CHANNELS, SERVER }
+
 /**
- * "Nastavení": two separate sections behind tabs at the top, "Kanály" (hide/reorder on this TV) first, then
- * "Server" (the household DVB gateway for "Anténa", and "O aplikaci").
+ * "Nastavení": a choice of two large items, "Kanály" (hide/reorder on this TV) first, then "Server" (the household
+ * DVB gateway for "Anténa", and "O aplikaci"). The chosen section is shown full screen (MainScreen hides its tab row
+ * while [open] is set); Back returns to the choice with focus on the item just left.
  */
 @Composable
-fun SettingsScreen(viewModel: MainViewModel) {
-    var section by rememberSaveable { mutableIntStateOf(0) }
-    val titles = listOf(stringResource(R.string.settings_tab_channels), stringResource(R.string.settings_tab_server))
-    Column(Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = section) {
-            titles.forEachIndexed { index, title ->
-                Tab(selected = section == index, onFocus = { section = index }, onClick = { section = index }) {
-                    Text(
-                        title,
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    )
-                }
+fun SettingsScreen(viewModel: MainViewModel, open: SettingsSection?, onOpen: (SettingsSection?) -> Unit) {
+    val requesters = remember { SettingsSection.entries.associateWith { FocusRequester() } }
+    var lastLeft by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+
+    if (open != null) {
+        BackHandler {
+            lastLeft = open
+            onOpen(null)
+        }
+        Column(Modifier.fillMaxSize()) {
+            Text(
+                stringResource(if (open == SettingsSection.CHANNELS) R.string.settings_tab_channels else R.string.settings_tab_server),
+                style = MaterialTheme.typography.headlineMedium,
+            )
+            Spacer(Modifier.height(8.dp))
+            when (open) {
+                SettingsSection.CHANNELS ->
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 16.dp)) {
+                        ChannelsSection(viewModel)
+                    }
+                SettingsSection.SERVER -> ServerSettings(viewModel)
             }
         }
-        Spacer(Modifier.height(8.dp))
-        when (section) {
-            0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 16.dp)) {
-                ChannelsSection(viewModel)
-            }
-            else -> ServerSettings(viewModel)
+        return
+    }
+
+    LaunchedEffect(Unit) {
+        // Back from a section: focus the item just left (the requester is attached by now).
+        lastLeft?.let { runCatching { requesters.getValue(it).requestFocus() } }
+    }
+    Column(
+        Modifier.fillMaxSize().padding(top = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
+    ) {
+        SectionItem(
+            stringResource(R.string.settings_tab_channels),
+            stringResource(R.string.settings_channels_detail),
+            Modifier.focusRequester(requesters.getValue(SettingsSection.CHANNELS)),
+        ) { onOpen(SettingsSection.CHANNELS) }
+        SectionItem(
+            stringResource(R.string.settings_tab_server),
+            stringResource(R.string.settings_server_detail),
+            Modifier.focusRequester(requesters.getValue(SettingsSection.SERVER)),
+        ) { onOpen(SettingsSection.SERVER) }
+    }
+}
+
+@Composable
+private fun SectionItem(title: String, detail: String, modifier: Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.widthIn(max = 900.dp).fillMaxWidth(),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.03f),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Palette.surface,
+            contentColor = Palette.text,
+            focusedContainerColor = Palette.focused,
+            focusedContentColor = Palette.onFocused,
+        ),
+    ) {
+        Column(Modifier.padding(horizontal = 28.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, style = MaterialTheme.typography.headlineSmall)
+            Text(detail, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }

@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -32,6 +33,8 @@ import cz.cztvhub.tv.R
 @Composable
 fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    // An open Nastavení section is full screen: no tab row (spec/apps.md).
+    var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     val tabs = listOf(
         stringResource(R.string.tab_live),
         stringResource(R.string.tab_guide),
@@ -45,7 +48,7 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
             .background(Palette.background)
             .padding(horizontal = 40.dp, vertical = 20.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (tab != 2 || settingsSection == null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TabRow(selectedTabIndex = tab) {
                 tabs.forEachIndexed { index, title ->
                     Tab(selected = tab == index, onFocus = { tab = index }, onClick = { tab = index }) {
@@ -64,7 +67,7 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         when (tab) {
             0 -> LiveScreen(viewModel, onPlay)
             1 -> GuideScreen(viewModel, onPlay)
-            else -> SettingsScreen(viewModel)
+            else -> SettingsScreen(viewModel, settingsSection) { settingsSection = it }
         }
     }
     }

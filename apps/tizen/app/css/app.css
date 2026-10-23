@@ -470,29 +470,51 @@ main {
   overflow: hidden;
 }
 
-/* Nastavení: two sections (Kanály, Server), switched by the sub-tabs at the top */
-#set-tabs {
-  display: flex;
-  margin: 20px 0 8px;
+/* Nastavení: a choice of two sections (Kanály, Server); the chosen one opens full screen */
+#set-choice {
+  margin-top: 40px;
 }
 
-.subtab {
-  font-size: 30px;
-  padding: 10px 30px;
-  margin-right: 12px;
-  border-radius: 30px;
-  color: var(--muted);
+.choice {
+  width: 1100px;
+  padding: 30px 40px;
+  margin-bottom: 32px;
+  border-radius: 16px;
+  background: var(--surface);
   border: 3px solid transparent;
 }
 
-.subtab.selected {
+.choice.focused {
   background: var(--surface-hi);
-  color: var(--text);
+  border-color: var(--focus);
 }
 
-.subtab.focused {
-  background: var(--focus);
-  color: #000;
+.choice-title {
+  font-size: 40px;
+  font-weight: 700;
+}
+
+.choice-detail {
+  font-size: 24px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+#stage.section-open #top {
+  display: none;
+}
+
+#stage.section-open main {
+  top: 0;
+}
+
+#stage.section-open #set-choice {
+  display: none;
+}
+
+#screen-settings h1.page-title {
+  font-size: 48px;
+  margin: 50px 0 16px;
 }
 
 .set-section {

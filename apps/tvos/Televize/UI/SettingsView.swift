@@ -1,25 +1,69 @@
 import CTCore
 import SwiftUI
 
-/// "Nastavení": two separate sections picked at the top, "Kanály" (channels shown on this TV)
-/// and "Server" (the DVB-T2 gateway). Nothing of one appears in the other.
+/// "Nastavení": a choice of two sections, "Kanály" (channels shown on this TV) and "Server" (the DVB-T2
+/// gateway). The chosen one opens full screen; the remote's Menu/‹ returns to the choice (spec/apps.md).
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case channels = "Kanály"
         case server = "Server"
         var id: String { rawValue }
+
+        var detail: String {
+            switch self {
+            case .channels: "Které kanály se zobrazují v Živě a v TV průvodci, a v jakém pořadí"
+            case .server: "Brána Anténa (DVB-T2) na Raspberry Pi: adresa a klíč"
+            }
+        }
     }
 
-    @State private var section: Section = .channels
+    @State private var open: Section?
+    /// Focus returns to the item of the section just closed.
+    @State private var lastOpened: Section?
+    @FocusState private var focused: Section?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 40) {
+            ForEach(Section.allCases) { section in
+                Button {
+                    open = section
+                } label: {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(section.rawValue).font(.title2.weight(.bold))
+                        Text(section.detail).font(.callout).foregroundStyle(.secondary)
+                    }
+                    .padding(32)
+                    .frame(width: 1000, alignment: .leading)
+                }
+                .buttonStyle(.card)
+                .focused($focused, equals: section)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .fullScreenCover(item: $open, onDismiss: { focused = lastOpened }) { section in
+            SettingsPage(section: section)
+                .onAppear { lastOpened = section }
+        }
+        #if DEBUG
+        // `-settingsSection channels|server` opens that section, for simulator screenshots.
+        .onAppear {
+            if let raw = UserDefaults.standard.string(forKey: "settingsSection") {
+                open = raw == "server" ? .server : .channels
+            }
+        }
+        #endif
+    }
+}
+
+/// One Nastavení section, full screen; Menu/‹ goes back to the choice.
+private struct SettingsPage: View {
+    let section: SettingsView.Section
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 32) {
-            Picker("Nastavení", selection: $section) {
-                ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 600)
-            .focusSection()
+            Text(section.rawValue)
+                .font(.title.weight(.bold))
             switch section {
             case .channels:
                 ScrollView {
@@ -31,13 +75,11 @@ struct SettingsView: View {
                 ServerSettingsSection()
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        #if DEBUG
-        // `-settingsSection server` opens the Server section, for simulator screenshots.
-        .onAppear {
-            if UserDefaults.standard.string(forKey: "settingsSection") == "server" { section = .server }
-        }
-        #endif
+        .padding(.horizontal, 80)
+        .padding(.top, 60)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(white: 0.08).ignoresSafeArea())
+        .onExitCommand { dismiss() }
     }
 }
 

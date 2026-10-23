@@ -212,6 +212,7 @@
         var screen = this.screens[this.tab];
         if (key === 'back' && !(screen.editing && screen.editing())) {
           event.preventDefault();
+          if (screen.onBack && screen.onBack()) return; // e.g. closing a Nastavení section
           this.zone = 'tabs';
           this.applyFocus();
           return;
