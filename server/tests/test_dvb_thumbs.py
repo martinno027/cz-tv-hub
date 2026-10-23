@@ -2,12 +2,15 @@ import json
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 from cztvhub.config import Config, DvbConfig
+from cztvhub.dvb import gateway as thumbs_gateway
 from cztvhub.dvb import thumbs
 from cztvhub.dvb.gateway import DvbGateway
 from cztvhub.dvb.hls import HlsManager
@@ -143,6 +146,62 @@ class ThumbnailsTest(unittest.TestCase):
         self.assertEqual(self.t.run.calls, [])
         self.assertNotIn("new", self.t._cache)
 
+    def test_same_entry_at_once_shares_one_run(self):
+        started, release = threading.Event(), threading.Event()
+
+        def slow(cmd, input=b"", capture_output=True, timeout=None):
+            self.run.calls.append((cmd, len(input)))
+            started.set()
+            release.wait(5)
+            return SimpleNamespace(stdout=JPEG, returncode=0)
+        self.t.run = slow
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(self.t.get(entry(), recording=False)))
+                   for _ in range(4)]
+        threads[0].start()
+        self.assertTrue(started.wait(5))
+        for t in threads[1:]:
+            t.start()
+        time.sleep(0.05)  # the others are waiting for the first run now
+        other = self.t.get_from("other", True, lambda: JPEG)  # a different entry is not held up
+        release.set()
+        for t in threads:
+            t.join(5)
+        self.assertEqual((results, other), ([JPEG] * 4, JPEG))
+        self.assertEqual(len(self.run.calls), 1)
+        self.assertEqual(self.t._flights, {})
+
+    def test_followers_share_busy_and_failures_are_cleaned_up(self):
+        for _ in range(thumbs.MAX_JOBS):
+            self.t._jobs.acquire()
+        waits, acquire = [], self.t._jobs.acquire
+        self.t._jobs.acquire = lambda timeout=None: waits.append(timeout) or acquire(timeout=timeout)
+        outcomes = []
+
+        def ask():
+            try:
+                outcomes.append(self.t.get_from("k", True, lambda: JPEG))
+            except thumbs.ThumbsBusy:
+                outcomes.append("busy")
+        with mock.patch.object(thumbs, "TIMEOUT", 0.2):
+            threads = [threading.Thread(target=ask) for _ in range(3)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(5)
+        for _ in range(thumbs.MAX_JOBS):
+            self.t._jobs.release()
+        self.assertEqual(outcomes, ["busy"] * 3)
+        self.assertEqual(len(waits), 1)  # only the first waited for a slot; the others shared its answer
+        self.assertEqual(self.t._flights, {})
+
+        def boom():
+            raise RuntimeError("produce failed")
+        with self.assertRaises(RuntimeError):
+            self.t.get_from("k", True, boom)
+        self.assertEqual(self.t._flights, {})
+        self.assertEqual(self.t.get_from("k", True, lambda: JPEG), JPEG)  # nothing stale left behind
+
 
 class GatewayThumbTest(unittest.TestCase):
     def setUp(self):
@@ -156,6 +215,15 @@ class GatewayThumbTest(unittest.TestCase):
         self.addCleanup(hls.shutdown)
         self.gw = DvbGateway(cfg, client=self.client, hls=hls, now=lambda: NOW, log=lambda m: None)
         self.gw.thumbs.run = FakeRun()
+        self.clock = [1000.0]
+        self.gw.thumbs.clock = lambda: self.clock[0]
+        self.dvr_calls = 0
+        dvr_entries = self.client.dvr_entries
+
+        def counted(grid="grid"):
+            self.dvr_calls += 1
+            return dvr_entries(grid)
+        self.client.dvr_entries = counted
 
     def get(self, uuid, headers=AUTH):
         return self.gw.handle(f"/dvb/recording/{uuid}/thumb.jpg", {}, headers)
@@ -186,11 +254,30 @@ class GatewayThumbTest(unittest.TestCase):
             self.gw.thumbs._jobs.release()
         self.assertEqual(self.get(REC_COMPLETED).status, 200)
 
-    def test_gone_recording_is_dropped_from_the_cache(self):
+    def test_gone_recording_is_dropped_from_the_cache_within_5_s(self):
         self.assertEqual(self.get(REC_COMPLETED).status, 200)
         self.client.removed.append(REC_COMPLETED)
+        self.clock[0] += 4.9
+        self.assertEqual(self.get(REC_COMPLETED).status, 200)  # the shared DVR list is still fresh
+        self.clock[0] += 0.1
         self.assertEqual(self.get(REC_COMPLETED).status, 404)
         self.assertNotIn(REC_COMPLETED, self.gw.thumbs._cache)
+
+    def test_one_dvr_list_for_all_requests_per_5_s(self):
+        for uuid in (REC_COMPLETED, REC_RECORDING, REC_SCHEDULED, "unknown", REC_COMPLETED):
+            self.get(uuid)
+        self.assertEqual(self.dvr_calls, 1)
+        self.clock[0] += thumbs_gateway.THUMB_DVR_SECONDS
+        self.get(REC_COMPLETED)
+        self.assertEqual(self.dvr_calls, 2)
+
+    def test_retention_refreshes_the_dvr_list(self):
+        self.get(REC_COMPLETED)
+        self.client.removed.append(REC_COMPLETED)
+        self.gw._after_retention()
+        calls = self.dvr_calls
+        self.assertEqual(self.get(REC_COMPLETED).status, 404)
+        self.assertEqual(self.dvr_calls, calls + 1)
 
     def test_retention_prunes(self):
         self.get(REC_COMPLETED)

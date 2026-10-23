@@ -25,6 +25,7 @@ CACHE_SIZE = 600  # the apps prefetch around the guide focus (spec/apps.md "Imag
 REFRESH_SECONDS = 60.0
 TIMEOUT = 10.0
 MAX_JOBS = 2
+FLIGHT_WAIT = 3 * TIMEOUT  # a follower waits out the slot wait, the recording read and ffmpeg (10 s each)
 JPEG_SOI = b"\xff\xd8"
 
 
@@ -48,6 +49,15 @@ def frame_offset(size: int, recorded_seconds: float) -> tuple[int, bool]:
     offset = int(size / recorded * at)
     offset = max(0, min(offset, size - READ_BYTES))
     return offset, at >= FRAME_AT_SECONDS
+
+
+class _Flight:
+    """One ffmpeg run that concurrent requests for the same key wait for."""
+
+    def __init__(self):
+        self.done = threading.Event()
+        self.data: bytes | None = None
+        self.busy = False
 
 
 class Settings:
@@ -93,6 +103,7 @@ class Thumbnails:
         self._cache: OrderedDict[str, tuple[bytes, bool, float]] = OrderedDict()  # uuid → (jpeg, final, made at)
         self._lock = threading.Lock()
         self._jobs = threading.BoundedSemaphore(MAX_JOBS)
+        self._flights: dict[str, _Flight] = {}  # key → the one run in progress for it
 
     @property
     def enabled(self) -> bool:
@@ -120,54 +131,64 @@ class Thumbnails:
     def get(self, entry: DvrEntry, recording: bool) -> bytes | None:
         """JPEG for a ``completed`` (``recording=False``) or still-recording entry, or None.
         Raises ThumbsBusy when no ffmpeg slot came free in time."""
-        with self._lock:
-            hit = self._cache.get(entry.uuid)
-            if hit is not None:
-                data, final, made = hit
-                if final or self.clock() - made < REFRESH_SECONDS:
-                    self._cache.move_to_end(entry.uuid)
-                    return data
+        hit = self._fresh(entry.uuid)
+        if hit is not None:
+            return hit
         recorded = (min(self.now(), entry.stop) if recording else entry.stop) - entry.start
         if entry.filesize <= 0 or recorded <= 0:
             return None
         offset, at_final = frame_offset(entry.filesize, recorded)
-        if not self._jobs.acquire(timeout=TIMEOUT):
-            raise ThumbsBusy()
-        try:
-            data = self._make(entry.uuid, offset)
-        finally:
-            self._jobs.release()
-        if data is None:
-            return None
-        with self._lock:
-            self._cache[entry.uuid] = (data, at_final or not recording, self.clock())
-            self._cache.move_to_end(entry.uuid)
-            while len(self._cache) > CACHE_SIZE:
-                self._cache.popitem(last=False)
-        return data
+        return self.get_from(entry.uuid, at_final or not recording, lambda: self._make(entry.uuid, offset))
 
     def get_from(self, key: str, final: bool, produce: Callable[[], bytes | None]) -> bytes | None:
-        """Same cache and limits for a still made by ``produce`` (the continuous recording, archive.py)."""
+        """Cached still for ``key``, else made by ``produce`` in one of the ffmpeg slots. Requests for the same
+        key at the same time share one run (single flight); they all get its result or ThumbsBusy."""
         with self._lock:
-            hit = self._cache.get(key)
+            hit = self._fresh_locked(key)
             if hit is not None:
-                data, was_final, made = hit
-                if was_final or self.clock() - made < REFRESH_SECONDS:
-                    self._cache.move_to_end(key)
-                    return data
-        if not self._jobs.acquire(timeout=TIMEOUT):
-            raise ThumbsBusy()
+                return hit
+            flight = self._flights.get(key)
+            leader = flight is None
+            if leader:
+                flight = self._flights[key] = _Flight()
+        if not leader:
+            if not flight.done.wait(FLIGHT_WAIT):
+                raise ThumbsBusy()
+            if flight.busy:
+                raise ThumbsBusy()
+            return flight.data
         try:
-            data = produce()
+            if not self._jobs.acquire(timeout=TIMEOUT):
+                flight.busy = True
+                raise ThumbsBusy()
+            try:
+                flight.data = produce()
+            finally:
+                self._jobs.release()
+            if flight.data is not None:
+                with self._lock:
+                    self._cache[key] = (flight.data, final, self.clock())
+                    self._cache.move_to_end(key)
+                    while len(self._cache) > CACHE_SIZE:
+                        self._cache.popitem(last=False)
+            return flight.data
         finally:
-            self._jobs.release()
-        if data is None:
-            return None
+            with self._lock:
+                self._flights.pop(key, None)
+            flight.done.set()
+
+    def _fresh(self, key: str) -> bytes | None:
         with self._lock:
-            self._cache[key] = (data, final, self.clock())
-            self._cache.move_to_end(key)
-            while len(self._cache) > CACHE_SIZE:
-                self._cache.popitem(last=False)
+            return self._fresh_locked(key)
+
+    def _fresh_locked(self, key: str) -> bytes | None:
+        hit = self._cache.get(key)
+        if hit is None:
+            return None
+        data, final, made = hit
+        if not final and self.clock() - made >= REFRESH_SECONDS:
+            return None
+        self._cache.move_to_end(key)
         return data
 
     def jpeg_from_mp4(self, data: bytes) -> bytes | None:
