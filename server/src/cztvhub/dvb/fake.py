@@ -61,9 +61,13 @@ def encode_args(pattern: str, tone: int, ffmpeg: str = "ffmpeg") -> list[str]:
     return [ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error",
             "-f", "lavfi", "-i", f"{pattern}=size=640x360:rate=25",
             "-f", "lavfi", "-i", f"sine=frequency={tone}:sample_rate=48000",
+            # a second, English Dolby track like many films on DVB-T2 (audio choice in the apps)
+            "-f", "lavfi", "-i", f"sine=frequency={tone * 2}:sample_rate=48000",
+            "-map", "0:v", "-map", "1:a", "-map", "2:a",
             "-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error",
             "-g", "50", "-b:v", "1000k", "-pix_fmt", "yuv420p",
-            "-c:a", "mp2", "-b:a", "128k", "-f", "mpegts"]
+            "-c:a:0", "mp2", "-b:a:0", "128k", "-c:a:1", "ac3", "-b:a:1", "192k",
+            "-metadata:s:a:0", "language=ces", "-metadata:s:a:1", "language=eng", "-f", "mpegts"]
 
 
 class FakeTvheadend:

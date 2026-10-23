@@ -19,14 +19,16 @@ cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed
 ## DVB-T2 (antenna)
 - Only free-to-air channels received by your own tuner at home. Encrypted multiplexes are never decrypted
   (no CA/CI module or softcam circumvention).
-- Recordings are a private copy for personal use within one household (§ 30 zákona č. 121/2000 Sb.; levies are
-  included in storage media prices). They stay on the Raspberry Pi's local disk, are deleted automatically after the
-  retention period (default 3 days, maximum 14) and cannot be downloaded or exported.
+- The channels selected in `/admin` are recorded continuously as a private copy for one household (§ 30 zákona
+  č. 121/2000 Sb.; levies are included in storage media prices). The recording stays on the Raspberry Pi's local disk,
+  is deleted automatically after the retention period (default 3 days, maximum 14) or earlier when space runs short,
+  and cannot be downloaded or exported. Only free-to-air channels from TVHeadend on the Pi are recorded; ČT internet
+  streams never.
 - Remote viewing over Tailscale is meant for members of the same household only (Tailscale ACLs, no Funnel, no node
   sharing). Relaying broadcasts outside the home is a legal grey area; you decide whether to enable it and you are
   responsible for that decision. Another household needs its own tuner.
 - Optional ad-break detection: a worker on a household machine (home LAN or own tailnet, never a cloud machine)
-  reads finished recordings through the gateway's authenticated HLS, analyses them in memory and stores only break
+  reads ended programmes of the recording through the gateway's authenticated HLS, analyses them in memory and stores only break
   timestamps and per-channel logo masks. Skipping is a manual seek by the viewer; the recording is never cut or
   altered. Break data and masks stay in the household and are never published.
 - Optional programme thumbnails (approved by the user on 2026-10-23, `spec/dvb-gateway.md` "Thumbnails"): the

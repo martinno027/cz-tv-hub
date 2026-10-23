@@ -13,6 +13,8 @@ RestartSec=3
 # Temporary HLS (hls_dir); if you move hls_dir to the recordings disk, add that path here.
 StateDirectory=cztvhub
 ReadWritePaths=/var/lib/cztvhub
+# Continuous recording on the recordings disk ([dvb] buffer_dir, see docs/dvb-setup.md); '-' = may not exist
+ReadWritePaths=-/srv/tv
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

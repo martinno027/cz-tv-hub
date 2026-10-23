@@ -15,9 +15,10 @@ antenna ─▶ tuner (USB in the Pi, or network tuner) ─▶ TVHeadend (Pi, 127
 
 - **TVHeadend** (apt package) owns tuners, scanning, EPG and recording. It listens on `127.0.0.1` only; the gateway
   talks to it with its own TVHeadend user. Free-to-air services only; no CA/descrambling configured.
-- **Recordings**: one TVHeadend autorec rule per configured channel records every EPG event to the Pi's local disk.
-  Retention = `retention_days` (default 3, clamped to 1..14), enforced by TVHeadend's DVR file removal **and** by the
-  gateway's own cleanup loop (deletes finished recordings older than retention through the TVHeadend API).
+- **Recordings**: the gateway records the channels selected on `/admin` **continuously** (see "Continuous recording",
+  approved by the user 2026-10-23). The older per-programme recording by TVHeadend autorec rules (`dvb-setup`,
+  retention `retention_days` through TVHeadend's DVR removal and the gateway's cleanup loop) still works for installs
+  that set it up; channels recorded continuously take their recordings from the continuous recording only.
 - **Gateway** = the existing `cztvhub serve` with DVB enabled in its config. Python standard library only; uses the
   system `ffmpeg` binary (apt) as a subprocess.
 - **Why remux**: tvOS AVPlayer cannot play raw MPEG-TS over HTTP and needs HEVC in fMP4 HLS (`hvc1`). The gateway runs
@@ -116,6 +117,58 @@ Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cz
   `503 {"error": "Tuner je obsazený"}` when TVHeadend has no free tuner, `502` TVHeadend unreachable or the stream
   could not be started, Czech `error` text in JSON bodies. When a live start finds no free tuner, the gateway
   first stops live sessions nobody has polled for 8 s (zapping) and retries once.
+
+## Continuous recording (`buffer.py`, `recorder.py`, `archive.py`, `space.py`)
+Approved by the user on 2026-10-23 (CLAUDE.md hard rules, `docs/legal-notes.md`; legal-guard: approve with changes).
+- **Recorder**: per channel switched to "Nahrávat" on `/admin` (and offered, not scrambled), one ffmpeg reads
+  TVHeadend's local stream (`/stream/channel/<uuid>?profile=pass`; the gateway refuses any TVHeadend that is not on
+  `127.0.0.1`, CT internet streams are never a source), copies the video and writes fMP4 segments (`-hls_time 2`,
+  cut at keyframes, ~2.6 s for ČT) with **every audio track muxed**: AAC, AC-3 and E-AC-3 copied, MPEG audio and
+  others converted to AAC 192 kbit/s. Track languages and Czech labels ("Čeština", "Angličtina (Dolby)",
+  "Čeština (pro nevidomé)") are kept per run. A mover takes each finished segment from ffmpeg's rolling playlist with
+  its `#EXT-X-PROGRAM-DATE-TIME` and files it in a **10-minute block** (`<buffer_dir>/<channel>/blocks/<UTC
+  YYYYMMDDTHHMM>/`, `index.jsonl`); segments are numbered per channel. When the source or ffmpeg ends, a new run
+  starts after 10 s (60 s while no tuner is free). Subtitles are not recorded yet (teletext → WebVTT needs a check of
+  real broadcasts and the Pi's ffmpeg first).
+- **Config**: `[dvb] buffer_dir` (default `/var/lib/cztvhub/buffer`; on the Pi the recordings disk, e.g.
+  `/srv/tv/buffer`, the unit allows writing below `/srv/tv`). Selection and the day limit live in
+  `<state dir>/settings.json` (`recordChannels`, `maxDays`), set on `/admin`; `[dvb] retention_days` is only the
+  default of `maxDays`.
+- **Retention** (every 60 s, `space.plan`, unit-tested): (1) **age always wins**: blocks older than `maxDays` (1..14,
+  clamped) are deleted whatever the free space; (2) **reserve**: while less than max(10 % of the disk, 5 GB) is free,
+  the oldest block of the channel holding the most hours is deleted (a channel's newest block never), so all recorded
+  channels keep about the same last N hours; (3) if the reserve still cannot be reached, **recording pauses** (resumes
+  once reserve + 1 GB is free). TVHeadend's own free-space setting does not cover these files. Switching "Nahrávat"
+  off or hiding a channel deletes its recording at once; recordings of channels no longer selected or offered are
+  deleted on the next pass (never while TVHeadend is unreachable).
+- **Programmes**: in `/dvb/epg` an event of a recorded channel gets `recording: {"id": "b<channel>-<start>-<end>",
+  "state"}` (epoch seconds of the event): `scheduled` (future, channel recorded), `recording` (airing, recorder
+  running, something recorded), `completed` (ended, ≥ 30 s recorded), else `null` ("Pořad nebyl nahrán").
+  `GET /dvb/recording/b….m3u8` only for a real EPG programme of an offered channel (exact times, from TVHeadend or the
+  EPG history; at most 12 h): from 30 s before the start to 60 s after the end; `EVENT` with a fixed target of 3 s
+  while airing, `VOD` + `ENDLIST` once ended. `#EXT-X-PROGRAM-DATE-TIME` on every segment, `#EXT-X-DISCONTINUITY`
+  (+ new `#EXT-X-MAP`) across runs and gaps > 1 s. Positions (resume, ad breaks) count from the playlist start.
+- **Audio choice**: with one audio track the playlist is the muxed media playlist (as before). With more, a master
+  playlist: `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud"` per track (`NAME`, `LANGUAGE` as RFC 5646, `DEFAULT=YES` on the
+  first Czech non-audio-description track, `CHARACTERISTICS="public.accessibility.describes-video"` on audio
+  description) and one video variant. The gateway cuts each rendition out of the same muxed fragments
+  (`fmp4.split_init` / `split_segment`, after the A/V-sync and open-GOP fixes), so the tracks stay in sync.
+- **Live**: `/dvb/live/<id>.m3u8` of a channel being recorded (a segment in the last 20 s) is served from the
+  recording: the last ~40 s, fixed target 3 s, `MEDIA-SEQUENCE`/`DISCONTINUITY-SEQUENCE`, a few seconds behind the
+  broadcast, no extra tuner. Other channels use the on-demand tuner session as before.
+- **Views**: playlists and media of the recording are served only under `/dvb/v/<view id>/…` (same key): a view is one
+  programme or the live window of one channel, kept 4 h after its last request. Media outside the view's range,
+  unknown views and anything else answer `404`; there is no listing, no static file serving of `buffer_dir` and no
+  playlist spanning "everything" (legal-guard).
+- **Thumbnails** of `b…` recordings come from one segment of the recording (init + segment, ffmpeg pipes), same rules.
+- **Ad breaks** (`spec/ad-breaks.md`): ended `b…` programmes of `[ads] channels` are analysable; the worker gets its
+  own views (`owner=worker`), one programme at a time (another one only after 2 min without requests).
+- `/admin`: per channel "Nahrávat" (`POST /admin/api/channels[/<id>]` `{"record": bool[, "ids"]}`; refused for hidden
+  or scrambled channels), "Uchovávat nahrávky nejvýše" (`POST /admin/api/settings {"maxDays": 1..14}`), tab
+  "Přehled nahrávek" (`GET /admin/api/storage`: disk, reserve, used, `maxDays`, `paused`, estimated hours per channel at
+  the measured bitrates, and per channel: recording, state, hours, oldest/newest, bytes, measured GB/h, gaps). The page
+  states that the recording is a private copy for this household, deleted after N days or earlier and not
+  downloadable.
 
 ## Channel administration (`/admin`, `src/cztvhub/dvb/admin.py`)
 A web page for the household (LAN / tailnet only, like the rest) to choose which antenna channels are offered.

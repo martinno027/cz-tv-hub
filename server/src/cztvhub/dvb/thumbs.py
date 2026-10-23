@@ -65,8 +65,15 @@ class Settings:
         return self._data.get("thumbnails", True) is not False
 
     def set_thumbnails(self, on: bool) -> None:
+        self.update(thumbnails=bool(on))
+
+    def get(self, key: str, default: Any = None) -> Any:
         with self._lock:
-            self._data["thumbnails"] = bool(on)
+            return self._data.get(key, default)
+
+    def update(self, **values: Any) -> None:
+        with self._lock:
+            self._data.update(values)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self._data), encoding="utf-8")
@@ -133,6 +140,43 @@ class Thumbnails:
             while len(self._cache) > CACHE_SIZE:
                 self._cache.popitem(last=False)
         return data
+
+    def get_from(self, key: str, final: bool, produce: Callable[[], bytes | None]) -> bytes | None:
+        """Same cache and limits for a still made by ``produce`` (the continuous recording, archive.py)."""
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit is not None:
+                data, was_final, made = hit
+                if was_final or self.clock() - made < REFRESH_SECONDS:
+                    self._cache.move_to_end(key)
+                    return data
+        if not self._jobs.acquire(timeout=TIMEOUT):
+            return None
+        try:
+            data = produce()
+        finally:
+            self._jobs.release()
+        if data is None:
+            return None
+        with self._lock:
+            self._cache[key] = (data, final, self.clock())
+            self._cache.move_to_end(key)
+            while len(self._cache) > CACHE_SIZE:
+                self._cache.popitem(last=False)
+        return data
+
+    def jpeg_from_mp4(self, data: bytes) -> bytes | None:
+        """One JPEG from fMP4 bytes (init + one segment) on stdin; pipes only."""
+        cmd = [self.ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error", "-f", "mp4", "-i", "pipe:0",
+               "-frames:v", "1", "-vf", f"scale='min({MAX_WIDTH},iw)':-2", "-q:v", str(QUALITY),
+               "-f", "image2", "-c:v", "mjpeg", "pipe:1"]
+        try:
+            result = self.run(cmd, input=data, capture_output=True, timeout=TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self.log(f"dvb: thumbnail: ffmpeg: {exc}")
+            return None
+        out = getattr(result, "stdout", b"") or b""
+        return out if getattr(result, "returncode", 1) == 0 and out.startswith(JPEG_SOI) else None
 
     def _make(self, dvr_uuid: str, offset: int) -> bytes | None:
         try:

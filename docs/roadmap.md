@@ -28,3 +28,8 @@
 11. **Ad-break skipping for "Anténa" recordings** (proposal, `spec/ad-breaks.md`, approved 2026-10-18): a detection worker
     on a household machine (Windows PC first, a newer Pi later) marks breaks by logo absence; apps offer
     "Přeskočit reklamu". Needs real recordings from a tuner to tune the detection.
+12. **Continuous antenna recording** (approved 2026-10-23, `spec/dvb-gateway.md` "Continuous recording"): the gateway
+    records the channels switched on in `/admin` 24/7 in 10-minute blocks (every audio track), programmes are time
+    ranges, live of a recorded channel comes from the recording, retention = day limit + free-space reserve with a
+    fair share per channel, "Přehled nahrávek" in `/admin`. Next: teletext subtitles → WebVTT (check real broadcasts
+    and the Pi's ffmpeg `libzvbi` first), measure how many channels a Pi 4 records at once.

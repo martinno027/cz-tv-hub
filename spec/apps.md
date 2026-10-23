@@ -68,6 +68,12 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    the programme's end, and at least every minute). Without guide data for now: the channel name as before.
    Start-over, archive and recordings: the programme title, subtitle = channel name (+ episode title if any). Live: seek within the timeshift buffer when started from it.
    Archive: normal VOD seeking. Subtitles/audio tracks from the HLS manifest via native UI if cheap.
+   **Audio choice for Anténa** (continuous recording, `spec/dvb-gateway.md`): a programme or live channel with several
+   broadcast audio tracks comes as a master playlist with one `#EXT-X-MEDIA TYPE=AUDIO` rendition per track (Czech
+   labels such as "Čeština", "Angličtina (Dolby)", "Čeština (pro nevidomé)"). The player starts with the default
+   rendition (Czech) and offers the others in its audio menu: AVPlayerViewController's own menu (tvOS), Media3's
+   track selection in the player controls (Android TV, preferred language `cs`), an OSD choice on the Samsung
+   (AVPlay tracks, ▲ = next audio track, its label shown). A single-track playlist stays as before.
    On playback error caused by URL expiry, re-resolve once and resume at the same position.
    Live (no start position) starts playing as soon as the player can, without waiting for a ready state first.
 4. **Errors**: show CT's `labels.textShort` (Czech) when present, else a generic Czech message.

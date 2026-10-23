@@ -229,3 +229,158 @@ def fix_leading_pictures(segment: bytes, track: int | None) -> bytes:
                         data = bytearray(segment)
                     data[pos:pos + 4] = struct.pack(">i" if version == 1 else ">I", wanted)
     return segment if data is None else bytes(data)
+
+
+# -- renditions from muxed fragments ------------------------------------------------------------
+# The continuous recorder (recorder.py) writes one fMP4 stream per channel with the video and every audio
+# track muxed, so one ffmpeg keeps them in sync (and the fixes above work per file). HLS players offer
+# alternative audio only as separate renditions, so the gateway serves each track on its own: the init
+# segment with just that track, and every fragment with just that track's run(s) and sample bytes.
+def _box(typ: bytes, body: bytes) -> bytes:
+    return struct.pack(">I4s", 8 + len(body), typ) + body
+
+
+def tracks(init: bytes) -> list[tuple[int, str]]:
+    """(track id, handler) of every track in an init segment, in file order: handler 'vide', 'soun', …"""
+    out = []
+    for tb, te in find(init, 0, len(init), [b"moov", b"trak"]):
+        tid = next((_full_box_u32(init, b, 12, 20) for b, _ in find(init, tb, te, [b"tkhd"])), None)
+        handler = next((init[b + 8:b + 12] for b, _ in find(init, tb, te, [b"mdia", b"hdlr"])), b"")
+        if tid is not None:
+            out.append((tid, handler.decode("latin-1")))
+    return out
+
+
+def split_init(init: bytes, track: int) -> bytes:
+    """``init`` reduced to one track: ftyp, then moov with mvhd, that trak and its trex."""
+    out = b""
+    for typ, start, body, end in boxes(init):
+        if typ != b"moov":
+            out += init[start:end]
+            continue
+        moov = b""
+        for t2, s2, b2, e2 in boxes(init, body, end):
+            if t2 == b"mvhd":
+                moov += init[s2:e2]
+            elif t2 == b"trak":
+                tid = next((_full_box_u32(init, b, 12, 20) for b, _ in find(init, b2, e2, [b"tkhd"])), None)
+                if tid == track:
+                    moov += init[s2:e2]
+            elif t2 == b"mvex":
+                mvex = b""
+                for t3, s3, b3, e3 in boxes(init, b2, e2):
+                    if t3 != b"trex" or struct.unpack(">I", init[b3 + 4:b3 + 8])[0] == track:
+                        mvex += init[s3:e3]
+                moov += _box(b"mvex", mvex)
+        out += _box(b"moov", moov)
+    return out
+
+
+def trex_defaults(init: bytes) -> dict[int, tuple[int, int]]:
+    """track id → (default sample duration, default sample size) from the init's ``trex`` boxes."""
+    out = {}
+    for b, _ in find(init, 0, len(init), [b"moov", b"mvex", b"trex"]):
+        tid, _, duration, size = struct.unpack(">IIII", init[b + 4:b + 20])
+        out[tid] = (duration, size)
+    return out
+
+
+def _parse_traf(seg: bytes, tb: int, te: int, moof_start: int, trex: tuple[int, int]):
+    """(track id, tfhd bytes without base offset, tfdt box, runs) where runs = [(trun header w/o data offset
+    fields, sample table bytes, absolute data start, data length)]."""
+    hd = next(find(seg, tb, te, [b"tfhd"]), None)
+    if hd is None:
+        return None
+    hb, he = hd
+    flags = int.from_bytes(seg[hb + 1:hb + 4], "big")
+    tid = struct.unpack(">I", seg[hb + 4:hb + 8])[0]
+    p = hb + 8
+    base = moof_start
+    if flags & 0x1:
+        base = struct.unpack(">Q", seg[p:p + 8])[0]
+        p += 8
+    rest_start = p
+    default_duration, default_size = trex
+    if flags & 0x2:
+        p += 4
+    if flags & 0x8:
+        default_duration = struct.unpack(">I", seg[p:p + 4])[0]
+        p += 4
+    if flags & 0x10:
+        default_size = struct.unpack(">I", seg[p:p + 4])[0]
+        p += 4
+    # the new tfhd: no explicit base offset, base = moof (what the runs are rewritten against)
+    new_flags = (flags & ~0x1) | 0x20000
+    tfhd = _box(b"tfhd", bytes([seg[hb]]) + new_flags.to_bytes(3, "big") + seg[hb + 4:hb + 8] + seg[rest_start:he])
+    tfdt = b"".join(seg[b - 8:e] for b, e in find(seg, tb, te, [b"tfdt"]))
+    runs = []
+    data_end = base
+    for rb, re_ in find(seg, tb, te, [b"trun"]):
+        version, rflags = seg[rb], int.from_bytes(seg[rb + 1:rb + 4], "big")
+        count = struct.unpack(">I", seg[rb + 4:rb + 8])[0]
+        q = rb + 8
+        start = data_end
+        if rflags & 0x1:
+            start = base + struct.unpack(">i", seg[q:q + 4])[0]
+            q += 4
+        first_flags = b""
+        if rflags & 0x4:
+            first_flags = seg[q:q + 4]
+            q += 4
+        table_start = q
+        total = 0
+        for _ in range(count):
+            if rflags & 0x100:
+                q += 4
+            if rflags & 0x200:
+                total += struct.unpack(">I", seg[q:q + 4])[0]
+                q += 4
+            else:
+                total += default_size
+            if rflags & 0x400:
+                q += 4
+            if rflags & 0x800:
+                q += 4
+        runs.append((version, rflags | 0x1, count, first_flags, seg[table_start:re_], start, total))
+        data_end = start + total
+    return tid, tfhd, tfdt, runs
+
+
+def split_segment(segment: bytes, track: int, trex: dict[int, tuple[int, int]] | None = None) -> bytes:
+    """``segment`` reduced to one track: per ``moof``/``mdat`` pair, a moof with just that track's ``traf``
+    (data offsets rewritten) and an mdat with just its sample bytes. Other top-level boxes (styp) are
+    kept, ``sidx`` is dropped (it described the muxed file)."""
+    trex = trex or {}
+    out = b""
+    for typ, start, body, end in boxes(segment):
+        if typ == b"moof":
+            mfhd = b"".join(segment[b - 8:e] for b, e in find(segment, body, end, [b"mfhd"]))
+            for tb, te in find(segment, body, end, [b"traf"]):
+                parsed = _parse_traf(segment, tb, te, start, trex.get(_traf_track(segment, tb, te), (0, 0)))
+                if parsed is None or parsed[0] != track:
+                    continue
+                _, tfhd, tfdt, runs = parsed
+
+                def trun_box(run, offset):
+                    version, rflags, count, first_flags, table, _, _ = run
+                    body2 = bytes([version]) + rflags.to_bytes(3, "big") + struct.pack(">Ii", count, offset)
+                    return _box(b"trun", body2 + first_flags + table)
+
+                fixed = sum(len(trun_box(r, 0)) for r in runs)
+                moof_size = 8 + len(mfhd) + 8 + len(tfhd) + len(tfdt) + fixed
+                truns, payload, offset = b"", b"", moof_size + 8
+                for run in runs:
+                    truns += trun_box(run, offset)
+                    payload += segment[run[5]:run[5] + run[6]]
+                    offset += run[6]
+                out += _box(b"moof", mfhd + _box(b"traf", tfhd + tfdt + truns)) + _box(b"mdat", payload)
+        elif typ in (b"mdat", b"sidx"):
+            continue
+        else:
+            out += segment[start:end]
+    return out
+
+
+def _traf_track(seg: bytes, tb: int, te: int) -> int:
+    hd = next(find(seg, tb, te, [b"tfhd"]), None)
+    return struct.unpack(">I", seg[hd[0] + 4:hd[0] + 8])[0] if hd else 0

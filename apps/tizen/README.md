@@ -13,7 +13,8 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
   výběru nabídne „Pokračovat od 23:10“. Dosledované pořady zapomene.
 - **Přeskočit reklamu** (volitelné, zapíná se na bráně, viz [`spec/ad-breaks.md`](../../spec/ad-breaks.md)): u hotových
   nahrávek z antény se během reklamního bloku ukáže vpravo dole tlačítko; OK ho stiskne.
-- **Přehrávač**: Samsung AVPlay, OK = pauza, ◀ ▶ posun o 10 s, ⏪ ⏩ o minutu, Zpět = konec.
+- **Přehrávač**: Samsung AVPlay, OK = pauza, ◀ ▶ posun o 10 s, ⏪ ⏩ o minutu, ▲ další zvuková stopa (anténa: čeština,
+  původní znění…), Zpět = konec.
   Když odkaz během sledování vyprší, aplikace si vyžádá nový a pokračuje.
 
 Stream se vždy vyžádá až na televizi těsně před přehráním (odkazy ČT jsou vázané na IP a platí asi hodinu).

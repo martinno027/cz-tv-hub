@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const CORE = ['models', 'days', 'decisions', 'api', 'layout', 'dvb', 'schedule', 'planner', 'entries', 'resume', 'channel-prefs', 'thumbs', 'ct-antenna', 'player-title'];
+const CORE = ['models', 'days', 'decisions', 'api', 'layout', 'dvb', 'schedule', 'planner', 'entries', 'resume', 'channel-prefs', 'thumbs', 'ct-antenna', 'player-title', 'audio'];
 const FIXTURES = path.join(__dirname, '..', '..', '..', 'spec', 'fixtures');
 
 CORE.forEach((name) => require(path.join(__dirname, '..', 'app', 'js', 'core', name + '.js')));

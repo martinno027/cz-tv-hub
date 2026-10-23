@@ -2,6 +2,8 @@
 name: Televize
 options:
   bundleIdPrefix: cz.cztvhub
+  # The app is Czech only; declaring it makes system UI (AVKit's player menus, track names) Czech too.
+  developmentLanguage: cs
   deploymentTarget:
     tvOS: "17.0"
   createIntermediateGroups: true
@@ -31,6 +33,7 @@ targets:
       path: Televize/Info.plist
       properties:
         CFBundleDisplayName: Televize
+        CFBundleLocalizations: [cs]
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true

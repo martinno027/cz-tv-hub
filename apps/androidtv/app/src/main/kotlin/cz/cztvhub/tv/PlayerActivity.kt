@@ -24,6 +24,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -81,6 +82,9 @@ class PlayerActivity : ComponentActivity() {
     private var target: PlayTarget? = null
     private var loadJob: Job? = null
     private var resumeOnStart: Resume = Resume.Default
+
+    /** Czech by default; the track picked in the settings menu once the viewer chooses one (Anténa audio tracks). */
+    private var audioPreference = AudioPreference.DEFAULT
 
     /** Ad breaks of a finished gateway recording (spec/ad-breaks.md); empty when unknown or off. */
     private var adBreaks: List<AdBreak> = emptyList()
@@ -206,10 +210,7 @@ class PlayerActivity : ComponentActivity() {
             )
             .build()
         val exo = ExoPlayer.Builder(this).setLoadControl(loadControl).build().apply {
-            trackSelectionParameters = trackSelectionParameters.buildUpon()
-                .setPreferredAudioLanguage("cs")
-                .setPreferredAudioRoleFlags(C.ROLE_FLAG_MAIN)
-                .build()
+            trackSelectionParameters = audioPreference.applyTo(trackSelectionParameters)
             addListener(listener)
         }
         player = exo
@@ -280,6 +281,8 @@ class PlayerActivity : ComponentActivity() {
                 .setReadTimeoutMs(HTTP_TIMEOUT_MS) // a gateway live start blocks until the first segment
                 .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
             val source = HlsMediaSource.Factory(http).createMediaSource(item)
+            // A master playlist with several audio renditions gets new track groups: the menu's override is stale.
+            exo.trackSelectionParameters = audioPreference.applyTo(exo.trackSelectionParameters)
             if (startPositionMs != null) exo.setMediaSource(source, startPositionMs) else exo.setMediaSource(source)
             // Hold playback until the start-over seek is done, so the live edge never flashes by.
             exo.playWhenReady = pendingWallClockMs == null
@@ -291,6 +294,10 @@ class PlayerActivity : ComponentActivity() {
     private val listener = object : Player.Listener {
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
             applyPendingSeek()
+        }
+
+        override fun onTrackSelectionParametersChanged(parameters: TrackSelectionParameters) {
+            AudioPreference.chosen(parameters)?.let { audioPreference = it }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {

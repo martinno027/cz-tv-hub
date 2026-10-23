@@ -112,6 +112,7 @@ class Service:
     enabled: bool
     mux: str  # multiplex uuid, "" if unknown
     mux_name: str = ""
+    encrypted: bool = False  # scrambled (CA): never recorded, never descrambled
 
 
 MUX_IGNORE, MUX_DISABLE, MUX_ENABLE = -1, 0, 1
@@ -233,7 +234,7 @@ def parse_autorecs(data: Any) -> list[Autorec]:
 
 def parse_services(data: Any) -> list[Service]:
     return [Service(str(e["uuid"]), _text(e.get("svcname")) or _text(e.get("name")), e.get("enabled") is not False,
-                    _id(e.get("multiplex_uuid")), _text(e.get("multiplex")))
+                    _id(e.get("multiplex_uuid")), _text(e.get("multiplex")), bool(e.get("encrypted")))
             for e in _entries(data) if e.get("uuid")]
 
 

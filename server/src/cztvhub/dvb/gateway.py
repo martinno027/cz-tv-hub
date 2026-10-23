@@ -12,6 +12,7 @@ import re
 import shutil
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -19,6 +20,9 @@ from typing import Any, Callable, Mapping
 
 from ..config import Config
 from . import breaks as ads
+from .archive import Archive, ArchiveError, parse_recording_id
+from .buffer import BufferStore
+from .recorder import RecorderManager
 from . import epg
 from . import fmp4
 from .hls import (INIT, LIVE_START_SECONDS, Codecs, EmptySource, HlsManager, HlsSession, StreamFailed,
@@ -38,6 +42,8 @@ JOBS_PATH = "/dvb/ads/jobs"
 COOKIE_NAME = "cztvhub_key"
 MAX_BODY = 64 * 1024
 HLS_RE = re.compile(r"^/dvb/hls/([0-9a-f]{32})/([A-Za-z0-9_.-]+)$")
+VIEW_PREFIX = "/dvb/v/"  # continuous recording: playlists and media of one programme or the live window
+WORKER_IDLE = 120.0  # the worker may switch programmes after this long without a request
 ICON_RE = re.compile(rf"^/dvb/icon/({UUID})$")
 RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 TVH_ICON_RE = re.compile(r"^imagecache/\d+$")
@@ -79,7 +85,7 @@ class DvbGateway:
     def __init__(self, cfg: Config, client: TvheadendClient | None = None, hls: HlsManager | None = None,
                  now: Callable[[], float] = time.time, prober: Callable[[bytes], Codecs] | None = None,
                  popen: Callable[..., Any] | None = None, playlist_timeout: float = PLAYLIST_TIMEOUT,
-                 log: Callable[[str], None] = print):
+                 log: Callable[[str], None] = print, archive: Archive | None = None):
         self.cfg = cfg
         self.dvb = cfg.dvb
         tvh = cfg.tvheadend
@@ -96,6 +102,14 @@ class DvbGateway:
         self.thumbs = Thumbnails(self.client, self.settings, self.dvb.ffmpeg, now=now, log=log)
         self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log, after=self._after_retention)
         self.history = EpgHistory(self.dvb.state_dir)
+        if archive is None:
+            store = BufferStore(self.dvb.buffer_dir)
+            recorders = RecorderManager(store, self._recording_source, self.dvb.ffmpeg, self.dvb.ffprobe, log=log)
+            archive = Archive(store, recorders, self.settings, self.thumbs, self.dvb.retention_days, now=now,
+                              log=log, offered=self._offered_ids, is_programme=self._is_programme)
+        self.archive = archive
+        self._worker_rid: str | None = None
+        self._worker_at = float("-inf")
         self._collector_stop = threading.Event()
         self._worker_sid: str | None = None  # the worker's one recording session (spec/ad-breaks.md)
         self._worker_lock = threading.Lock()
@@ -107,10 +121,12 @@ class DvbGateway:
     def start(self) -> None:
         self.hls.start()
         self.retention.start()
+        self.archive.start()
         threading.Thread(target=self._collect_loop, name="dvb-epg-history", daemon=True).start()
 
     def stop(self) -> None:
         self._collector_stop.set()
+        self.archive.stop()
         self.retention.stop()
         self.hls.shutdown()
 
@@ -169,6 +185,8 @@ class DvbGateway:
             return self.epg(query.get("date"))
         if m := HLS_RE.match(path):
             return self.media(m.group(1), m.group(2), headers.get("Range"))
+        if path.startswith(VIEW_PREFIX):
+            return self.view_file(path[len(VIEW_PREFIX):], headers.get("Range"))
         if m := LIVE_RE.match(path):
             return self.live(m.group(1))
         if m := RECORDING_RE.match(path):
@@ -189,11 +207,37 @@ class DvbGateway:
                 self._channels_at = time.monotonic()
             return self._channels
 
+    def _recording_source(self, channel: str):
+        """The only input of the continuous recording: TVHeadend's stream of an antenna channel on this Pi
+        (never CT internet streams, never another host)."""
+        if not local_url(self.client.base):
+            raise TvhError("recording needs TVHeadend on 127.0.0.1")
+        return self.client.open_live(channel)
+
+    def _offered_ids(self) -> set[str] | None:
+        """Channels offered to the apps, or None when TVHeadend cannot be asked (nothing is deleted then)."""
+        try:
+            return {c.uuid for c in self._channel_list()}
+        except TvhError:
+            return None
+
+    def _is_programme(self, channel: str, start: int, end: int) -> bool:
+        """An EPG programme (remembered or current) of the channel with exactly these times."""
+        if any(e.channel == channel and e.start == start and e.stop == end
+               for e in self.history.between(start, start + 1)):
+            return True
+        try:
+            return any(e.channel == channel and e.start == start and e.stop == end
+                       for e in self.client.epg_events(start, start + 1))
+        except TvhError:
+            return False
+
     # -- EPG history (epgstore.py) -----------------------------------------------------------
     def _remember(self, events: list, window: tuple[int, int]) -> None:
         now = self.now()
         changed = self.history.merge(events, now, window)
-        changed = self.history.prune(now - (self.dvb.retention_days + 1) * 86400) or changed
+        changed = self.history.prune(now - (max(self.dvb.retention_days, self.archive.max_days()) + 1) * 86400) \
+            or changed
         if changed:
             try:
                 self.history.save()
@@ -221,6 +265,8 @@ class DvbGateway:
             self._channels_at = float("-inf")
         for channel_id in hidden or []:
             self.hls.stop_key(f"live:{channel_id}")
+            self.archive.forget_channel(channel_id)  # a hidden channel is not recorded (legal-guard)
+        self.archive.sync()
 
     def status(self) -> Response:
         try:
@@ -233,7 +279,7 @@ class DvbGateway:
             disk = {"freeBytes": usage.free, "totalBytes": usage.total}
         except OSError:
             disk = {"freeBytes": 0, "totalBytes": 0}
-        return json_response(200, {"enabled": True, "retentionDays": self.dvb.retention_days, "tuners": tuners,
+        return json_response(200, {"enabled": True, "retentionDays": self.archive.max_days(), "tuners": tuners,
                                    "disk": disk, "tvheadendReachable": reachable,
                                    "thumbnails": self.thumbs.enabled})
 
@@ -252,7 +298,7 @@ class DvbGateway:
                 raise HttpError(400, "Neplatné datum (YYYY-MM-DD)")
         else:
             day = today
-        first, last = epg.allowed_days(today, self.dvb.retention_days)
+        first, last = epg.allowed_days(today, max(self.dvb.retention_days, self.archive.max_days()))
         if not first <= day <= last:
             raise HttpError(400, f"Program je k dispozici jen od {first.isoformat()} do {last.isoformat()}")
         start, end = epg.day_bounds(day)
@@ -260,10 +306,13 @@ class DvbGateway:
         offered = {c.uuid for c in self._channel_list()}
         live = self.client.epg_events(start, end)
         self._remember(live, (start, end))
-        entries = [e for e in self.client.dvr_entries("grid") if e.channel in offered]
+        # continuously recorded channels take their recordings from the buffer, not from TVHeadend's DVR
+        recorded = {c for c in offered if self.archive.is_recorded(c)}
+        entries = [e for e in self.client.dvr_entries("grid") if e.channel in offered and e.channel not in recorded]
         # TVHeadend forgets ended programmes; the remembered ones fill the past (spec "EPG history")
         events = [e for e in merge_past(live, self.history.between(start, end), entries) if e.channel in offered]
         built = epg.build_epg(events, entries, start, end)
+        self.archive.annotate(built, recorded)
         if self.ads.enabled:
             stored = self.breaks.ids()
             for event in built:
@@ -321,6 +370,10 @@ class DvbGateway:
     def live(self, channel_id: str) -> Response:
         if not any(c.uuid == channel_id for c in self._channel_list()):
             raise HttpError(404, "Neznámý kanál")
+        if self.archive.live_ready(channel_id):
+            # a recorded channel plays from its recording, a few seconds behind, without another tuner
+            body, content_type = self._archive_call(self.archive.live, channel_id)
+            return Response(200, body, content_type, {"Cache-Control": "no-cache"})
         open_source = lambda: self.client.open_live(channel_id)  # noqa: E731
         try:
             session = self._open_live(channel_id, open_source)
@@ -345,7 +398,22 @@ class DvbGateway:
             return False
         return bool(tuners) and all(t.in_use for t in tuners)
 
+    def _archive_call(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except ArchiveError as exc:
+            raise HttpError(exc.status, exc.message)
+
+    def view_file(self, rest: str, range_header: str | None, owner: str = "") -> Response:
+        data, content_type = self._archive_call(self.archive.view_file, rest, owner)
+        if content_type.endswith("mpegurl"):
+            return Response(200, data, content_type, {"Cache-Control": "no-cache"})
+        return _ranged(data, content_type, range_header)
+
     def recording(self, dvr_uuid: str, on_session: Callable[[HlsSession], None] | None = None) -> Response:
+        if parse_recording_id(dvr_uuid):
+            body, content_type = self._archive_call(self.archive.programme, dvr_uuid)
+            return Response(200, body, content_type, {"Cache-Control": "no-cache"})
         def entry() -> DvrEntry | None:
             return next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
 
@@ -374,6 +442,11 @@ class DvbGateway:
         """One still of a recording (spec/dvb-gateway.md "Thumbnails"); checked against TVHeadend every time."""
         if not self.thumbs.enabled:
             raise HttpError(404, "Náhledy jsou vypnuté")
+        if parse_recording_id(dvr_uuid):
+            data = self.archive.thumbnail(dvr_uuid)
+            if data is None:
+                raise HttpError(404, "Náhled není k dispozici")
+            return Response(200, data, "image/jpeg", {"Cache-Control": "private, no-store"})
         entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
         state = epg.recording_state(entry.sched_status) if entry else ""
         if entry is None or state not in ("completed", "recording") \
@@ -394,22 +467,7 @@ class DvbGateway:
             data = self._synced(session, path.name, path.read_bytes())
         except OSError:
             raise HttpError(404, "Segment nenalezen")
-        content_type = MEDIA_TYPES.get(path.suffix, "application/octet-stream")
-        headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
-        if range_header:
-            m = RANGE_RE.match(range_header.strip())
-            size = len(data)
-            if m and (m.group(1) or m.group(2)):
-                if m.group(1):
-                    first = int(m.group(1))
-                    last = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
-                else:
-                    first, last = max(0, size - int(m.group(2))), size - 1
-                if first <= last < size:
-                    headers["Content-Range"] = f"bytes {first}-{last}/{size}"
-                    return Response(206, data[first:last + 1], content_type, headers)
-            return Response(416, b"", content_type, {"Content-Range": f"bytes */{size}"})
-        return Response(200, data, content_type, headers)
+        return _ranged(data, MEDIA_TYPES.get(path.suffix, "application/octet-stream"), range_header)
 
     def _log_startup(self, session: HlsSession, media: float) -> None:
         """One line per live start: where the time goes (spec/dvb-gateway.md "Start-up timing")."""
@@ -464,11 +522,20 @@ class DvbGateway:
             return self._worker_recording(m.group(1))
         if method == "GET" and (m := HLS_RE.match(path)) and m.group(1) == self._worker_sid:
             return self.media(m.group(1), m.group(2), None)
+        if method == "GET" and path.startswith(VIEW_PREFIX):
+            return self.view_file(path[len(VIEW_PREFIX):], None, owner="worker")
         if method == "PUT" and (m := BREAKS_RE.match(path)):
             return self.put_breaks(m.group(1), body)
         raise HttpError(403, "Klíč pracovníka sem nemá přístup")
 
     def _analysable(self, dvr_uuid: str) -> bool:
+        parsed = parse_recording_id(dvr_uuid)
+        if parsed:
+            channel, start, end = parsed
+            channels = {c.uuid: c for c in self._channel_list()}
+            return ads.channel_selected(channels.get(channel), self.ads.channels) \
+                and self.now() >= end and self._is_programme(channel, start, end) \
+                and self.archive.state(channel, start, end) == "completed"
         entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
         channels = {c.uuid: c for c in self._channel_list()}
         return ads.analysable(entry, channels, self.ads.channels)
@@ -491,6 +558,14 @@ class DvbGateway:
     def _worker_recording(self, dvr_uuid: str) -> Response:
         if not self._analysable(dvr_uuid):
             raise HttpError(403, "Nahrávka není k analýze")
+        if parse_recording_id(dvr_uuid):
+            with self._worker_lock:
+                busy = self._worker_rid not in (None, dvr_uuid) and time.monotonic() - self._worker_at < WORKER_IDLE
+                if busy:
+                    raise HttpError(409, "Pracovník už zpracovává jinou nahrávku")
+                self._worker_rid, self._worker_at = dvr_uuid, time.monotonic()
+            body, content_type = self._archive_call(self.archive.programme, dvr_uuid, owner="worker")
+            return Response(200, body, content_type, {"Cache-Control": "no-cache"})
         key = f"rec:{dvr_uuid}"
         with self._worker_lock:
             # Looked up without touching it, so a refused request does not keep the old session alive.
@@ -528,6 +603,29 @@ class DvbGateway:
         removed = self.breaks.prune(e.uuid for e in entries)
         if removed:
             self.log(f"dvb: removed ad breaks of {len(removed)} deleted recording(s)")
+
+
+def local_url(url: str) -> bool:
+    host = urllib.parse.urlparse(url).hostname or ""
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
+def _ranged(data: bytes, content_type: str, range_header: str | None) -> Response:
+    headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
+    if range_header:
+        m = RANGE_RE.match(range_header.strip())
+        size = len(data)
+        if m and (m.group(1) or m.group(2)):
+            if m.group(1):
+                first = int(m.group(1))
+                last = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+            else:
+                first, last = max(0, size - int(m.group(2))), size - 1
+            if first <= last < size:
+                headers["Content-Range"] = f"bytes {first}-{last}/{size}"
+                return Response(206, data[first:last + 1], content_type, headers)
+        return Response(416, b"", content_type, {"Content-Range": f"bytes */{size}"})
+    return Response(200, data, content_type, headers)
 
 
 def _same(token: str, key: str) -> bool:

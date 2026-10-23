@@ -59,6 +59,8 @@ final class PlayerController {
     private var backgroundObserver: NSObjectProtocol?
     /// False until the start position has been applied, so the pre-seek position is never saved.
     private var positionApplied = false
+    /// Audio renditions of the current item (gateway master playlists with several broadcast tracks).
+    private var audioGroup: AVMediaSelectionGroup?
 
     /// `resolve` fetches a fresh source (new signed URL / new gateway session) after a failure.
     /// `adBreaks` is given only for finished recordings: it enables the "Přeskočit reklamu" button.
@@ -77,6 +79,7 @@ final class PlayerController {
         let tracked = source.mode == .live ? nil : progress
         self.progressTarget = tracked?.target
         self.resumeStore = tracked?.store
+        applyAudioPreference(language: nil, describesVideo: false)
     }
 
     func start() {
@@ -104,6 +107,7 @@ final class PlayerController {
         if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
         backgroundObserver = nil
         positionApplied = false
+        audioGroup = nil
         statusObservation = nil
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         failureObserver = nil
@@ -257,6 +261,7 @@ final class PlayerController {
                         self.statusHandled = true
                         playerLog.info("ready to play")
                         Task {
+                            await self.loadAudioOptions(item)
                             await self.applyStartPosition(item, source: source, resume: resume)
                             if self.player.currentItem === item { self.positionApplied = true }
                             self.player.play()
@@ -348,6 +353,7 @@ final class PlayerController {
         }
         hasRetried = true
         let resume = currentResume()
+        keepSelectedAudio()
         Task {
             do {
                 let fresh = try await resolve()
@@ -372,6 +378,40 @@ final class PlayerController {
             let seconds = item.currentTime().seconds
             return seconds.isFinite && seconds > 0 ? .seconds(seconds) : nil
         }
+    }
+
+    // MARK: audio ("Audio choice for Anténa", spec/apps.md)
+
+    /// Czech first, or the viewer's own pick when the stream is reloaded. Applies to the next items too,
+    /// so AVPlayerViewController's audio menu starts on that track and still lists all of them.
+    private func applyAudioPreference(language: String?, describesVideo: Bool) {
+        let criteria = AVPlayerMediaSelectionCriteria(
+            preferredLanguages: AudioPreference.languages(selected: language),
+            preferredMediaCharacteristics: describesVideo ? [.describesVideoForAccessibility] : nil
+        )
+        player.setMediaSelectionCriteria(criteria, forMediaCharacteristic: .audible)
+    }
+
+    private func loadAudioOptions(_ item: AVPlayerItem) async {
+        audioGroup = nil
+        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .audible),
+              player.currentItem === item else { return }
+        audioGroup = group
+        let names = group.options.map { option in
+            let title = AVMetadataItem.metadataItems(from: option.commonMetadata, filteredByIdentifier: .commonIdentifierTitle)
+                .first?.stringValue ?? option.displayName
+            return "\(title) [\(option.extendedLanguageTag ?? "-")]"
+        }.joined(separator: ", ")
+        let selected = item.currentMediaSelection.selectedMediaOption(in: group)?.displayName ?? "-"
+        playerLog.info("audio options: \(names, privacy: .public); selected \(selected, privacy: .public)")
+    }
+
+    /// Before a reload: the new item should start on the track the viewer was listening to.
+    private func keepSelectedAudio() {
+        guard let item = player.currentItem, let group = audioGroup,
+              let option = item.currentMediaSelection.selectedMediaOption(in: group) else { return }
+        applyAudioPreference(language: option.extendedLanguageTag ?? option.locale?.identifier,
+                             describesVideo: option.hasMediaCharacteristic(.describesVideoForAccessibility))
     }
 
     // MARK: info bar title

@@ -58,6 +58,9 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // Media3's Format / TrackSelectionParameters call android.text.TextUtils (stubbed in JVM tests).
+    testOptions.unitTests.isReturnDefaultValues = true
 }
 
 dependencies {

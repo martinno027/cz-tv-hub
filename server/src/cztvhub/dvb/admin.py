@@ -98,6 +98,8 @@ class ChannelAdmin:
                 "name": channel.name,
                 "shortName": short_name(channel.name),
                 "offered": channel.enabled,
+                # every service scrambled (CA): cannot be recorded (free-to-air only, nothing is descrambled)
+                "scrambled": bool(own) and all(s.encrypted for s in own),
                 # tuned at all: an enabled service in an enabled multiplex
                 "received": any(s.enabled and muxes.get(s.mux) is not None and muxes[s.mux].enabled == MUX_ENABLE
                                 for s in own),
@@ -223,6 +225,8 @@ class AdminSite:
                 return Response(200, PAGE.encode("utf-8"), HTML, PAGE_HEADERS)
             if method == "GET" and path == "/admin/api/channels":
                 return self._overview()
+            if method == "GET" and path == "/admin/api/storage":
+                return self._storage()
             if method == "POST" and path == "/admin/api/settings":
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
@@ -261,10 +265,41 @@ class AdminSite:
 
     def _overview(self) -> Response:
         status = json.loads(self.gateway.status().body)
-        return json_response(200, {"channels": self.admin.overview(), "status": status,
-                                   "settings": {"thumbnails": self.gateway.thumbs.enabled},
+        rows = self.admin.overview()
+        archive = self.gateway.archive
+        recorded = archive.record_channels()
+        for row in rows:
+            row["record"] = row["id"] in recorded
+            stats = archive.store.stats(row["id"])
+            row["stored"] = {"hours": round(stats["seconds"] / 3600, 2), "bytes": stats["bytes"],
+                             "oldest": epg.iso(int(stats["oldest"])) if stats["oldest"] else None}
+            rec = archive.recorders.recorder(row["id"])
+            row["recorderState"] = rec.state if rec is not None else None
+        return json_response(200, {"channels": rows, "status": status,
+                                   "settings": {"thumbnails": self.gateway.thumbs.enabled,
+                                                "maxDays": archive.max_days()},
                                    "recordingSetUp": recording_set_up(self.gateway.client),
-                                   "retentionDays": self.gateway.dvb.retention_days})
+                                   "retentionDays": archive.max_days(),
+                                   "recordingPaused": archive.recorders.paused})
+
+    def _storage(self) -> Response:
+        """"Přehled nahrávek": per recorded channel hours, how far back, size, measured bitrate, gaps."""
+        names = {c.uuid: c.name for c in self.gateway.client.channels(include_disabled=True)}
+        return json_response(200, self.gateway.archive.overview(names))
+
+    def _record(self, ids: list[str], on: bool) -> Response:
+        """Switch the continuous recording of channels (spec/dvb-gateway.md "Continuous recording")."""
+        rows = {r["id"]: r for r in self.admin.overview()}
+        missing = [i for i in ids if i not in rows]
+        if missing:
+            raise TvhNotFound(", ".join(missing))
+        if on:
+            blocked = [rows[i]["name"] for i in ids if not rows[i]["offered"] or rows[i]["scrambled"]]
+            if blocked:
+                return error(400, "Nahrávat lze jen zapnuté nekódované kanály: " + ", ".join(blocked))
+        done = self.gateway.archive.set_record(ids, on)
+        self.gateway.log(f"admin: recording {'on' if on else 'off'}: {', '.join(rows[i]['name'] for i in ids)}")
+        return json_response(200, {"changes": done})
 
     def _set(self, channel_id: str | None, body: bytes) -> Response:
         """``POST /admin/api/channels/<id>`` {"offered"} | {"name"}, or for several channels
@@ -275,6 +310,12 @@ class AdminSite:
             payload = None
         if isinstance(payload, dict) and ("name" in payload or "names" in payload):
             return self._rename(channel_id, payload)
+        if isinstance(payload, dict) and isinstance(payload.get("record"), bool):
+            ids = payload.get("ids") if channel_id is None else [channel_id]
+            if not isinstance(ids, list) or not 0 < len(ids) <= MAX_BULK or \
+                    not all(isinstance(i, str) and ID_RE.match(i) for i in ids):
+                return error(400, 'Očekávám {"ids": ["<id kanálu>", …], "record": true|false}')
+            return self._record(list(dict.fromkeys(ids)), payload["record"])
         if not isinstance(payload, dict) or not isinstance(payload.get("offered"), bool):
             return error(400, 'Očekávám {"offered": true|false}')
         if channel_id is None:
@@ -288,7 +329,11 @@ class AdminSite:
         try:
             done = self.admin.set_offered(ids, offered)
         finally:
+            if not offered:  # a hidden channel is not recorded any more, its recording is deleted
+                done_rec = self.gateway.archive.set_record(ids, False)
             self.gateway.channels_changed(hidden=None if offered else ids)
+        if not offered:
+            done += done_rec
         return json_response(200, {"changes": done})
 
     def _settings(self, body: bytes) -> Response:
@@ -297,11 +342,19 @@ class AdminSite:
             payload: Any = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             payload = None
-        if not isinstance(payload, dict) or not isinstance(payload.get("thumbnails"), bool):
-            return error(400, 'Očekávám {"thumbnails": true|false}')
-        self.gateway.thumbs.set_enabled(payload["thumbnails"])
-        self.gateway.log(f"admin: thumbnails {'on' if payload['thumbnails'] else 'off'}")
-        return json_response(200, {"settings": {"thumbnails": self.gateway.thumbs.enabled}})
+        days = payload.get("maxDays") if isinstance(payload, dict) else None
+        if isinstance(days, int) and not isinstance(days, bool):
+            if not 1 <= days <= 14:
+                return error(400, "Uchovávat lze 1 až 14 dní")
+            self.gateway.archive.set_max_days(days)
+            self.gateway.log(f"admin: recordings kept {days} days")
+        elif not isinstance(payload, dict) or not isinstance(payload.get("thumbnails"), bool):
+            return error(400, 'Očekávám {"thumbnails": true|false} nebo {"maxDays": 1..14}')
+        else:
+            self.gateway.thumbs.set_enabled(payload["thumbnails"])
+            self.gateway.log(f"admin: thumbnails {'on' if payload['thumbnails'] else 'off'}")
+        return json_response(200, {"settings": {"thumbnails": self.gateway.thumbs.enabled,
+                                                "maxDays": self.gateway.archive.max_days()}})
 
     def _rename(self, channel_id: str | None, payload: dict) -> Response:
         raw = {channel_id: payload.get("name")} if channel_id else payload.get("names")
@@ -386,6 +439,20 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
 .edit input { font: inherit; font-weight: 600; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--accent);
   background: var(--bg); color: var(--fg); min-width: 0; width: 220px; max-width: 100%; }
 .confirm ul { margin: 4px 0; padding-left: 20px; flex-basis: 100%; }
+.tabs { display: flex; gap: 4px; margin: 0 0 16px; }
+.tabs button { padding: 6px 14px; }
+.tabs button[aria-selected=true] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rec { display: inline-flex; gap: 6px; align-items: center; margin-left: 10px; }
+.rec input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.legal { font-size: 13px; color: var(--muted); border-left: 3px solid var(--accent); padding: 6px 12px; margin: 0 0 16px; }
+table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px; overflow: hidden; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); border-top: 0; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.totals { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 12px; font-size: 14px; }
+.totals b { font-weight: 600; }
+.warn { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -393,8 +460,24 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
 <h1>Anténa – kanály</h1>
 <p class="sub">Vypnutý kanál aplikace nenabízejí, nenahrává se a tuner ho neladí.</p>
 <div class="status" id="status"></div>
-<label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
+<div class="tabs" role="tablist">
+  <button role="tab" id="tab-channels" aria-selected="true">Kanály</button>
+  <button role="tab" id="tab-storage" aria-selected="false">Přehled nahrávek</button>
+</div>
+<p class="legal">Nahrávání je soukromá kopie jen pro tuto domácnost. Záznam zůstává na disku tohoto Raspberry, maže se
+automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostatku místa a nelze ho stáhnout ani sdílet.</p>
 <div id="msg" role="status" aria-live="polite"></div>
+<section id="storage" hidden>
+  <div class="totals" id="totals"></div>
+  <table><thead><tr><th>Kanál</th><th>Stav</th><th class="n">Uloženo</th><th>Zpět do</th><th class="n">Velikost</th>
+    <th class="n">Datový tok</th><th class="n">Výpadky</th></tr></thead><tbody id="storage-rows"></tbody></table>
+  <p class="help">Když místo dochází, maže se nejstarších 10 minut z kanálu, který má uloženo nejvíc hodin, takže
+  každý nahrávaný kanál drží zhruba stejný počet posledních hodin. Na disku zůstává rezerva 10 % (nejméně 5 GB);
+  když ji nejde udržet, nahrávání se pozastaví. Datový tok je změřený ze skutečných nahrávek.</p>
+</section>
+<section id="channels">
+<label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
+<label class="setting">Uchovávat nahrávky nejvýše <select id="maxdays"></select> (dříve se maže, když dochází místo)</label>
 <div class="list">
   <div class="bar" id="bar"></div>
   <div id="list"><div class="row"><span></span><span></span><span class="meta">Načítám…</span></div></div>
@@ -402,7 +485,10 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
 <p class="help">Vypnutím se zruší plánované nahrávky kanálu a smažou jeho nahrávky. Multiplex se vypne, až
 v něm nezbude žádný zapnutý kanál. Po zapnutí se nahrává od dalšího pořadu; programový průvodce se doplní,
 až tuner multiplex znovu naladí (může trvat desítky minut). Vypnuté kanály nemají program, protože se nepřijímají.
-Nový název kanálu se uloží v TVHeadendu a aplikace ho ukážou po obnovení seznamu kanálů.</p>
+Nový název kanálu se uloží v TVHeadendu a aplikace ho ukážou po obnovení seznamu kanálů.
+„Nahrávat“ znamená nepřetržitý záznam kanálu na disk tohoto Raspberry; vypnutím se záznam kanálu hned smaže.
+Kódované kanály nahrávat nelze.</p>
+</section>
 </main>
 <script>
 "use strict";
@@ -419,7 +505,7 @@ function say(text, isError) {
   msg.textContent = "";
   if (text) msg.appendChild(el("div", "msg" + (isError ? " err" : ""), text));
 }
-function gb(n) { return (n / 1e9).toFixed(n >= 1e11 ? 0 : 1) + " GB"; }
+function gb(n) { return n < 1e9 ? Math.round(n / 1e6) + " MB" : (n / 1e9).toFixed(n >= 1e11 ? 0 : 1) + " GB"; }
 function plural(n, one, few, many) { return n === 1 ? one : (n > 1 && n < 5 ? few : many); }
 function channels(n) { return n + " " + plural(n, "kanál", "kanály", "kanálů"); }
 function hm(iso) { return new Date(iso).toLocaleTimeString("cs-CZ", {hour: "2-digit", minute: "2-digit"}); }
@@ -435,6 +521,75 @@ function api(method, path, body) {
   });
 }
 
+var tabChannels = document.getElementById("tab-channels"), tabStorage = document.getElementById("tab-storage");
+function showTab(storage) {
+  tabChannels.setAttribute("aria-selected", String(!storage));
+  tabStorage.setAttribute("aria-selected", String(storage));
+  document.getElementById("channels").hidden = storage;
+  document.getElementById("storage").hidden = !storage;
+  if (storage) loadStorage();
+}
+tabChannels.addEventListener("click", function () { showTab(false); });
+tabStorage.addEventListener("click", function () { showTab(true); });
+
+function hours(h) {
+  if (h == null) return "–";
+  if (h < 1) return Math.round(h * 60) + " min";
+  return (h < 10 ? h.toFixed(1) : String(Math.round(h))).replace(".", ",") + " h";
+}
+function when(iso) {
+  if (!iso) return "–";
+  var d = new Date(iso);
+  return d.toLocaleDateString("cs-CZ", {day: "numeric", month: "numeric"}) + " " + hm(iso);
+}
+function loadStorage() {
+  return api("GET", "/admin/api/storage").then(function (data) {
+    var t = document.getElementById("totals");
+    t.textContent = "";
+    function tot(label, value, cls) { var p = el("span", cls || null, label + " "); p.appendChild(el("b", null, value)); t.appendChild(p); }
+    tot("Disk:", gb(data.disk.freeBytes) + " volno z " + gb(data.disk.totalBytes));
+    tot("Rezerva:", gb(data.disk.reserveBytes));
+    tot("Nahrávky:", gb(data.usedBytes));
+    tot("Nejvýše:", data.maxDays + plural(data.maxDays, " den", " dny", " dní"));
+    if (data.hoursPerChannel != null) tot("Vejde se zhruba:", hours(data.hoursPerChannel) + " na kanál");
+    if (data.paused) tot("", "Nahrávání pozastaveno – plný disk", "warn");
+    var body = document.getElementById("storage-rows");
+    body.textContent = "";
+    if (!data.channels.length) {
+      var tr = el("tr"), td = el("td", null, "Nic se nenahrává. Zapněte „Nahrávat“ u kanálů v záložce Kanály.");
+      td.colSpan = 7; tr.appendChild(td); body.appendChild(tr);
+    }
+    data.channels.forEach(function (c) {
+      var tr = el("tr");
+      tr.appendChild(el("td", null, c.name));
+      tr.appendChild(el("td", c.recording ? null : "warn", c.recording ? c.state : "nenahrává se (záznam se smaže)"));
+      tr.appendChild(el("td", "n", hours(c.hours)));
+      tr.appendChild(el("td", null, when(c.oldest)));
+      tr.appendChild(el("td", "n", gb(c.bytes)));
+      tr.appendChild(el("td", "n", c.gbPerHour == null ? "měří se…" : String(c.gbPerHour).replace(".", ",") + " GB/h"));
+      tr.appendChild(el("td", "n", c.gaps ? c.gaps + " (" + String(c.gapMinutes).replace(".", ",") + " min)" : "–"));
+      body.appendChild(tr);
+    });
+  }, function (e) { say("Přehled se nepodařilo načíst: " + e.message, true); });
+}
+
+var maxdays = document.getElementById("maxdays");
+for (var d = 1; d <= 14; d++) {
+  var o = el("option", null, d + plural(d, " den", " dny", " dní"));
+  o.value = String(d);
+  maxdays.appendChild(o);
+}
+maxdays.addEventListener("change", function () {
+  var days = parseInt(maxdays.value, 10);
+  maxdays.disabled = true;
+  api("POST", "/admin/api/settings", {maxDays: days}).then(function (data) {
+    maxdays.value = String(data.settings.maxDays);
+    say("Nahrávky se uchovávají nejvýše " + maxdays.options[maxdays.selectedIndex].text + ".");
+  }, function (e) {
+    say("Nastavení se nepodařilo uložit: " + e.message, true);
+  }).then(function () { maxdays.disabled = false; return load(); });
+});
+
 var thumbs = document.getElementById("thumbs");
 thumbs.addEventListener("change", function () {
   var on = thumbs.checked;
@@ -449,7 +604,10 @@ thumbs.addEventListener("change", function () {
 });
 
 function renderStatus(data) {
-  if (data.settings) thumbs.checked = !!data.settings.thumbnails;
+  if (data.settings) {
+    thumbs.checked = !!data.settings.thumbnails;
+    if (data.settings.maxDays) maxdays.value = String(data.settings.maxDays);
+  }
   var s = data.status || {}, box = document.getElementById("status");
   box.textContent = "";
   function item(label, value) { var p = el("span", null, label + " "); p.appendChild(el("b", null, value)); box.appendChild(p); }
@@ -457,7 +615,9 @@ function renderStatus(data) {
   if (s.tuners) item("Tunery:", s.tuners.filter(function (t) { return t.inUse; }).length + " z " + s.tuners.length + " v provozu");
   if (s.disk && s.disk.totalBytes) item("Disk:", gb(s.disk.freeBytes) + " volno z " + gb(s.disk.totalBytes));
   var d = data.retentionDays;
-  item("Nahrávání:", data.recordingSetUp ? "zapnuté, " + d + plural(d, " den", " dny", " dní") : "není nastavené (dvb-setup)");
+  var rec = rows.filter(function (c) { return c.record; }).length;
+  item("Nahrávání:", (rec ? channels(rec) : "žádný kanál") + ", nejvýše " + d + plural(d, " den", " dny", " dní") +
+    (data.recordingPaused ? " – POZASTAVENO, plný disk" : ""));
 }
 
 function picked() { return rows.filter(function (c) { return selected[c.id]; }); }
@@ -490,9 +650,25 @@ function renderBar() {
   off.addEventListener("click", function () { pending = "bulk"; render(); });
   on.addEventListener("click", function () { send(chosen, true); });
   short.addEventListener("click", function () { pending = "short"; render(); });
+  var recOn = el("button", null, "Nahrávat vybrané");
+  var recOff = el("button", null, "Nenahrávat vybrané");
+  recOn.disabled = busy || !chosen.some(function (c) { return !c.record && c.offered && !c.scrambled; });
+  recOff.disabled = busy || !chosen.some(function (c) { return c.record; });
+  recOn.addEventListener("click", function () {
+    record(chosen.filter(function (c) { return !c.record && c.offered && !c.scrambled; }), true);
+  });
+  recOff.addEventListener("click", function () { pending = "recoff"; render(); });
   bar.appendChild(off);
   bar.appendChild(on);
   bar.appendChild(short);
+  bar.appendChild(recOn);
+  bar.appendChild(recOff);
+  if (pending === "recoff") {
+    var stop = chosen.filter(function (c) { return c.record; });
+    var h = stop.reduce(function (n, c) { return n + (c.stored ? c.stored.hours : 0); }, 0);
+    bar.appendChild(confirmBox("Přestat nahrávat " + channels(stop.length) + "?" +
+      (h ? " Smaže se " + hours(h) + " záznamu." : ""), function () { record(stop, false); }, "Nenahrávat"));
+  }
   if (pending === "short") {
     var box = confirmBox("Přejmenovat " + channels(shorten.length) + "?", function () {
       var names = {};
@@ -575,6 +751,23 @@ function render() {
       flag(c.received ? "služba se stále přijímá" : "nepřijímá se", !c.received);
     }
     if (c.recordings) flag("nahrávek: " + c.recordings, true);
+    if (c.stored && c.stored.hours) flag("uloženo " + hours(c.stored.hours) + " (od " + when(c.stored.oldest) + "), " +
+      gb(c.stored.bytes), true);
+    if (c.record && c.recorderState) flag(c.recorderState, c.recorderState === "nahrává");
+    var recBox = el("label", "rec");
+    var recInput = el("input");
+    recInput.type = "checkbox";
+    recInput.checked = !!c.record;
+    recInput.disabled = busy || (!c.record && (!c.offered || c.scrambled));
+    recBox.title = c.scrambled ? "Kódovaný kanál nelze nahrávat" : (!c.offered ? "Nejdřív kanál zapněte" : "");
+    recInput.addEventListener("change", function () {
+      if (recInput.checked) { record([c], true); return; }
+      pending = "rec:" + c.id;
+      render();
+    });
+    recBox.appendChild(recInput);
+    recBox.appendChild(document.createTextNode("Nahrávat"));
+    meta.appendChild(recBox);
     if (c.offered && !c.received && c.multiplexes.length) {
       var fix = el("button", null, "Zapnout příjem");
       fix.disabled = busy;
@@ -597,6 +790,10 @@ function render() {
     sw.appendChild(input);
     sw.appendChild(el("span"));
     row.appendChild(sw);
+    if (pending === "rec:" + c.id) {
+      row.appendChild(confirmBox("Přestat nahrávat " + c.name + "?" + (c.stored && c.stored.hours
+        ? " Smaže se " + hours(c.stored.hours) + " záznamu." : ""), function () { record([c], false); }, "Nenahrávat"));
+    }
     if (pending === c.id) {
       row.appendChild(confirmBox(c.recordings
         ? "Vypnout " + c.name + "? Smažou se i jeho nahrávky (" + c.recordings + ")."
@@ -666,6 +863,24 @@ function confirmBox(text, action, yesLabel, danger) {
   return box;
 }
 
+function record(targets, on) {
+  if (!targets.length) return;
+  var label = targets.length === 1 ? targets[0].name : channels(targets.length);
+  busy = true;
+  pending = null;
+  render();
+  say((on ? "Zapínám nahrávání: " : "Vypínám nahrávání: ") + label + "…");
+  var request = targets.length === 1
+    ? api("POST", "/admin/api/channels/" + encodeURIComponent(targets[0].id), {record: on})
+    : api("POST", "/admin/api/channels", {ids: targets.map(function (c) { return c.id; }), record: on});
+  request.then(function (data) {
+    say(label + ": " + (data.changes.length ? data.changes.join(", ") : "beze změny") + ".");
+    selected = {};
+  }, function (e) {
+    say(label + ": " + e.message, true);
+  }).then(function () { busy = false; return load(); });
+}
+
 function send(targets, offered) {
   if (!targets.length) return;
   var label = targets.length === 1 ? targets[0].name : channels(targets.length);
@@ -696,7 +911,10 @@ function load() {
 }
 load();
 // keep "now playing" current, but never while the user is in the middle of something
-setInterval(function () { if (!busy && pending === null && editing === null) load(); }, 60000);
+setInterval(function () {
+  if (busy || pending !== null || editing !== null) return;
+  if (document.getElementById("storage").hidden) load(); else loadStorage();
+}, 60000);
 </script>
 </body>
 </html>

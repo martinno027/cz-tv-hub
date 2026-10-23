@@ -131,6 +131,33 @@
     }
   };
 
+  /** Audio tracks [{index, language}] and the selected one's index (AVPlay's track list). */
+  AvPlayBackend.prototype.audioTracks = function () {
+    try {
+      return CT.AudioTracks.fromAvPlay(this.av.getTotalTrackInfo());
+    } catch (e) {
+      return [];
+    }
+  };
+
+  AvPlayBackend.prototype.currentAudio = function () {
+    try {
+      var info = this.av.getCurrentStreamInfo().filter(function (t) { return t.type === 'AUDIO'; })[0];
+      return info ? info.index : -1;
+    } catch (e) {
+      return -1;
+    }
+  };
+
+  AvPlayBackend.prototype.selectAudio = function (index) {
+    try {
+      this.av.setSelectTrack('AUDIO', index);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
   AvPlayBackend.prototype.seekBy = function (deltaMs) {
     this.seekTo(this.position() + deltaMs);
   };
@@ -185,6 +212,26 @@
 
   Html5Backend.prototype.seekTo = function (ms) {
     this.video.currentTime = Math.max(0, ms / 1000);
+  };
+
+  Html5Backend.prototype.audioTracks = function () {
+    var list = this.video.audioTracks;
+    var out = [];
+    for (var i = 0; list && i < list.length; i++) out.push({ index: i, language: list[i].language });
+    return out;
+  };
+
+  Html5Backend.prototype.currentAudio = function () {
+    var list = this.video.audioTracks;
+    for (var i = 0; list && i < list.length; i++) if (list[i].enabled) return i;
+    return -1;
+  };
+
+  Html5Backend.prototype.selectAudio = function (index) {
+    var list = this.video.audioTracks;
+    if (!list) return false;
+    for (var i = 0; i < list.length; i++) list[i].enabled = i === index;
+    return true;
   };
 
   Html5Backend.prototype.seekBy = function (deltaMs) {
@@ -379,10 +426,27 @@
       case 'forward':
         this.seek(60 * 1000);
         break;
+      case 'up':
+        this.nextAudio();
+        break;
       default:
         break;
     }
     this.showOsd();
+  };
+
+  /** ▲: the next broadcast audio track (Anténa renditions, spec/apps.md "Audio choice for Anténa"). */
+  Player.prototype.nextAudio = function () {
+    if (!this.target) return;
+    var tracks = this.backend.audioTracks();
+    if (tracks.length < 2) {
+      $('osd-state').textContent = 'Jen jedna zvuková stopa';
+      return;
+    }
+    var position = CT.AudioTracks.next(tracks, this.backend.currentAudio());
+    if (this.backend.selectAudio(tracks[position].index)) {
+      $('osd-state').textContent = CT.AudioTracks.osd(tracks, position);
+    }
   };
 
   /**

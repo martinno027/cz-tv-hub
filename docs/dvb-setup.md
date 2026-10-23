@@ -81,11 +81,20 @@ Skript:
 Kontrola: `sudo ss -ltnp | grep 998` musí ukázat `127.0.0.1:9981` a `127.0.0.1:9982`, ne `*:9981`.
 
 ### 2.4 Disk na nahrávky
-Připojte USB disk natrvalo (např. do `/srv/tv`, záznam v `/etc/fstab` podle UUID), vytvořte
-`/srv/tv/recordings` s vlastníkem `hts` (`sudo install -d -o hts -g video /srv/tv/recordings`) a v TVHeadendu
-(Configuration → Recording → Digital Video Recorder Profiles → výchozí profil) nastavte *Recording system path* na
-tuto složku. Jinak se nahrává na SD kartu, která se rychle zaplní a opotřebuje. Nahrávání (kapitola 4) zapínejte
-až s diskem.
+Nahrává se na USB disk (SSD), ne na SD kartu (ta by se rychle zaplnila a opotřebovala). Disk naformátujte
+a připojte natrvalo do `/srv/tv` (pozor, **formátování smaže vše, co na disku je**; `sda` ověřte příkazem `lsblk`):
+
+```bash
+lsblk                                            # najděte USB disk, např. sda
+sudo mkfs.ext4 -L tv /dev/sda1                   # oddíl disku (případně nejdřív vytvořte: sudo fdisk /dev/sda)
+sudo mkdir -p /srv/tv
+echo 'LABEL=tv /srv/tv ext4 defaults,noatime,nofail 0 2' | sudo tee -a /etc/fstab
+sudo mount /srv/tv && df -h /srv/tv
+sudo install -d -o cztvhub -g cztvhub /srv/tv/buffer
+```
+
+V `/etc/cztvhub/cztvhub.conf` v sekci `[dvb]` nastavte `buffer_dir = /srv/tv/buffer` a restartujte službu
+(`sudo systemctl restart cztvhub`). Služba smí zapisovat pod `/srv/tv` (je to v `cztvhub.service`).
 
 Pokud chcete dočasné soubory pro přehrávání na velkém disku, změňte `hls_dir` v konfiguraci a tutéž cestu
 doplňte do `ReadWritePaths=` v `/etc/systemd/system/cztvhub.service`.
@@ -150,15 +159,28 @@ sudo systemctl start tvheadend
 
 ## 4. Nahrávání
 
-Jednou po ladění (a vždy po změně `retention_days` nebo `record_channels`):
+Nahrávání se zapíná ve **webové administraci** (kapitola 4a), u každého kanálu přepínačem **Nahrávat**. Zapnutý
+kanál se nahrává **nepřetržitě** na disk Raspberry (po 10minutových blocích); pořady v aplikacích jsou úseky tohoto
+záznamu, takže nic nechybí ani na hranicích pořadů a „Živě“ se u nahrávaného kanálu pouští přímo ze záznamu
+(o pár vteřin později, bez dalšího tuneru). Ukládají se všechny zvukové stopy (čeština, původní znění, komentář
+pro nevidomé); v aplikacích je výběr zvuku v přehrávači. Titulky se zatím neukládají.
 
-```bash
-sudo -u cztvhub env PYTHONPATH=/opt/cztvhub/src python3 -m cztvhub dvb-setup --config /etc/cztvhub/cztvhub.conf
-```
+- **Uchovávat nahrávky nejvýše** 1–14 dní (výchozí `retention_days` z konfigurace). Starší záznam se smaže vždy.
+- **Když dochází místo**: na disku zůstává rezerva 10 % (nejméně 5 GB). Když by volné místo kleslo pod ni, smaže se
+  nejstarších 10 minut z kanálu, který má uloženo nejvíc hodin – každý nahrávaný kanál tak drží zhruba stejný
+  počet posledních hodin (na malém disku a s mnoha kanály třeba jen posledních 5 hodin z každého). Když rezervu
+  nejde udržet, nahrávání se pozastaví a v administraci je to vidět.
+- **Přehled nahrávek** (záložka v administraci): pro každý kanál kolik hodin je uloženo, jak daleko zpět, velikost,
+  skutečný datový tok (GB/h, změřený z nahrávek) a výpadky; nahoře disk, rezerva a odhad, kolik hodin na kanál se
+  vejde.
+- Vypnutím „Nahrávat“ nebo skrytím kanálu se jeho záznam **hned smaže**. Kódované kanály nahrávat nejde.
+- Dva tunery = kanály nejvýš ze dvou multiplexů najednou (všechny kanály jednoho multiplexu nahraje jeden tuner).
 
-Příkaz je bezpečné spouštět opakovaně. Nastaví v TVHeadendu dobu uchování nahrávek a pro každý vybraný kanál
-jedno pravidlo automatického nahrávání (komentář „cztvhub“), které nahrává všechny pořady. Volba `--dry-run`
-jen vypíše, co by změnil. Služba cz-tv-hub navíc každou hodinu maže nahrávky starší než `retention_days`.
+Nahrávání je soukromá kopie jen pro vaši domácnost: záznam zůstává na disku Raspberry, maže se automaticky a nedá
+se stáhnout ani sdílet (viz [legal-notes.md](legal-notes.md)).
+
+Starší způsob – TVHeadend nahrává po jednotlivých pořadech podle pravidel z `dvb-setup` – dál funguje pro instalace,
+které ho nastavily; s nepřetržitým nahráváním ho nekombinujte (`dvb-setup` nespouštějte).
 
 ## 4a. Správa kanálů (webová administrace)
 
