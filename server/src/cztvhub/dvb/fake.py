@@ -269,9 +269,13 @@ class FakeTvheadend:
                         entry.update(sched_status="completedError", broadcast=0)
             return {}
         if path == "mpegts/service/grid":
-            return {"entries": list(self.services.values()), "total": len(self.services)}
+            # like TVHeadend: without hidemode=none, services of disabled multiplexes are left out
+            rows = [s for s in self.services.values()
+                    if args.get("hidemode") == "none" or self.muxes[s["multiplex_uuid"]]["enabled"] == 1]
+            return {"entries": rows, "total": len(rows)}
         if path == "mpegts/mux/grid":
-            return {"entries": list(self.muxes.values()), "total": len(self.muxes)}
+            rows = [m for m in self.muxes.values() if args.get("hidemode") != "all" or m["enabled"] == 1]
+            return {"entries": rows, "total": len(rows)}
         if path == "status/inputs":
             with self.lock:
                 busy = dict(self.active_streams)

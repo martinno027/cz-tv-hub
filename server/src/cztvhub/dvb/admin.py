@@ -6,7 +6,8 @@ A hidden channel is switched off in TVHeadend itself, so TVHeadend is the only s
   so the tuner does not tune to it at all (no reception, no EPG scan);
 - its cztvhub autorec rule is disabled (``dvb-setup`` keeps it disabled), its scheduled and running
   recordings are cancelled and its finished recordings deleted.
-Showing the channel again reverses the switches (recordings start with the next programme).
+Showing the channel again reverses the switches (recordings start with the next programme); showing an
+already offered channel repairs its reception (services / multiplex switched off elsewhere).
 
 Login: HTTP Basic, user ``admin``, ``[admin] password``. State-changing requests must carry the
 ``X-Cztvhub-Admin`` header (a cross-site page cannot send it without a CORS preflight, which this
@@ -322,6 +323,13 @@ function render() {
     function flag(text, ok) { if (meta.childNodes.length && meta.textContent) meta.appendChild(document.createTextNode(" · ")); meta.appendChild(el("span", ok ? null : "no", text)); }
     if (c.offered) {
       flag(c.received ? "příjem zapnutý" : "příjem vypnutý", c.received);
+      if (!c.received && c.multiplexes.length) {
+        var fix = el("button", null, "Zapnout příjem");
+        fix.disabled = pending !== null;
+        fix.style.marginLeft = "8px";
+        fix.addEventListener("click", function () { send(c, true); });
+        meta.appendChild(fix);
+      }
       if (c.recordingRule !== null) flag(c.recordingRule ? "nahrává se" : "nenahrává se", c.recordingRule);
     } else {
       flag(c.received ? "služba se stále přijímá" : "nepřijímá se", !c.received);

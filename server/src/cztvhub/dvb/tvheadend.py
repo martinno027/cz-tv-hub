@@ -5,6 +5,8 @@ web UI's requests; the API is not formally versioned, so parsing is defensive):
 - POST /api/channel/grid            channels: uuid, name, number, enabled, icon_public_url, services[]
 - POST /api/mpegts/service/grid     services: uuid, enabled, svcname, multiplex, multiplex_uuid (admin)
 - POST /api/mpegts/mux/grid         multiplexes: uuid, name, enabled (int: -1 ignore, 0 disable, 1 enable; admin)
+                                    both with hidemode=none: by default (api_mpegts.c) the service grid leaves
+                                    out services of disabled multiplexes, which the admin page must re-enable
 - POST /api/epg/events/grid         EPG: eventId, channelUuid, start, stop, title, subtitle,
                                     summary, description, genre[], dvrUuid, dvrState
 - POST /api/dvr/entry/grid          DVR entries: uuid, channel, start, stop, disp_title, disp_subtitle,
@@ -298,10 +300,11 @@ class TvheadendClient:
         return parse_channels(self.api("channel/grid", {"start": "0", "limit": str(GRID_LIMIT)}), include_disabled)
 
     def services(self) -> list[Service]:
-        return parse_services(self.api("mpegts/service/grid", {"start": "0", "limit": str(GRID_LIMIT)}))
+        return parse_services(self.api("mpegts/service/grid",
+                                       {"start": "0", "limit": str(GRID_LIMIT), "hidemode": "none"}))
 
     def muxes(self) -> list[Mux]:
-        return parse_muxes(self.api("mpegts/mux/grid", {"start": "0", "limit": str(GRID_LIMIT)}))
+        return parse_muxes(self.api("mpegts/mux/grid", {"start": "0", "limit": str(GRID_LIMIT), "hidemode": "none"}))
 
     def epg_events(self, start: int, stop: int) -> list[EpgEvent]:
         """Events overlapping [start, stop) (epoch seconds). TVHeadend drops events once they end."""

@@ -120,7 +120,9 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   once no offered channel uses it, so the tuner never tunes to it (no reception, no EPG scan); its `cztvhub`
   autorec rule disabled; scheduled entries cancelled (`dvr/entry/cancel`, also aborts a running recording) and its
   finished/failed recordings removed. A running live session of the channel is stopped.
-- **Show**: the reverse (channel, services, disabled multiplexes, rule back on). No rule is created before
+- **Show**: the reverse (channel, services, disabled multiplexes, rule back on; also repairs an offered channel
+  whose service or multiplex is off). Service and mux grids are read with `hidemode=none`, else TVHeadend leaves
+  out services of disabled multiplexes. No rule is created before
   `dvb-setup` has run (recording stays a deliberate step). EPG returns once TVHeadend rescans the multiplex.
 - `dvb-setup` keeps rules of disabled channels, disabled, instead of deleting them.
 - `GET /admin` page, `GET /admin/api/channels` → `{"channels": [{"id", "number", "name", "offered", "received",

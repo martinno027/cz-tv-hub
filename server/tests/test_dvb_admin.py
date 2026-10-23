@@ -139,6 +139,14 @@ class AdminTest(unittest.TestCase):
         self.assertEqual(self.row(PRIMA)["received"], True)
         self.assertIn(PRIMA, self.app_channels())
 
+    def test_show_repairs_reception_of_an_offered_channel(self):
+        # e.g. after an older version re-enabled only the channel: service and multiplex still off
+        self.fake.services[stable_uuid("service", "Prima HD")]["enabled"] = False
+        self.fake.muxes[MUX_PRIMA]["enabled"] = 0
+        self.assertEqual(self.row(PRIMA)["received"], False)
+        self.assertEqual(self.hide(PRIMA, offered=True), ["služby zapnuty: 1", "multiplex 690MHz zapnut"])
+        self.assertEqual(self.row(PRIMA)["received"], True)
+
     def test_shared_multiplex_stays_on(self):
         changes = self.hide(CT1)
         self.assertEqual(self.fake.muxes[MUX_CT]["enabled"], 1)  # ČT2 still uses it
