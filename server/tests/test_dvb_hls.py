@@ -70,8 +70,8 @@ class CommandTest(unittest.TestCase):
         self.assertIn("-c:v copy -tag:v hvc1", joined)
         self.assertIn("-c:a aac", joined)
         self.assertIn("-hls_segment_type fmp4", joined)
-        self.assertIn("-hls_time 4", joined)
-        self.assertIn("-hls_list_size 10", joined)
+        self.assertIn("-hls_time 2", joined)  # short live segments: faster start
+        self.assertIn("-hls_list_size 20", joined)
         self.assertIn("delete_segments", joined)
         self.assertNotIn("-hls_playlist_type", joined)
         self.assertEqual(cmd[-1], "/x/index.m3u8")
@@ -84,6 +84,7 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(cmd[0], "/usr/bin/ffmpeg")
         self.assertIn("-tag:v avc1", joined)
         self.assertIn("-c:a copy", joined)
+        self.assertIn("-hls_time 4", joined)
         self.assertIn("-hls_list_size 0 -hls_playlist_type event", joined)
         self.assertNotIn("delete_segments", joined)
 

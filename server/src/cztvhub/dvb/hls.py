@@ -25,7 +25,8 @@ MEDIA_NAME_RE = re.compile(r"^(init\.mp4|seg_\d{5,}\.m4s)$")
 SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 OWN_FILE_SUFFIXES = (".m3u8", ".m4s", ".mp4", ".tmp")
 HLS_TIME = 4
-LIVE_LIST_SIZE = 10
+LIVE_HLS_TIME = 2  # live: the first segment (what the first playlist request waits for) is ready sooner
+LIVE_LIST_SIZE = 20  # x 2 s = the same ~40 s live window as before
 PROBE_BYTES = 128 * 1024
 PROBE_SECONDS = 6.0
 CHUNK = 64 * 1024
@@ -78,7 +79,9 @@ def video_tag(codec: str) -> str | None:
 
 
 def build_ffmpeg_command(out_dir: Path, codecs: Codecs, live: bool, ffmpeg: str = "ffmpeg",
-                         hls_time: int = HLS_TIME, list_size: int = LIVE_LIST_SIZE) -> list[str]:
+                         hls_time: int | None = None, list_size: int = LIVE_LIST_SIZE) -> list[str]:
+    if hls_time is None:
+        hls_time = LIVE_HLS_TIME if live else HLS_TIME
     cmd = [ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error",
            "-fflags", "+genpts+discardcorrupt", "-f", "mpegts", "-i", "pipe:0",
            "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "copy"]
