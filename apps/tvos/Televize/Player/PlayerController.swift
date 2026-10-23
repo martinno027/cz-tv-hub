@@ -215,6 +215,9 @@ final class PlayerController {
         positionApplied = false
         player.replaceCurrentItem(with: item)
         observe(item, source: source, resume: resume)
+        // Live has no start position: let AVPlayer start as soon as it has enough data instead of
+        // waiting for readyToPlay first (that round trip delayed every channel start).
+        if source.mode == .live { player.play() }
         // A stream that never becomes ready must end in the failure path, not a frozen screen.
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.readyTimeout))

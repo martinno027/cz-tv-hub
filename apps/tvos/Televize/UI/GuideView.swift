@@ -57,18 +57,28 @@ private struct GuideRow: Identifiable {
     let entries: [GuideEntry]
 }
 
+/// Rows, time axis and cell segments, computed once per data change (not on every focus move:
+/// rebuilding thousands of cells per D-pad press made the guide lag by seconds).
+private struct GuideLayout {
+    var version = 0
+    var rows: [GuideRow] = []
+    var timeline = GuideTimeline(start: .distantPast, end: .distantPast, pointsPerSecond: GuideView.pointsPerSecond)
+    var segments: [[GuideTimeline.Segment<GuideEntry>]] = []
+    var entries: [String: GuideEntry] = [:]
+}
+
 /// "TV průvodce": EPG grid with channels as rows and time on the horizontal axis.
 /// CT internet channels first, then the "Anténa" channels when a gateway is configured; both in the
 /// order and with the channels hidden in Nastavení → Kanály (`ChannelPrefs`).
 struct GuideView: View {
-    static let pointsPerSecond = 0.21  // ~2 h visible
+    nonisolated static let pointsPerSecond = 0.21  // ~2 h visible
     static let channelColumnWidth: CGFloat = 190
     static let headerHeight: CGFloat = 44
     static let rowHeight: CGFloat = 80
     static let rowSpacing: CGFloat = 8
     static let minFocusableGap: CGFloat = 60
 
-    private struct ScrollRequest: Equatable {
+    fileprivate struct ScrollRequest: Equatable {
         let id = UUID()
         let tick: Int
         let rowID: String?
@@ -81,6 +91,7 @@ struct GuideView: View {
     @State private var antennaChannels: [DVBChannel] = []
     @State private var antennaEPG: AntennaStore.EPG = [:]
     @State private var loadError: String?
+    @State private var layout = GuideLayout()
     @State private var focusedEntry: GuideEntry?
     @State private var defaultFocusID: String?
     @State private var scrollRequest: ScrollRequest?
@@ -113,9 +124,10 @@ struct GuideView: View {
             }
         }
         .task(id: LoadKey(day: day, gateway: model.gateway)) { await load() }
+        .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
         .onChange(of: focusedID) { _, id in
             guard let id else { return }
-            focusedEntry = entry(withID: id)
+            focusedEntry = layout.entries[id]
         }
         .confirmationDialog(
             choice?.entry.title ?? "",
@@ -158,7 +170,7 @@ struct GuideView: View {
         }
     }
 
-    private var rows: [GuideRow] {
+    private func buildRows() -> [GuideRow] {
         let prefs = model.channelPrefs
         let ct = prefs.internet().visible.map { channel in
             GuideRow(id: channel.slug, name: channel.name, entries: (schedule[channel.slug] ?? []).map(GuideEntry.ct))
@@ -170,70 +182,41 @@ struct GuideView: View {
         return ct + antenna
     }
 
-    private func timeline(for rows: [GuideRow]) -> GuideTimeline {
-        GuideTimeline(spans: rows.flatMap(\.entries), fallbackDay: day, pointsPerSecond: Self.pointsPerSecond)
+    /// Version 0 = nothing loaded yet: the grid stays mounted (empty) until then, so focus lands on
+    /// the anchor cell instead of wherever a re-created grid puts it.
+    private func rebuildLayout() {
+        let rows = buildRows()
+        let timeline = GuideTimeline(spans: rows.flatMap(\.entries), fallbackDay: day, pointsPerSecond: Self.pointsPerSecond)
+        var entries: [String: GuideEntry] = [:]
+        for row in rows {
+            for entry in row.entries { entries[entry.id] = entry }
+        }
+        layout = GuideLayout(version: layout.version + 1, rows: rows, timeline: timeline,
+                             segments: rows.map { timeline.segments(for: $0.entries, splitGapsAtTicks: true) },
+                             entries: entries)
     }
 
     // MARK: grid
 
     private func grid(now: Date) -> some View {
-        let rows = rows
-        let timeline = timeline(for: rows)
-        return Group {
+        Group {
             if let loadError {
                 VStack(spacing: 24) {
                     Text(loadError).font(.headline)
                     Button("Zkusit znovu") { Task { await load() } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if rows.isEmpty, model.antenna == nil || !antennaChannels.isEmpty {
+            } else if layout.version > 0, layout.rows.isEmpty, model.antenna == nil || !antennaChannels.isEmpty {
                 // every channel hidden in Nastavení → Kanály
                 Text(ChannelPrefsUI.allHiddenMessage)
                     .font(.headline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // Vertical scrolling once the Anténa rows are added; the channel names scroll along.
-                ScrollViewReader { verticalProxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 0) {
-                        VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                            Color.clear
-                                .frame(width: Self.channelColumnWidth, height: Self.headerHeight)
-                            ForEach(rows) { row in
-                                Text(row.name)
-                                    .font(.system(size: 28, weight: .bold))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.7)
-                                    .frame(width: Self.channelColumnWidth - 12, height: Self.rowHeight, alignment: .leading)
-                                    .padding(.trailing, 12)
-                                    .id("row|\(row.id)")
-                            }
-                        }
-                        .padding(.vertical, 6)
-                        ScrollViewReader { proxy in
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                                    timeHeader(timeline)
-                                    ForEach(rows) { row in
-                                        self.row(row, timeline.segments(for: row.entries, splitGapsAtTicks: true), now: now)
-                                            .frame(height: Self.rowHeight)
-                                    }
-                                }
-                                .overlay(alignment: .topLeading) { nowLine(timeline, now: now) }
-                                .padding(.vertical, 6)
-                            }
-                            .focusSection()
-                            .defaultFocus($focusedID, defaultFocusID)
-                            .onChange(of: scrollRequest) { _, request in
-                                guard let request else { return }
-                                proxy.scrollTo("tick-\(request.tick)", anchor: .leading)
-                                if let rowID = request.rowID { verticalProxy.scrollTo("row|\(rowID)", anchor: .top) }
-                            }
-                        }
-                    }
-                }
-                }
+                // Equatable: a focus move re-renders GuideView (detail), not the thousands of cells.
+                GuideGrid(layout: layout, now: now, focusedID: $focusedID, defaultFocusID: defaultFocusID,
+                          scrollRequest: scrollRequest, select: select)
+                    .equatable()
             }
         }
     }
@@ -251,67 +234,6 @@ struct GuideView: View {
         .focusSection()
     }
 
-    private func timeHeader(_ timeline: GuideTimeline) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(timeline.ticks.enumerated()), id: \.offset) { index, tick in
-                Text(Formatting.time(tick))
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: GuideTimeline.tickInterval * Self.pointsPerSecond, alignment: .leading)
-                    .id("tick-\(index)")
-            }
-        }
-        .frame(height: Self.headerHeight)
-    }
-
-    private func row(_ row: GuideRow, _ segments: [GuideTimeline.Segment<GuideEntry>], now: Date) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
-                switch segment {
-                case .gap(let width) where width < Self.minFocusableGap:
-                    Color.clear.frame(width: width)
-                case .gap(let width):
-                    // Focusable filler, so up/down never gets stuck on a row with a long gap.
-                    Button {} label: {
-                        Text("Mimo vysílání")
-                            .font(.system(size: 22))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12)
-                            .frame(maxHeight: .infinity, alignment: .leading)
-                            .frame(width: width - 6, alignment: .leading)
-                            .stickyLeading()
-                    }
-                    .buttonStyle(GuideCellStyle(state: .offAir))
-                    .focused($focusedID, equals: "gap|\(row.id)|\(index)")
-                    .padding(.horizontal, 3)
-                case .item(let entry, let width):
-                    let state = entry.state(at: now)
-                    Button {
-                        select(entry)
-                    } label: {
-                        EntryCellLabel(start: entry.start, title: entry.title, state: state)
-                            .frame(width: max(width - 6, 2))
-                    }
-                    .buttonStyle(GuideCellStyle(state: state))
-                    .focused($focusedID, equals: entry.id)
-                    .padding(.horizontal, 3)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func nowLine(_ timeline: GuideTimeline, now: Date) -> some View {
-        if timeline.contains(now) {
-            Rectangle()
-                .fill(Color.red)
-                .frame(width: 3)
-                .padding(.top, Self.headerHeight - 8)
-                .offset(x: timeline.x(for: now) - 1.5)
-                .allowsHitTesting(false)
-        }
-    }
-
     // MARK: behaviour
 
     private func load() async {
@@ -322,11 +244,13 @@ struct GuideView: View {
         do {
             let loaded = try await model.schedules.schedule(for: day)
             schedule = loaded
+            rebuildLayout()
             positionAtAnchor(now: now)
         } catch is CancellationError {
             return
         } catch {
             schedule = [:]
+            rebuildLayout()
             loadError = AppModel.message(for: error)
         }
     }
@@ -347,7 +271,7 @@ struct GuideView: View {
         let anchor = day == today
             ? now
             : Calendar.prague.date(byAdding: .hour, value: 20, to: day.startDate()) ?? day.startDate()
-        let rows = rows
+        let rows = layout.rows
         var anchorRow = rows.first
         #if DEBUG
         // `-guideRow 6` starts on that row (6 = first Anténa row unless channels are hidden), for simulator screenshots.
@@ -358,17 +282,10 @@ struct GuideView: View {
         let target = firstRow.first { $0.isAiring(at: anchor) } ?? firstRow.first { $0.start >= anchor } ?? firstRow.last
         defaultFocusID = target?.id
         focusedEntry = target
-        let tick = timeline(for: rows).tickIndex(for: anchor.addingTimeInterval(-30 * 60))
+        let tick = layout.timeline.tickIndex(for: anchor.addingTimeInterval(-30 * 60))
         // Let the new rows lay out before scrolling.
         let rowID = anchorRow?.id == rows.first?.id ? nil : anchorRow?.id
         Task { @MainActor in scrollRequest = ScrollRequest(tick: tick, rowID: rowID) }
-    }
-
-    private func entry(withID id: String) -> GuideEntry? {
-        for row in rows {
-            if let match = row.entries.first(where: { $0.id == id }) { return match }
-        }
-        return nil
     }
 
     private func select(_ entry: GuideEntry) {
@@ -415,6 +332,132 @@ struct GuideView: View {
         case .future, .notRecorded: return nil
         }
     }
+}
+
+/// The EPG grid itself. Compared by layout version, minute and focus/scroll inputs, so a focus move
+/// elsewhere (the detail above) does not rebuild it.
+private struct GuideGrid: View, Equatable {
+    let layout: GuideLayout
+    let now: Date
+    let focusedID: FocusState<String?>.Binding
+    let defaultFocusID: String?
+    let scrollRequest: GuideView.ScrollRequest?
+    let select: (GuideEntry) -> Void
+
+    nonisolated static func == (lhs: GuideGrid, rhs: GuideGrid) -> Bool {
+        lhs.layout.version == rhs.layout.version && lhs.now == rhs.now
+            && lhs.defaultFocusID == rhs.defaultFocusID && lhs.scrollRequest == rhs.scrollRequest
+    }
+
+    var body: some View {
+        let rows = layout.rows
+        let timeline = layout.timeline
+        // Vertical scrolling once the Anténa rows are added; the channel names scroll along.
+        ScrollViewReader { verticalProxy in
+        ScrollView(.vertical, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: GuideView.rowSpacing) {
+                    Color.clear
+                        .frame(width: GuideView.channelColumnWidth, height: GuideView.headerHeight)
+                    ForEach(rows) { row in
+                        Text(row.name)
+                            .font(.system(size: 28, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .frame(width: GuideView.channelColumnWidth - 12, height: GuideView.rowHeight, alignment: .leading)
+                            .padding(.trailing, 12)
+                            .id("row|\(row.id)")
+                    }
+                }
+                .padding(.vertical, 6)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: GuideView.rowSpacing) {
+                            timeHeader(timeline)
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                                self.row(row, layout.segments[index], now: now)
+                                    .frame(height: GuideView.rowHeight)
+                            }
+                        }
+                        .overlay(alignment: .topLeading) { nowLine(timeline, now: now) }
+                        .padding(.vertical, 6)
+                    }
+                    .focusSection()
+                    .defaultFocus(focusedID, defaultFocusID)
+                    // Also on first appearance (new rows and the request arrive together), after layout.
+                    .task(id: scrollRequest) {
+                        guard let request = scrollRequest else { return }
+                        try? await Task.sleep(for: .milliseconds(50))
+                        proxy.scrollTo("tick-\(request.tick)", anchor: .leading)
+                        if let rowID = request.rowID { verticalProxy.scrollTo("row|\(rowID)", anchor: .top) }
+                    }
+                }
+            }
+        }
+        }
+    }
+
+    private func timeHeader(_ timeline: GuideTimeline) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(timeline.ticks.enumerated()), id: \.offset) { index, tick in
+                Text(Formatting.time(tick))
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: GuideTimeline.tickInterval * GuideView.pointsPerSecond, alignment: .leading)
+                    .id("tick-\(index)")
+            }
+        }
+        .frame(height: GuideView.headerHeight)
+    }
+
+    private func row(_ row: GuideRow, _ segments: [GuideTimeline.Segment<GuideEntry>], now: Date) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                switch segment {
+                case .gap(let width) where width < GuideView.minFocusableGap:
+                    Color.clear.frame(width: width)
+                case .gap(let width):
+                    // Focusable filler, so up/down never gets stuck on a row with a long gap.
+                    Button {} label: {
+                        Text("Mimo vysílání")
+                            .font(.system(size: 22))
+                            .lineLimit(1)
+                            .padding(.horizontal, 12)
+                            .frame(maxHeight: .infinity, alignment: .leading)
+                            .frame(width: width - 6, alignment: .leading)
+                            .stickyLeading()
+                    }
+                    .buttonStyle(GuideCellStyle(state: .offAir))
+                    .focused(focusedID, equals: "gap|\(row.id)|\(index)")
+                    .padding(.horizontal, 3)
+                case .item(let entry, let width):
+                    let state = entry.state(at: now)
+                    Button {
+                        select(entry)
+                    } label: {
+                        EntryCellLabel(start: entry.start, title: entry.title, state: state)
+                            .frame(width: max(width - 6, 2))
+                    }
+                    .buttonStyle(GuideCellStyle(state: state))
+                    .focused(focusedID, equals: entry.id)
+                    .padding(.horizontal, 3)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func nowLine(_ timeline: GuideTimeline, now: Date) -> some View {
+        if timeline.contains(now) {
+            Rectangle()
+                .fill(Color.red)
+                .frame(width: 3)
+                .padding(.top, GuideView.headerHeight - 8)
+                .offset(x: timeline.x(for: now) - 1.5)
+                .allowsHitTesting(false)
+        }
+    }
+
 }
 
 // MARK: - cells
