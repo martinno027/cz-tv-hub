@@ -21,11 +21,15 @@ QUALITY = 5  # mjpeg -q:v (2 best .. 31 worst), fixed
 READ_BYTES = 2 * 1024 * 1024
 FRAME_AT_SECONDS = 300  # "a few minutes in" (not current: it only has to show what the programme is)
 FRAME_AT_SHARE = 0.2
-CACHE_SIZE = 200
+CACHE_SIZE = 600  # the apps prefetch around the guide focus (spec/apps.md "Image prefetch")
 REFRESH_SECONDS = 60.0
 TIMEOUT = 10.0
 MAX_JOBS = 2
 JPEG_SOI = b"\xff\xd8"
+
+
+class ThumbsBusy(Exception):
+    """Both ffmpeg slots stayed taken for ``TIMEOUT``: try again later (503), not "no frame" (404)."""
 
 
 def ffmpeg_command(ffmpeg: str = "ffmpeg") -> list[str]:
@@ -114,7 +118,8 @@ class Thumbnails:
             self._cache.pop(dvr_uuid, None)
 
     def get(self, entry: DvrEntry, recording: bool) -> bytes | None:
-        """JPEG for a ``completed`` (``recording=False``) or still-recording entry, or None."""
+        """JPEG for a ``completed`` (``recording=False``) or still-recording entry, or None.
+        Raises ThumbsBusy when no ffmpeg slot came free in time."""
         with self._lock:
             hit = self._cache.get(entry.uuid)
             if hit is not None:
@@ -127,7 +132,7 @@ class Thumbnails:
             return None
         offset, at_final = frame_offset(entry.filesize, recorded)
         if not self._jobs.acquire(timeout=TIMEOUT):
-            return None
+            raise ThumbsBusy()
         try:
             data = self._make(entry.uuid, offset)
         finally:
@@ -151,7 +156,7 @@ class Thumbnails:
                     self._cache.move_to_end(key)
                     return data
         if not self._jobs.acquire(timeout=TIMEOUT):
-            return None
+            raise ThumbsBusy()
         try:
             data = produce()
         finally:

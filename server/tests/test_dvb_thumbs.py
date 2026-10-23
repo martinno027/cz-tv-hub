@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from cztvhub.config import Config, DvbConfig
 from cztvhub.dvb import thumbs
@@ -116,13 +117,31 @@ class ThumbnailsTest(unittest.TestCase):
         self.assertIsNone(self.t.get(entry(), recording=False))
 
     def test_cache_bounded_pruned_cleared(self):
+        self.assertEqual(thumbs.CACHE_SIZE, 600)  # spec/dvb-gateway.md: room for several TVs prefetching
         for i in range(thumbs.CACHE_SIZE + 5):
             self.t.get(entry(uuid=f"r{i}"), recording=False)
         self.assertEqual(len(self.t._cache), thumbs.CACHE_SIZE)
+        self.assertNotIn("r4", self.t._cache)  # least recently used go first
+        self.assertIn("r5", self.t._cache)
         self.t.prune(["r200", "r201"])
         self.assertEqual(sorted(self.t._cache), ["r200", "r201"])
         self.t.set_enabled(False)
         self.assertEqual(len(self.t._cache), 0)
+
+    def test_busy_slots_raise_instead_of_no_frame(self):
+        self.t.get(entry(uuid="hit"), recording=False)
+        self.t.run.calls.clear()
+        for _ in range(thumbs.MAX_JOBS):
+            self.t._jobs.acquire()
+        self.addCleanup(lambda: [self.t._jobs.release() for _ in range(thumbs.MAX_JOBS)])
+        with mock.patch.object(thumbs, "TIMEOUT", 0.01):
+            with self.assertRaises(thumbs.ThumbsBusy):
+                self.t.get(entry(uuid="new"), recording=False)
+            with self.assertRaises(thumbs.ThumbsBusy):
+                self.t.get_from("rid", True, lambda: JPEG)
+            self.assertEqual(self.t.get(entry(uuid="hit"), recording=False), JPEG)  # cache hits need no slot
+        self.assertEqual(self.t.run.calls, [])
+        self.assertNotIn("new", self.t._cache)
 
 
 class GatewayThumbTest(unittest.TestCase):
@@ -155,6 +174,17 @@ class GatewayThumbTest(unittest.TestCase):
         self.assertEqual(self.get(REC_COMPLETED).status, 404)
         status = json.loads(self.gw.handle("/dvb/status", {}, AUTH).body)
         self.assertFalse(status["thumbnails"])
+
+    def test_busy_is_503_with_retry_after_then_served(self):
+        for _ in range(thumbs.MAX_JOBS):
+            self.gw.thumbs._jobs.acquire()
+        with mock.patch.object(thumbs, "TIMEOUT", 0.01):
+            resp = self.get(REC_COMPLETED)
+        self.assertEqual(resp.status, 503)
+        self.assertEqual(resp.headers["Retry-After"], "5")
+        for _ in range(thumbs.MAX_JOBS):
+            self.gw.thumbs._jobs.release()
+        self.assertEqual(self.get(REC_COMPLETED).status, 200)
 
     def test_gone_recording_is_dropped_from_the_cache(self):
         self.assertEqual(self.get(REC_COMPLETED).status, 200)

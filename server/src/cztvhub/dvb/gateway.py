@@ -30,7 +30,7 @@ from .hls import (INIT, LIVE_START_SECONDS, Codecs, EmptySource, HlsManager, Hls
 from .retention import RetentionLoop
 from .sources import GrowingRecording
 from .epgstore import EpgHistory, merge_past
-from .thumbs import Settings, Thumbnails
+from .thumbs import Settings, Thumbnails, ThumbsBusy
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
 UUID = r"[A-Za-z0-9_-]{1,64}"
@@ -53,6 +53,7 @@ EPG_AHEAD_SECONDS = 3 * 86400
 PLAYLIST_TIMEOUT = 25.0
 VOD_WAIT_SECONDS = 5.0  # short finished recordings are fully remuxed by then and served as VOD
 ZAP_IDLE_SECONDS = 8.0  # a live session nobody polled for this long no longer has a viewer
+THUMB_RETRY_AFTER = 5  # seconds; both ffmpeg slots stayed busy (several TVs prefetching)
 JSON = "application/json; charset=utf-8"
 M3U8 = "application/vnd.apple.mpegurl"
 MEDIA_TYPES = {".m4s": "video/iso.segment", ".mp4": "video/mp4"}
@@ -443,7 +444,14 @@ class DvbGateway:
         return self._playlist(session)
 
     def thumbnail(self, dvr_uuid: str) -> Response:
-        """One still of a recording (spec/dvb-gateway.md "Thumbnails"); checked against TVHeadend every time."""
+        """One still of a recording (spec/dvb-gateway.md "Thumbnails"); checked against TVHeadend every time.
+        Busy ffmpeg slots answer 503 + Retry-After, so the apps ask again instead of remembering a 404."""
+        try:
+            return self._thumbnail(dvr_uuid)
+        except ThumbsBusy:
+            return error(503, "Náhledy se právě připravují", {"Retry-After": str(THUMB_RETRY_AFTER)})
+
+    def _thumbnail(self, dvr_uuid: str) -> Response:
         if not self.thumbs.enabled:
             raise HttpError(404, "Náhledy jsou vypnuté")
         if parse_recording_id(dvr_uuid):
