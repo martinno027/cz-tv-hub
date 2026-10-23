@@ -25,8 +25,14 @@ MEDIA_NAME_RE = re.compile(r"^(init\.mp4|seg_\d{5,}\.m4s)$")
 SESSION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 OWN_FILE_SUFFIXES = (".m3u8", ".m4s", ".mp4", ".tmp")
 HLS_TIME = 4
-LIVE_HLS_TIME = 2  # live: the first segment (what the first playlist request waits for) is ready sooner
-LIVE_LIST_SIZE = 20  # x 2 s = the same ~40 s live window as before
+# Live: cut at every keyframe after 1 s (ČT's DVB-T2 GOP is ~1.3 s), announce a fixed target of 2 s and
+# answer the first playlist request only once 6 s exist (3 x target, Apple's live hold-back). With a
+# target that changed from 1 to 3 and a start 1.3 s from the live edge, the Apple TV stalled and
+# glitched (its log: "restarting 1.28s from end of live playlist; target duration 1s - stall danger").
+LIVE_HLS_TIME = 1
+LIVE_TARGET = 2
+LIVE_START_SECONDS = 6.0
+LIVE_LIST_SIZE = 40  # x ~1 s: a ~40 s live window as before
 PROBE_BYTES = 128 * 1024
 PROBE_SECONDS = 6.0
 CHUNK = 64 * 1024
@@ -107,11 +113,38 @@ def build_ffmpeg_command(out_dir: Path, codecs: Codecs, live: bool, ffmpeg: str 
     return cmd
 
 
-def rewrite_playlist(text: str, prefix: str, vod: bool = False) -> str:
-    """Point segment and init URIs at ``prefix`` (e.g. /dvb/hls/<sid>/); optionally mark as VOD."""
+def media_seconds(text: str) -> float:
+    """Total ``#EXTINF`` duration of a playlist."""
+    total = 0.0
+    for line in text.splitlines():
+        if line.startswith("#EXTINF:"):
+            try:
+                total += float(line[8:].split(",", 1)[0])
+            except ValueError:
+                pass
+    return total
+
+
+def needed_target(text: str) -> int:
+    """Smallest TARGETDURATION the playlist's segments allow (EXTINF rounded to the nearest integer)."""
+    longest = 0
+    for line in text.splitlines():
+        if line.startswith("#EXTINF:"):
+            try:
+                longest = max(longest, int(float(line[8:].split(",", 1)[0]) + 0.5))
+            except ValueError:
+                pass
+    return longest
+
+
+def rewrite_playlist(text: str, prefix: str, vod: bool = False, target: int | None = None) -> str:
+    """Point segment and init URIs at ``prefix`` (e.g. /dvb/hls/<sid>/); optionally mark as VOD and
+    announce a fixed ``#EXT-X-TARGETDURATION`` (ffmpeg's grows with the longest segment so far)."""
     out = []
     for line in text.splitlines():
-        if line.startswith("#EXT-X-MAP:"):
+        if target is not None and line.startswith("#EXT-X-TARGETDURATION:"):
+            line = f"#EXT-X-TARGETDURATION:{target}"
+        elif line.startswith("#EXT-X-MAP:"):
             line = re.sub(r'URI="([^"]+)"', lambda m: f'URI="{prefix}{m.group(1).rsplit("/", 1)[-1]}"', line)
         elif line and not line.startswith("#"):
             line = prefix + line.rsplit("/", 1)[-1]
@@ -141,6 +174,8 @@ class HlsSession:
         self.error: Exception | None = None
         self.vod: bool | None = None  # decided at the first playlist response of a recording
         self.shifts: dict[int, int] | None = None  # per-track tfdt shifts for A/V sync (fmp4.py)
+        self.target = LIVE_TARGET  # live: announced TARGETDURATION, only ever grows (should stay 2)
+        self.answered = False  # live: the first playlist answer waits for LIVE_START_SECONDS of media
         self.source: Source | None = None
         self._chunks: queue.Queue[bytes | None] = queue.Queue(maxsize=QUEUE_CHUNKS)
         self._start_lock = threading.Lock()

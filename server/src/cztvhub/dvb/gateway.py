@@ -21,8 +21,8 @@ from ..config import Config
 from . import breaks as ads
 from . import epg
 from . import fmp4
-from .hls import (INIT, Codecs, EmptySource, HlsManager, HlsSession, StreamFailed, build_ffmpeg_command,
-                  probe_codecs, rewrite_playlist)
+from .hls import (INIT, LIVE_START_SECONDS, Codecs, EmptySource, HlsManager, HlsSession, StreamFailed,
+                  build_ffmpeg_command, media_seconds, needed_target, probe_codecs, rewrite_playlist)
 from .retention import RetentionLoop
 from .sources import GrowingRecording
 from .epgstore import EpgHistory, merge_past
@@ -295,6 +295,17 @@ class DvbGateway:
 
     def _playlist(self, session: HlsSession) -> Response:
         text = session.wait_playlist(self.playlist_timeout)
+        if session.live and not session.answered:
+            # Start with a cushion: the player begins as far back as the playlist goes.
+            deadline = time.monotonic() + self.playlist_timeout
+            while media_seconds(text) < LIVE_START_SECONDS and session.usable() and time.monotonic() < deadline:
+                time.sleep(0.2)
+                text = session.wait_playlist(self.playlist_timeout)
+            session.answered = True
+        if session.live:
+            session.target = max(session.target, needed_target(text))
+            body = rewrite_playlist(text, f"/dvb/hls/{session.sid}/", target=session.target)
+            return Response(200, body.encode("utf-8"), M3U8, {"Cache-Control": "no-cache"})
         if not session.live and session.vod is None:
             # Decided once per session: the playlist type must not change while a player follows it.
             if not isinstance(session.source, GrowingRecording):

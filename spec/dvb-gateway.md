@@ -91,8 +91,13 @@ Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cz
   - `genre` is a Czech label from the DVB content nibble ("Zprávy", "Film / drama", …) or `""`.
   - State mapping from TVHeadend: `recording*` → recording, `scheduled` → scheduled, `completed` → completed,
     everything else (`completedError`, `completedRerecord`, `completedWarning` = missed) → failed.
-- `GET /dvb/live/<channel id>.m3u8` → live HLS (fMP4, rolling 20 segments of ~2 s, no `EXT-X-PLAYLIST-TYPE`; short
-  segments so the first one, which the first request blocks for, is ready sooner: tuning + ~2 s). Recordings use ~4 s. Media files under
+- `GET /dvb/live/<channel id>.m3u8` → live HLS (fMP4, a new segment at the first keyframe after 1 s, i.e. one ČT
+  GOP of ~1.3 s; 40 kept; no `EXT-X-PLAYLIST-TYPE`). `#EXT-X-TARGETDURATION` is fixed at 2 (it only grows if a
+  segment ever needs more; ffmpeg's own value grows with the longest segment so far, which HLS forbids). The first
+  request of a session blocks until **6 s** of media exist (3 × target, Apple's live hold-back), so players start
+  with a cushion; later requests answer at once. Before (2026-10-23) the Apple TV started 1.3 s from the live edge
+  with a target of 1 and stalled / glitched ("restarting 1.28s from end of live playlist; target duration 1s - stall
+  danger"). Media files under
   `/dvb/hls/<session>/` (`init.mp4`, `seg_NNNNN.m4s`; the playlist uses absolute paths).
 - `GET /dvb/recording/<dvr entry uuid>.m3u8` → HLS of a recording (`404` unless its state is `completed` or
   `recording`). `EVENT` playlist while it is still recording (start-over of an airing programme; it grows until

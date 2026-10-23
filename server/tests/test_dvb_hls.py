@@ -70,8 +70,8 @@ class CommandTest(unittest.TestCase):
         self.assertIn("-c:v copy -tag:v hvc1", joined)
         self.assertIn("-c:a aac", joined)
         self.assertIn("-hls_segment_type fmp4", joined)
-        self.assertIn("-hls_time 2", joined)  # short live segments: faster start
-        self.assertIn("-hls_list_size 20", joined)
+        self.assertIn("-hls_time 1", joined)  # one ČT GOP per live segment
+        self.assertIn("-hls_list_size 40", joined)
         self.assertIn("delete_segments", joined)
         self.assertNotIn("independent_segments", joined)  # open-GOP HEVC: segments depend on the previous one
         self.assertNotIn("-hls_playlist_type", joined)
@@ -93,6 +93,16 @@ class CommandTest(unittest.TestCase):
         cmd = hls.build_ffmpeg_command(Path("/x"), Codecs(), live=True)
         self.assertNotIn("-tag:v", cmd)
         self.assertIn("aac", cmd)
+
+    def test_live_playlist_target_and_length(self):
+        text = "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1.280000,\nseg_00000.m4s\n#EXTINF:2.6,\nseg_00001.m4s\n"
+        self.assertAlmostEqual(hls.media_seconds(text), 3.88)
+        self.assertEqual(hls.needed_target(text), 3)
+        out = hls.rewrite_playlist(text, "/dvb/hls/s/", target=2)
+        self.assertIn("#EXT-X-TARGETDURATION:2", out)
+        self.assertNotIn("TARGETDURATION:1", out)
+        self.assertIn("/dvb/hls/s/seg_00001.m4s", out)
+        self.assertIn("#EXT-X-TARGETDURATION:1", hls.rewrite_playlist(text, "/x/"))  # untouched without target
 
     def test_parse_probe(self):
         out = '{"streams": [{"codec_name": "mp2", "codec_type": "audio"}, {"codec_name": "hevc", "codec_type": "video"}]}'
@@ -235,3 +245,26 @@ class ManagerTest(unittest.TestCase):
         time.sleep(0.15)
         self.assertEqual(self.manager.stop_idle_live(0.1), 1)
         self.assertTrue(a.stopped)
+
+
+class LiveStartCushionTest(unittest.TestCase):
+    def test_first_answer_waits_for_six_seconds_later_ones_do_not(self):
+        from types import SimpleNamespace
+        from cztvhub.dvb.gateway import DvbGateway
+
+        lengths = iter([1.3, 2.6, 3.9, 5.2, 6.5, 6.5, 7.8])
+
+        def playlist(timeout):
+            seconds = next(lengths)
+            n = round(seconds / 1.3)
+            return "#EXTM3U\n#EXT-X-TARGETDURATION:1\n" + "".join(
+                f"#EXTINF:1.300000,\nseg_{i:05d}.m4s\n" for i in range(n))
+
+        session = SimpleNamespace(live=True, answered=False, target=hls.LIVE_TARGET, sid="s",
+                                  wait_playlist=playlist, usable=lambda: True)
+        gw = SimpleNamespace(playlist_timeout=5)
+        first = DvbGateway._playlist(gw, session).body.decode()
+        self.assertGreaterEqual(hls.media_seconds(first), hls.LIVE_START_SECONDS)
+        self.assertIn("#EXT-X-TARGETDURATION:2", first)
+        second = DvbGateway._playlist(gw, session).body.decode()
+        self.assertAlmostEqual(hls.media_seconds(second), 6.5)  # answered at once
