@@ -99,9 +99,15 @@ private val HEADER_HEIGHT = 24.dp
 private val DETAIL_HEIGHT = 120.dp
 private const val DESCRIPTION_LINES = 2
 
-/** Focus link between the detail panel's "Otevřít v iVysílání" button and the grid below it. */
+/**
+ * Focus links of the day strip, the detail panel's "Otevřít v iVysílání" button and the grid (spec/apps.md): up from
+ * the grid's first row lands on the highlighted chip, never on the button first; the button is reached from the
+ * strip (down) and leads down back to the grid.
+ */
 private class AppButtonLink {
     val button = FocusRequester()
+    /** The day strip's highlighted chip. */
+    val chip = FocusRequester()
     var shown = false
     /** Cell to return to when leaving the button downwards. */
     var lastCell: FocusRequester = FocusRequester.Default
@@ -235,7 +241,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val images = remember { GuideImages(context.tvApp.images, scope) }
 
     Column(Modifier.fillMaxSize()) {
-        DayPicker(today, selection, onSelect = onChip)
+        DayPicker(today, selection, appButton, onSelect = onChip)
         Spacer(Modifier.height(8.dp))
         DetailPanel(selection, now, appButton, onOpenApp, images, imageOf)
         Spacer(Modifier.height(8.dp))
@@ -318,12 +324,12 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
  * keeps the grid out of it), and entering it from below lands on that chip.
  */
 @Composable
-private fun DayPicker(today: LocalDate, selection: GuideSelection, onSelect: (LocalDate) -> Unit) {
+private fun DayPicker(today: LocalDate, selection: GuideSelection, appButton: AppButtonLink, onSelect: (LocalDate) -> Unit) {
     val days = Days.guideDays(today)
     // A programme after midnight on the last day starts on a day past the strip: its last chip.
     val selected = (selection.focusedStart?.let(Days::chipDay) ?: selection.chip ?: today)
         .coerceIn(days.first(), days.last())
-    val selectedRequester = remember { FocusRequester() }
+    val selectedRequester = appButton.chip
     var inside by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Row(
@@ -341,7 +347,9 @@ private fun DayPicker(today: LocalDate, selection: GuideSelection, onSelect: (Lo
             val isSelected = day == selected
             Surface(
                 onClick = { onSelect(day) },
-                modifier = if (isSelected) Modifier.focusRequester(selectedRequester) else Modifier,
+                modifier = (if (isSelected) Modifier.focusRequester(selectedRequester) else Modifier)
+                    // Down from the strip: the detail panel's button when it is offered, else the grid.
+                    .focusProperties { down = if (appButton.shown) appButton.button else FocusRequester.Default },
                 shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(18.dp)),
                 scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
                 colors = ClickableSurfaceDefaults.colors(
@@ -687,9 +695,9 @@ private fun EpgGrid(
                             if (nav.row < 0) return@onPreviewKeyEvent false
                             var next = nav.row + step
                             while (next in cellRows.indices && cellRows[next].second.isEmpty()) next += step
-                            // Up from the top row: the detail panel's button if shown, else the day chips.
-                            if (next < 0 && appButton.shown) {
-                                return@onPreviewKeyEvent runCatching { appButton.button.requestFocus() }.isSuccess
+                            // Up from the top row: the highlighted day chip, never the detail panel's button first.
+                            if (next < 0) {
+                                return@onPreviewKeyEvent runCatching { appButton.chip.requestFocus() }.isSuccess
                             }
                             // From a programme airing now: the next row's airing programme too.
                             val moment = GuideLayout.verticalMoment(nav.live, nav.last?.slot, Instant.now(), nav.cursor)
