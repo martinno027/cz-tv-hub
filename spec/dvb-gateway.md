@@ -179,6 +179,11 @@ frame of the new shot, then a few of the old one (found 2026-10-23 in a screen r
 gets it right). The gateway rewrites that offset so the CRA is presented right after its last leading picture
 (in place, served init/segments only). `tests/test_dvb_avsync.py` compares the display order with the source.
 
+## Start-up timing
+Every live start logs one line (`journalctl -u cztvhub`): `dvb: live start live:<id>: tuner+TVHeadend +Xs, first
+bytes +Xs, probe sample +Xs, ffprobe +Xs, first segment +Xs, cushion 6.0s +Xs = Ns`, to see where a slow channel
+start spends its time.
+
 ## Thumbnails (approved by the user on 2026-10-23; see `docs/legal-notes.md`)
 One still per recording so the viewer sees what a programme is ("it does not have to be current, just show what is
 on"). Implemented in `src/cztvhub/dvb/thumbs.py`.

@@ -177,6 +177,7 @@ class HlsSession:
         self.hevc_track: int | None = None  # video track whose open-GOP keyframes get fixed (fmp4.py)
         self.target = LIVE_TARGET  # live: announced TARGETDURATION, only ever grows (should stay 2)
         self.answered = False  # live: the first playlist answer waits for LIVE_START_SECONDS of media
+        self.timing: dict[str, float] = {}  # start-up steps (monotonic), logged once by the gateway
         self.source: Source | None = None
         self._chunks: queue.Queue[bytes | None] = queue.Queue(maxsize=QUEUE_CHUNKS)
         self._start_lock = threading.Lock()
@@ -218,8 +219,10 @@ class HlsSession:
                 raise self.error
 
     def _start(self) -> None:
+        self.timing["start"] = time.monotonic()
         self.directory.mkdir(parents=True, exist_ok=True)
         self.source = self._open_source()
+        self.timing["opened"] = time.monotonic()
         threading.Thread(target=self._reader, name=f"hls-read-{self.sid[:8]}", daemon=True).start()
         head = bytearray()
         ended = False
@@ -235,10 +238,13 @@ class HlsSession:
             if chunk is None:
                 ended = True
                 break
+            self.timing.setdefault("first_bytes", time.monotonic())
             head += chunk
+        self.timing["probe_sample"] = time.monotonic()
         if not head:
             raise EmptySource("source sent no data")
         codecs = self._prober(bytes(head))
+        self.timing["probed"] = time.monotonic()
         cmd = self._build_command(self.directory, codecs)
         self.process = self._popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL)
         threading.Thread(target=self._pump, args=(bytes(head), ended), name=f"hls-pump-{self.sid[:8]}",
@@ -299,6 +305,7 @@ class HlsSession:
             except OSError:
                 text = ""
             if "#EXTINF" in text:
+                self.timing.setdefault("first_segment", time.monotonic())
                 return text
             if self.stopped or (self.process is not None and self.process.poll() is not None):
                 raise StreamFailed("ffmpeg exited before the first segment")

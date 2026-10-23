@@ -302,6 +302,7 @@ class DvbGateway:
                 time.sleep(0.2)
                 text = session.wait_playlist(self.playlist_timeout)
             session.answered = True
+            self._log_startup(session, media_seconds(text))
         if session.live:
             session.target = max(session.target, needed_target(text))
             body = rewrite_playlist(text, f"/dvb/hls/{session.sid}/", target=session.target)
@@ -409,6 +410,23 @@ class DvbGateway:
                     return Response(206, data[first:last + 1], content_type, headers)
             return Response(416, b"", content_type, {"Content-Range": f"bytes */{size}"})
         return Response(200, data, content_type, headers)
+
+    def _log_startup(self, session: HlsSession, media: float) -> None:
+        """One line per live start: where the time goes (spec/dvb-gateway.md "Start-up timing")."""
+        t = session.timing
+        start = t.get("start")
+        if start is None:
+            return
+        steps = [("tuner+TVHeadend", "opened"), ("first bytes", "first_bytes"), ("probe sample", "probe_sample"),
+                 ("ffprobe", "probed"), ("first segment", "first_segment")]
+        parts, prev = [], start
+        for label, key in steps:
+            if key in t:
+                parts.append(f"{label} +{t[key] - prev:.1f}s")
+                prev = t[key]
+        total = time.monotonic() - start
+        parts.append(f"cushion {media:.1f}s +{time.monotonic() - prev:.1f}s")
+        self.log(f"dvb: live start {session.key}: " + ", ".join(parts) + f" = {total:.1f}s")
 
     @staticmethod
     def _synced(session: HlsSession, name: str, data: bytes) -> bytes:

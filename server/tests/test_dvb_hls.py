@@ -262,7 +262,7 @@ class LiveStartCushionTest(unittest.TestCase):
 
         session = SimpleNamespace(live=True, answered=False, target=hls.LIVE_TARGET, sid="s",
                                   wait_playlist=playlist, usable=lambda: True)
-        gw = SimpleNamespace(playlist_timeout=5)
+        gw = SimpleNamespace(playlist_timeout=5, _log_startup=lambda session, media: None)
         first = DvbGateway._playlist(gw, session).body.decode()
         self.assertGreaterEqual(hls.media_seconds(first), hls.LIVE_START_SECONDS)
         self.assertIn("#EXT-X-TARGETDURATION:2", first)
