@@ -44,7 +44,8 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    dropped (one already running finishes). At most 4 CT image requests and **2 gateway thumbnail requests** at a time
    (the gateway runs at most 2 ffmpeg). In-memory LRU in the app (about 300 images), never disk. Anténa thumbnails
    only for `completed`/`recording` entries while thumbnails are on; a `404` is not asked again for the guide's
-   lifetime (`completed`) or for 60 s (`recording`).
+   lifetime (`completed`) or for 60 s (`recording`); a `503` (gateway busy) is not remembered: the item goes back into
+   the queue and is retried after `Retry-After` (5 s) if it is still in the window (the focused one always).
    **ČT images for Anténa ČT channels**: an Anténa channel that broadcasts a ČT programme gets the official ČT image
    (and nothing else) from the CT schedule the app already loads, so no recording is needed. Rules (golden cases
    `spec/fixtures/ct_antenna_match.json`, all three apps):
