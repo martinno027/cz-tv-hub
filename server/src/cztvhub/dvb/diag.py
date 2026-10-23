@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -112,7 +113,7 @@ def _level(value: Any, scale: Any) -> str:
     return str(v)
 
 
-def run_diag(cfg: Config, channel: str | None, seconds: int, out: Callable[[str], None] = print,
+def run_diag(cfg: Config, channel: str | None, seconds: int, out: Callable[[str], None] = print, frames: bool = False,
              sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
              opener: Callable[..., Any] = urllib.request.urlopen) -> int:
     base = f"http://127.0.0.1:{cfg.port}"
@@ -145,6 +146,8 @@ def run_diag(cfg: Config, channel: str | None, seconds: int, out: Callable[[str]
     before = tuners()
     log = SegmentLog()
     playlist_times: list[float] = []
+    init: bytes | None = None
+    kept: list[bytes] = []  # --frames: segments in memory only
     end = clock() + seconds
     next_report = clock() + 10
     while clock() < end:
@@ -156,7 +159,17 @@ def run_diag(cfg: Config, channel: str | None, seconds: int, out: Callable[[str]
             sleep(1)
             continue
         playlist_times.append(clock() - t0)
+        before_feed = set(log.seen)
         log.feed(clock(), text)
+        if frames:
+            if init is None and (m := re.search(r'#EXT-X-MAP:URI="([^"]+)"', text)):
+                init = get(m.group(1))
+            for uri, _ in parse_playlist(text)[1]:
+                if uri not in before_feed and len(kept) < MAX_SEGMENTS:
+                    try:
+                        kept.append(get(uri))
+                    except Exception:  # noqa: BLE001 - already deleted from the live window
+                        pass
         if clock() >= next_report:
             ds = log.durations()
             out(f"  {len(ds)} úseků, poslední {ds[-1]:.1f} s" if ds else "  zatím žádný úsek")
@@ -199,4 +212,145 @@ def run_diag(cfg: Config, channel: str | None, seconds: int, out: Callable[[str]
         stalls, longest = simulate_stalls(log.arrivals, hold)
         label = "dnes (3 × délka úseku)" if hold == 3 * target else "s větší zásobou"
         out(f"zásoba {hold:>2} s {label}: zaseknutí {stalls}×" + (f", nejdelší {longest:.1f} s" if stalls else ""))
+    if frames:
+        out("")
+        out("== Obraz (rozbor úseků, dekóduji…) ==")
+        if init is None or not kept:
+            out("Žádná data k rozboru.")
+        else:
+            for line in analyse_segments(init, kept, cfg.dvb.ffmpeg):
+                out(line)
     return 0
+
+
+# -- `--frames`: what the picture itself looks like at segment boundaries -------------------------
+HEVC_NAMES = {19: "IDR", 20: "IDR", 21: "CRA", 16: "BLA", 17: "BLA", 18: "BLA", 1: "P/B", 0: "P/B"}
+RASL = (8, 9)
+MAX_SEGMENTS = 60  # ~2 min of video kept in memory for the analysis, never written to disk
+
+
+def video_track_id(init: bytes) -> int | None:
+    from . import fmp4
+
+    for tb, te in fmp4.find(init, 0, len(init), [b"moov", b"trak"]):
+        handler = next((init[b + 8:b + 12] for b, _ in fmp4.find(init, tb, te, [b"mdia", b"hdlr"])), b"")
+        if handler == b"vide":
+            return next((fmp4._full_box_u32(init, b, 12, 20) for b, _ in fmp4.find(init, tb, te, [b"tkhd"])), None)
+    return None
+
+
+def video_samples(segment: bytes, track: int) -> tuple[int | None, list[tuple[int, int, int]]]:
+    """(tfdt, [(offset, size, duration)]) of the video track's samples in a fragment."""
+    from . import fmp4
+
+    tfdt, samples = None, []
+    for moof_body, moof_end in fmp4.find(segment, 0, len(segment), [b"moof"]):
+        moof_start = moof_body - 8
+        for tb, te in fmp4.find(segment, moof_body, moof_end, [b"traf"]):
+            hd = next(fmp4.find(segment, tb, te, [b"tfhd"]), None)
+            if hd is None or struct.unpack(">I", segment[hd[0] + 4:hd[0] + 8])[0] != track:
+                continue
+            flags = int.from_bytes(segment[hd[0] + 1:hd[0] + 4], "big")
+            p = hd[0] + 8 + (8 if flags & 1 else 0) + (4 if flags & 2 else 0)
+            default_duration = struct.unpack(">I", segment[p:p + 4])[0] if flags & 8 else 0
+            p += 4 if flags & 8 else 0
+            default_size = struct.unpack(">I", segment[p:p + 4])[0] if flags & 0x10 else 0
+            for db, _ in fmp4.find(segment, tb, te, [b"tfdt"]):
+                fmt = ">Q" if segment[db] == 1 else ">I"
+                tfdt = struct.unpack(fmt, segment[db + 4:db + 4 + struct.calcsize(fmt)])[0]
+            for rb, _ in fmp4.find(segment, tb, te, [b"trun"]):
+                rflags = int.from_bytes(segment[rb + 1:rb + 4], "big")
+                count = struct.unpack(">I", segment[rb + 4:rb + 8])[0]
+                q = rb + 8
+                offset = moof_start
+                if rflags & 1:
+                    offset += struct.unpack(">i", segment[q:q + 4])[0]
+                    q += 4
+                if rflags & 4:
+                    q += 4
+                for _ in range(count):
+                    duration, size = default_duration, default_size
+                    if rflags & 0x100:
+                        duration = struct.unpack(">I", segment[q:q + 4])[0]
+                        q += 4
+                    if rflags & 0x200:
+                        size = struct.unpack(">I", segment[q:q + 4])[0]
+                        q += 4
+                    q += (4 if rflags & 0x400 else 0) + (4 if rflags & 0x800 else 0)
+                    samples.append((offset, size, duration))
+                    offset += size
+    return tfdt, samples
+
+
+def first_picture_type(sample: bytes) -> int | None:
+    """NAL unit type of the first slice in a length-prefixed (4 bytes) HEVC sample."""
+    p = 0
+    while p + 5 <= len(sample):
+        length = struct.unpack(">I", sample[p:p + 4])[0]
+        if length <= 0:
+            return None
+        nal = (sample[p + 4] >> 1) & 0x3F
+        if nal < 32:
+            return nal
+        p += 4 + length
+    return None
+
+
+def analyse_segments(init: bytes, segments: list[bytes], ffmpeg: str = "ffmpeg",
+                     run: Callable[..., Any] | None = None) -> list[str]:
+    import subprocess
+
+    run = run or subprocess.run
+    lines: list[str] = []
+    track = video_track_id(init)
+    if track is None:
+        return ["Úseky nemají obrazovou stopu."]
+    starts: dict[str, int] = {}
+    rasl_after_cra = 0
+    gaps, last_end = 0, None
+    for seg in segments:
+        tfdt, samples = video_samples(seg, track)
+        if not samples:
+            continue
+        types = [first_picture_type(seg[o:o + s]) for o, s, _ in samples]
+        name = HEVC_NAMES.get(types[0], f"typ {types[0]}") if types[0] is not None else "?"
+        starts[name] = starts.get(name, 0) + 1
+        if types[0] == 21:
+            rasl_after_cra += sum(1 for t in types[1:8] if t in RASL)
+        if tfdt is not None:
+            if last_end is not None and abs(tfdt - last_end) > 1:
+                gaps += 1
+            last_end = tfdt + sum(d for _, _, d in samples)
+    lines.append("Začátky úseků: " + ", ".join(f"{k} {v}×" for k, v in sorted(starts.items())))
+    if rasl_after_cra:
+        lines.append(f"Otevřený GOP: za CRA na začátku úseku následuje {rasl_after_cra} snímků RASL, které odkazují "
+                     "do předchozího úseku. Přehrávač, který na začátku úseku dekodér resetuje, je vykreslí s artefakty.")
+    lines.append(f"Díry/překryvy v časech obrazu mezi úseky: {gaps}")
+
+    def errors(data: bytes) -> int:
+        try:
+            result = run([ffmpeg, "-hide_banner", "-nostats", "-v", "error", "-i", "pipe:0", "-map", "0:v:0",
+                          "-f", "null", "-"], input=data, capture_output=True, timeout=600)
+        except (OSError, subprocess.TimeoutExpired):
+            return -1
+        return len([l for l in result.stderr.decode("utf-8", "replace").splitlines() if l.strip()])
+
+    try:
+        probe = run(["ffprobe" if ffmpeg == "ffmpeg" else ffmpeg.replace("ffmpeg", "ffprobe"), "-v", "error",
+                     "-select_streams", "v:0", "-show_entries",
+                     "stream=codec_name,profile,width,height,field_order,r_frame_rate,avg_frame_rate",
+                     "-of", "default=nw=1", "pipe:0"], input=init + segments[0], capture_output=True, timeout=60)
+        info = dict(l.split("=", 1) for l in probe.stdout.decode("utf-8", "replace").splitlines() if "=" in l)
+        field = info.get("field_order", "?")
+        lines.append(f"Obraz: {info.get('codec_name', '?')} {info.get('profile', '')} {info.get('width', '?')}×"
+                     f"{info.get('height', '?')}, snímky {info.get('r_frame_rate', '?')}, prokládání: {field}")
+        if field not in ("progressive", "unknown", "?"):
+            lines.append("Prokládané video: přehrávače v televizích ho u HEVC často neprokládají správně "
+                         "(zubaté hrany, trojúhelníky při pohybu).")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        pass
+    lines.append(f"Chyby dekodéru při plynulém přehrávání: {errors(init + b''.join(segments))}")
+    single = [errors(init + seg) for seg in segments[:12]]
+    lines.append(f"Chyby dekodéru, když se úsek dekóduje samostatně (prvních {len(single)}): "
+                 + ", ".join(str(n) for n in single))
+    return lines

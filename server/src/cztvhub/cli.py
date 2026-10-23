@@ -68,7 +68,7 @@ def cmd_dvb_diag(args):
     if not cfg.dvb.enabled:
         print("DVB is not enabled in the config", file=sys.stderr)
         return 2
-    return run_diag(cfg, args.channel, args.seconds)
+    return run_diag(cfg, args.channel, args.seconds, frames=args.frames)
 
 
 def cmd_dvb_fake(args):
@@ -165,6 +165,8 @@ def main(argv=None):
     p_diag.add_argument("--config", required=True)
     p_diag.add_argument("--channel", help="TVHeadend channel name (default: the first one)")
     p_diag.add_argument("--seconds", type=int, default=120)
+    p_diag.add_argument("--frames", action="store_true",
+                        help="also analyse the picture (segment start frames, decoder errors); keeps ~2 min in memory")
     p_diag.set_defaults(func=cmd_dvb_diag)
 
     p_fake = sub.add_parser("dvb-fake", help="fake TVHeadend with test streams for development")
