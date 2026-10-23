@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -18,6 +20,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -42,6 +46,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.Tab
+import androidx.tv.material3.TabRow
 import androidx.tv.material3.Text
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.dvb.DvbClient
@@ -53,9 +59,39 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** "Nastavení": the household DVB gateway ("Anténa"). */
+/**
+ * "Nastavení": two separate sections behind tabs at the top, "Kanály" (hide/reorder on this TV) first, then
+ * "Server" (the household DVB gateway for "Anténa", and "O aplikaci").
+ */
 @Composable
 fun SettingsScreen(viewModel: MainViewModel) {
+    var section by rememberSaveable { mutableIntStateOf(0) }
+    val titles = listOf(stringResource(R.string.settings_tab_channels), stringResource(R.string.settings_tab_server))
+    Column(Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = section) {
+            titles.forEachIndexed { index, title ->
+                Tab(selected = section == index, onFocus = { section = index }, onClick = { section = index }) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        when (section) {
+            0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 16.dp)) {
+                ChannelsSection(viewModel)
+            }
+            else -> ServerSettings(viewModel)
+        }
+    }
+}
+
+/** "Server": the household DVB gateway ("Anténa"); "O aplikaci" at the end. */
+@Composable
+private fun ServerSettings(viewModel: MainViewModel) {
     val context = LocalContext.current
     val settings = context.tvApp.dvbSettings
     val configured by settings.config.collectAsState()
@@ -121,6 +157,7 @@ fun SettingsScreen(viewModel: MainViewModel) {
             }
         }
         message?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+        Text(stringResource(R.string.settings_about), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
         Text(stringResource(R.string.disclaimer), style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
     }
 }

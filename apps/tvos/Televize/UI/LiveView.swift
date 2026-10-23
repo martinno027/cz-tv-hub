@@ -2,7 +2,7 @@ import CTCore
 import SwiftUI
 
 /// "Živě": the six CT channels with what is on air now, plus the "Anténa" group when a
-/// DVB-T2 gateway is configured. Select → live playback.
+/// DVB-T2 gateway is configured; order and hidden channels from Nastavení → Kanály. Select → live playback.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
     @State private var onAir: [String: Programme] = [:]
@@ -13,13 +13,24 @@ struct LiveView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
+        let internet = model.channelPrefs.internet().visible
+        let antenna = model.channelPrefs.antenna(antennaChannels).visible
+        // A group whose channels are all hidden is left out (the Anténa one only once its channels are known).
+        let showAntenna = model.antenna != nil && (antennaChannels.isEmpty || !antenna.isEmpty)
+        return TimelineView(.periodic(from: .now, by: 30)) { context in
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
-                    if model.antenna != nil { sectionTitle("Internet ČT") }
+                    if internet.isEmpty && !showAntenna {
+                        Text(ChannelPrefsUI.allHiddenMessage)
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 200)
+                    }
+                    if showAntenna && !internet.isEmpty { sectionTitle("Internet ČT") }
                     LazyVGrid(columns: columns, spacing: 56) {
-                        ForEach(Channels.all) { channel in
+                        ForEach(internet) { channel in
                             let programme = onAir[channel.slug]
                             Button {
                                 model.play(.live(channel))
@@ -30,14 +41,14 @@ struct LiveView: View {
                             .buttonStyle(.card)
                         }
                     }
-                    if model.antenna != nil {
+                    if showAntenna {
                         sectionTitle("Anténa")
                             .id("antenna")
                         if let antennaError {
                             Text(antennaError).font(.callout).foregroundStyle(.secondary)
                         }
                         LazyVGrid(columns: columns, spacing: 56) {
-                            ForEach(antennaChannels) { channel in
+                            ForEach(antenna) { channel in
                                 let event = antennaOnAir[channel.id]
                                 Button {
                                     model.playAntennaLive(channel)

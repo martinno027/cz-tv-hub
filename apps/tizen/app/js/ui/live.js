@@ -1,4 +1,7 @@
-/* "Živě": the six CT channels with the programme on air now, then the "Anténa" group if set up. */
+/*
+ * "Živě": the CT channels with the programme on air now, then the "Anténa" group if set up. Both in this TV's
+ * order without hidden channels ("Kanály" in Nastavení); a group with every channel hidden is left out.
+ */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
@@ -15,6 +18,7 @@
     this.app = app;
     this.root = document.getElementById('screen-live');
     this.cards = []; // [{el, request}]
+    this.groups = []; // [{start, end}] card index ranges, one per shown group
     this.focus = 0;
   }
 
@@ -24,30 +28,46 @@
     var focusedKey = this.cards[this.focus] ? this.cards[this.focus].key : null;
     this.root.innerHTML = '';
     this.cards = [];
+    this.groups = [];
+    var app = this.app;
+    var ctChannels = app.ctChannels();
+    // An Anténa group whose channels all exist but are hidden is left out; while loading it still shows.
+    var dvbChannels = dvb ? app.dvbChannelList(dvb.channels) : [];
+    var showDvb = dvb && (dvbChannels.length > 0 || !dvb.channels.length);
 
-    if (dvb) this.root.appendChild(el('h2', 'group', 'Internet ČT'));
-    if (ct.error && !ct.onAir) this.root.appendChild(el('div', 'group-error', ct.error));
-    var grid = el('div', 'cards');
-    CT.Channels.all.forEach(function (ch) {
-      var info = ct.onAir ? ct.onAir[ch.id] : null;
-      grid.appendChild(self.card('ct:' + ch.id, ch.name, info, now, { kind: 'live', channelId: ch.id, title: ch.name }));
-    });
-    this.root.appendChild(grid);
+    if (ctChannels.length) {
+      if (showDvb) this.root.appendChild(el('h2', 'group', 'Internet ČT'));
+      if (ct.error && !ct.onAir) this.root.appendChild(el('div', 'group-error', ct.error));
+      this.group(ctChannels, function (ch) {
+        var info = ct.onAir ? ct.onAir[ch.id] : null;
+        return self.card('ct:' + ch.id, ch.name, info, now, { kind: 'live', channelId: ch.id, title: ch.name });
+      });
+    }
 
-    if (dvb) {
+    if (showDvb) {
       this.root.appendChild(el('h2', 'group', 'Anténa'));
       if (dvb.error) this.root.appendChild(el('div', 'group-error', dvb.error));
-      var dgrid = el('div', 'cards');
-      dvb.channels.forEach(function (ch) {
+      this.group(dvbChannels, function (ch) {
         var info = dvb.onAir ? dvb.onAir[ch.id] : null;
-        dgrid.appendChild(self.card('dvb:' + ch.id, ch.name, info, now, { kind: 'dvbLive', channelId: ch.id, title: ch.name }));
+        return self.card('dvb:' + ch.id, ch.name, info, now, { kind: 'dvbLive', channelId: ch.id, title: ch.name });
       });
-      this.root.appendChild(dgrid);
+    }
+
+    if (!this.cards.length && !showDvb) {
+      this.root.appendChild(el('div', 'group-error', 'Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály.'));
     }
 
     var restored = this.cards.findIndex(function (c) { return c.key === focusedKey; });
-    this.focus = restored >= 0 ? restored : Math.min(this.focus, this.cards.length - 1);
+    this.focus = restored >= 0 ? restored : Math.max(0, Math.min(this.focus, this.cards.length - 1));
     this.applyFocus();
+  };
+
+  LiveScreen.prototype.group = function (channels, makeCard) {
+    var grid = el('div', 'cards');
+    var start = this.cards.length;
+    channels.forEach(function (ch) { grid.appendChild(makeCard(ch)); });
+    if (this.cards.length > start) this.groups.push({ start: start, end: this.cards.length });
+    this.root.appendChild(grid);
   };
 
   LiveScreen.prototype.card = function (key, name, info, now, request) {
@@ -83,12 +103,12 @@
   /** Returns false when the key leaves the screen upwards (to the tabs). */
   LiveScreen.prototype.onKey = function (key) {
     if (!this.cards.length) return key !== 'up';
-    var ctCount = CT.Channels.all.length;
     var i = this.focus;
-    // Two groups of rows: CT (indices < ctCount) and Anténa; rows hold PER_ROW cards each.
-    var group = i < ctCount ? 0 : 1;
-    var base = group === 0 ? 0 : ctCount;
-    var groupEnd = group === 0 ? ctCount : this.cards.length;
+    // Up to two groups (CT, Anténa), each in rows of PER_ROW cards.
+    var g = 0;
+    while (g < this.groups.length - 1 && i >= this.groups[g].end) g++;
+    var base = this.groups[g].start;
+    var groupEnd = this.groups[g].end;
     var col = (i - base) % PER_ROW;
     switch (key) {
       case 'left':
@@ -98,13 +118,20 @@
         if (i < this.cards.length - 1) this.focus = i + 1;
         break;
       case 'up':
-        if (i - PER_ROW >= base) this.focus = i - PER_ROW;
-        else if (group === 1) this.focus = Math.min(ctCount - 1, col);
-        else return false;
+        if (i - PER_ROW >= base) {
+          this.focus = i - PER_ROW;
+        } else if (g > 0) {
+          // last row of the group above, same column if it has one
+          var prev = this.groups[g - 1];
+          var lastRow = prev.start + Math.floor((prev.end - 1 - prev.start) / PER_ROW) * PER_ROW;
+          this.focus = Math.min(prev.end - 1, lastRow + col);
+        } else {
+          return false;
+        }
         break;
       case 'down':
-        if (i + PER_ROW < groupEnd) this.focus = i + PER_ROW;
-        else if (group === 0 && this.cards.length > ctCount) this.focus = Math.min(this.cards.length - 1, ctCount + col);
+        if (base + (Math.floor((i - base) / PER_ROW) + 1) * PER_ROW < groupEnd) this.focus = Math.min(groupEnd - 1, i + PER_ROW);
+        else if (g < this.groups.length - 1) this.focus = Math.min(this.groups[g + 1].end - 1, this.groups[g + 1].start + col);
         break;
       case 'enter':
         this.app.play(this.cards[i].request);

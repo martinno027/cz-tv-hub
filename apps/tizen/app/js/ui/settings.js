@@ -1,4 +1,8 @@
-/* "Nastavení": gateway address and key for "Anténa"; saving tests the gateway right away. */
+/*
+ * "Nastavení" in two sections, picked with the sub-tabs at the top (left/right): "Kanály" = which channels this
+ * TV shows, and in what order (rows [☑ name] [▲] [▼] per group, spec/apps.md); "Server" = gateway address and key
+ * for "Anténa" (saving tests the gateway right away) and "O aplikaci".
+ */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
@@ -7,10 +11,22 @@
     return document.getElementById(id);
   }
 
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
   function SettingsScreen(app) {
     this.app = app;
     this.items = ['set-address', 'set-key', 'set-save', 'set-clear'].map($);
     this.focus = 0;
+    this.section = 'channels'; // 'channels' | 'server'
+    this.zone = 'subtabs'; // 'subtabs' | 'channels' | 'form' (the Server fields and buttons)
+    this.chItems = []; // [{key, keys (the group's), controls: [name, up, down], enabled: [bool ×3]}] | {reset, controls}
+    this.chRow = 0;
+    this.chCol = 0;
     var self = this;
     this.items.slice(0, 2).forEach(function (input) {
       // Leaving the on-screen keyboard (Done / Cancel / Enter) returns to remote navigation.
@@ -22,7 +38,126 @@
     var s = CT.SettingsStore.load();
     $('set-address').value = s ? s.address : '';
     $('set-key').value = s ? s.key : '';
+    this.zone = 'subtabs';
+    this.showSection(this.section);
     this.showStatus();
+    this.renderChannels();
+  };
+
+  SettingsScreen.prototype.showSection = function (section) {
+    this.section = section;
+    Array.prototype.forEach.call(document.querySelectorAll('#set-tabs .subtab'), function (t) {
+      t.classList.toggle('selected', t.dataset.section === section);
+    });
+    $('set-section-channels').classList.toggle('active', section === 'channels');
+    $('set-section-server').classList.toggle('active', section === 'server');
+    $('screen-settings').scrollTop = 0;
+  };
+
+  /** The "Kanály" lists; keeps focus on the same channel and control across re-renders. */
+  SettingsScreen.prototype.renderChannels = function () {
+    var app = this.app;
+    var box = $('set-channels');
+    var current = this.chItems[this.chRow];
+    var focusKey = current ? (current.reset ? 'reset' : current.key) : null;
+    box.innerHTML = '';
+    this.chItems = [];
+
+    var dvb = app.dvbConfig ? app.dvbState : null;
+    var ctList = app.ctChannels(true);
+    if (dvb) box.appendChild(el('div', 'ch-group', 'Internet ČT'));
+    this.groupRows(box, ctList.map(function (ch) { return { key: 'ct:' + ch.id, name: ch.name }; }));
+
+    if (dvb) {
+      box.appendChild(el('div', 'ch-group', 'Anténa'));
+      var dvbList = app.dvbChannelList(dvb.channels, true);
+      if (dvbList.length) {
+        this.groupRows(box, dvbList.map(function (ch) { return { key: 'dvb:' + ch.id, name: ch.name }; }));
+      } else if (dvb.error) {
+        box.appendChild(el('div', 'ch-message error', 'Kanály antény se nepodařilo načíst: ' + dvb.error));
+      } else {
+        box.appendChild(el('div', 'ch-message', 'Načítám kanály antény…'));
+      }
+    }
+
+    var reset = el('div', 'button', 'Obnovit výchozí pořadí');
+    box.appendChild(reset);
+    this.chItems.push({ reset: true, controls: [reset], enabled: [true] });
+
+    var restored = -1;
+    this.chItems.forEach(function (item, i) {
+      if ((item.reset && focusKey === 'reset') || (!item.reset && item.key === focusKey)) restored = i;
+    });
+    this.chRow = restored >= 0 ? restored : Math.min(this.chRow, this.chItems.length - 1);
+    // After ▲/▼ focus stays on that button even when it is now disabled (moved to the edge).
+    this.chCol = Math.min(this.chCol, this.chItems[this.chRow].controls.length - 1);
+    this.applyFocus();
+  };
+
+  SettingsScreen.prototype.groupRows = function (box, channels) {
+    var self = this;
+    var keys = channels.map(function (c) { return c.key; });
+    var prefs = this.app.channelPrefs;
+    channels.forEach(function (c, i) {
+      var hidden = CT.ChannelPrefs.isHidden(prefs, c.key);
+      var row = el('div', 'ch-row' + (hidden ? ' off' : ''));
+      var name = el('div', 'ch-name', (hidden ? '☐ ' : '☑ ') + c.name);
+      var up = el('div', 'ch-btn' + (i === 0 ? ' disabled' : ''), '▲');
+      var down = el('div', 'ch-btn' + (i === channels.length - 1 ? ' disabled' : ''), '▼');
+      row.appendChild(name);
+      row.appendChild(up);
+      row.appendChild(down);
+      box.appendChild(row);
+      self.chItems.push({ key: c.key, keys: keys, controls: [name, up, down],
+        enabled: [true, i > 0, i < channels.length - 1] });
+    });
+  };
+
+  /** OK on a "Kanály" control: toggle the channel, move it, or reset everything. */
+  SettingsScreen.prototype.activateChannel = function () {
+    var item = this.chItems[this.chRow];
+    var P = CT.ChannelPrefs;
+    var prefs = this.app.channelPrefs;
+    if (!item || !item.enabled[this.chCol]) return;
+    if (item.reset) prefs = P.reset();
+    else if (this.chCol === 0) prefs = P.toggle(prefs, item.key);
+    else prefs = P.move(item.keys, prefs, item.key, this.chCol === 1 ? -1 : 1);
+    this.app.setChannelPrefs(prefs); // re-renders this list; focus follows the row (same key, same control)
+  };
+
+  /** Arrow keys in "Kanály"; leaving the top row goes back to the gateway buttons. */
+  SettingsScreen.prototype.onChannelsKey = function (key) {
+    var item = this.chItems[this.chRow];
+    var col;
+    switch (key) {
+      case 'up':
+      case 'down': {
+        var next = this.chRow + (key === 'up' ? -1 : 1);
+        if (next < 0) {
+          this.zone = 'subtabs';
+          break;
+        }
+        if (next >= this.chItems.length) break;
+        this.chRow = next;
+        var target = this.chItems[next];
+        // a disabled ▲/▼ (first/last row) or the single-control reset row: fall back to the name
+        if (this.chCol >= target.controls.length || !target.enabled[this.chCol]) this.chCol = 0;
+        break;
+      }
+      case 'left':
+        for (col = this.chCol - 1; col >= 0; col--) if (item.enabled[col]) { this.chCol = col; break; }
+        break;
+      case 'right':
+        for (col = this.chCol + 1; col < item.controls.length; col++) if (item.enabled[col]) { this.chCol = col; break; }
+        break;
+      case 'enter':
+        this.activateChannel();
+        return true;
+      default:
+        break;
+    }
+    this.applyFocus();
+    return true;
   };
 
   SettingsScreen.prototype.showStatus = function () {
@@ -78,9 +213,23 @@
   SettingsScreen.prototype.applyFocus = function () {
     var self = this;
     var active = this.app.inContent();
-    this.items.forEach(function (item, i) {
-      item.classList.toggle('focused', active && i === self.focus);
+    Array.prototype.forEach.call(document.querySelectorAll('#set-tabs .subtab'), function (t) {
+      t.classList.toggle('focused', active && self.zone === 'subtabs' && t.dataset.section === self.section);
     });
+    this.items.forEach(function (item, i) {
+      item.classList.toggle('focused', active && self.zone === 'form' && i === self.focus);
+    });
+    var focusedEl = null;
+    this.chItems.forEach(function (item, r) {
+      item.controls.forEach(function (control, c) {
+        var on = active && self.zone === 'channels' && r === self.chRow && c === self.chCol;
+        control.classList.toggle('focused', on);
+        if (on) focusedEl = control;
+      });
+    });
+    if (!active) return;
+    if (focusedEl) CT.scrollIntoView(focusedEl);
+    else $('screen-settings').scrollTop = 0;
   };
 
   SettingsScreen.prototype.editing = function () {
@@ -100,10 +249,12 @@
       }
       return 'input';
     }
+    if (this.zone === 'subtabs') return this.onSubtabsKey(key);
+    if (this.zone === 'channels') return this.onChannelsKey(key);
     switch (key) {
       case 'up':
-        if (this.focus === 0) return false;
-        this.focus = this.focus === 3 ? 1 : this.focus - 1;
+        if (this.focus === 0) this.zone = 'subtabs';
+        else this.focus = this.focus === 3 ? 1 : this.focus - 1;
         break;
       case 'down':
         this.focus = Math.min(this.focus === 2 ? 2 : this.focus + 1, this.items.length - 1);
@@ -121,6 +272,35 @@
         }
         if (this.focus === 2) this.save();
         else this.clear();
+        break;
+      default:
+        break;
+    }
+    this.applyFocus();
+    return true;
+  };
+
+  /** The "Kanály" / "Server" switch; up leaves to the app tabs, down/OK enters the section. */
+  SettingsScreen.prototype.onSubtabsKey = function (key) {
+    switch (key) {
+      case 'left':
+        if (this.section === 'server') this.showSection('channels');
+        break;
+      case 'right':
+        if (this.section === 'channels') this.showSection('server');
+        break;
+      case 'up':
+        return false;
+      case 'down':
+      case 'enter':
+        if (this.section === 'channels') {
+          this.zone = 'channels';
+          this.chRow = 0;
+          this.chCol = 0;
+        } else {
+          this.zone = 'form';
+          this.focus = 0;
+        }
         break;
       default:
         break;

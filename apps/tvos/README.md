@@ -44,6 +44,7 @@ Enter = výběr, Esc = tlačítko Menu/Zpět.
 Ladicí parametry (jen v Debug buildu), např. `xcrun simctl launch booted cz.cztvhub.tv -tab guide`:
 
 - `-tab guide` – otevře rovnou TV průvodce
+- `-tab settings -settingsSection server` – otevře Nastavení → Server (bez parametru Nastavení → Kanály)
 - `-play live:CH_24`, `-play startover:CH_1`, `-play buffer:CH_1` (skončilo před < 3 h → Zpět v čase), `-play archive:CH_1`, `-play unavailable:CH_6`
 - `-openOfficialApp YES` – zkusí otevřít stránku iVysílání v App Store; `-showDRMError YES` – ukáže obrazovku „vyžaduje DRM“
 - `-breakURLs first` / `-breakURLs all` – nasimuluje vypršelý odkaz (test opakovaného načtení / chybové hlášky)

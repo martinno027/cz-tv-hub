@@ -113,23 +113,34 @@
     this.applyFocus();
   };
 
-  /** CT internet channels first, then the "Anténa" channels (empty rows show as "Mimo vysílání"). */
+  /**
+   * CT internet channels first, then the "Anténa" channels (empty rows show as "Mimo vysílání"), each group in
+   * this TV's order without hidden channels ("Kanály" in Nastavení).
+   */
   GuideScreen.prototype.build = function (ct, dvb) {
-    var self = this;
-    var rows = CT.Channels.all.map(function (ch) {
+    var app = this.app;
+    var rows = app.ctChannels().map(function (ch) {
       var list = ct.plan ? ct.plan[ch.id] || [] : [];
       return { name: ch.name, entries: list.map(function (p) { return CT.Entries.ct(ch, p); }) };
     });
     if (dvb) {
-      dvb.channels.forEach(function (ch) {
+      app.dvbChannelList(dvb.channels).forEach(function (ch) {
         var list = dvb.plan[ch.id] || [];
         rows.push({ name: ch.name, entries: list.map(function (e) { return CT.Entries.dvb(ch, e); }) });
       });
     }
     var all = [];
     rows.forEach(function (r) { all = all.concat(r.entries); });
+    if (!rows.length) {
+      $('grid-message').textContent = 'Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály.';
+      this.rows = [];
+      this.nowLine = null;
+      $('grid-rows').innerHTML = '';
+      $('grid-ticks').innerHTML = '';
+      this.showDetail(null);
+      return;
+    }
     $('grid-message').textContent = ct.error ? ct.error : (all.length ? '' : 'Pro tento den není program');
-    if (!all.length && !rows.length) return;
 
     var axisStart = CT.GuideLayout.axisStart(all);
     if (axisStart === null) axisStart = CT.Days.atMinute(this.day, 5 * 60);
@@ -186,6 +197,7 @@
     this.anchor = anchor;
     this.scrollX = Math.max(0, px(anchor - axisStart - 30 * MINUTE));
     this.focusRow = Math.min(this.focusRow, this.rows.length - 1);
+    if (this.scrollRow > this.focusRow) this.scrollRow = this.focusRow;
     this.focusSlot = this.slotAt(this.focusRow, anchor);
     this.zone = this.zone === 'days' && this.app.inContent() ? 'days' : 'grid';
     this.applyFocus();

@@ -41,7 +41,7 @@ import java.time.Instant
 /** Title and time span of what a card shows. */
 private data class CardItem(val title: String, val span: Timed)
 
-/** "Živě": the six CT channels with the programme on air now, then the "Anténa" group if set up. */
+/** "Živě": the CT channels with the programme on air now, then the "Anténa" group if set up; "Kanály" applied. */
 @Composable
 fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val onAir by viewModel.onAir.collectAsStateWithLifecycle()
@@ -51,36 +51,50 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val loading = onAir is Load.Loading
     val firstCard = remember { FocusRequester() }
     val antenna = dvb
+    val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
+    val ctChannels = ChannelOrder.visibleCt(prefs)
+    val dvbChannels = antenna?.let { ChannelOrder.visibleDvb(prefs, it.channels) }.orEmpty()
+    // The very first card of the screen takes the initial focus, whichever group it is in.
+    var firstTaken = false
+    fun firstModifier(modifier: Modifier): Modifier =
+        if (firstTaken) modifier else modifier.focusRequester(firstCard).also { firstTaken = true }
+
+    if (ctChannels.isEmpty() && (antenna == null || (antenna.channels.isNotEmpty() && dvbChannels.isEmpty()))) {
+        CenteredMessage(stringResource(R.string.channels_all_hidden))
+        return
+    }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        if (antenna != null) GroupTitle(stringResource(R.string.group_internet))
-        Channels.all.chunked(3).forEachIndexed { rowIndex, row ->
-            CardRow {
-                row.forEachIndexed { colIndex, channel ->
-                    val info = current[channel.id]
-                    val modifier = Modifier.weight(1f).fillMaxHeight()
-                    ChannelCard(
-                        name = channel.name,
-                        current = info?.current?.let { CardItem(it.title, it) },
-                        next = info?.next?.let { CardItem(it.title, it) },
-                        emptyText = stringResource(if (loading) R.string.loading else R.string.no_programme_info),
-                        now = now,
-                        modifier = if (rowIndex == 0 && colIndex == 0) modifier.focusRequester(firstCard) else modifier,
-                        onClick = { onPlay(PlayRequest.Live(channel.id, channel.name)) },
-                    )
+        if (ctChannels.isNotEmpty()) {
+            if (antenna != null) GroupTitle(stringResource(R.string.group_internet))
+            ctChannels.chunked(3).forEach { row ->
+                CardRow {
+                    row.forEach { channel ->
+                        val info = current[channel.id]
+                        ChannelCard(
+                            name = channel.name,
+                            current = info?.current?.let { CardItem(it.title, it) },
+                            next = info?.next?.let { CardItem(it.title, it) },
+                            emptyText = stringResource(if (loading) R.string.loading else R.string.no_programme_info),
+                            now = now,
+                            modifier = firstModifier(Modifier.weight(1f).fillMaxHeight()),
+                            onClick = { onPlay(PlayRequest.Live(channel.id, channel.name)) },
+                        )
+                    }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        if (antenna != null) {
+        // A group whose channels are all hidden is left out; a gateway that has not answered yet still shows.
+        if (antenna != null && (dvbChannels.isNotEmpty() || antenna.channels.isEmpty())) {
             GroupTitle(stringResource(R.string.group_antenna))
             antenna.error?.let {
                 Text(stringResource(R.string.antenna_unavailable, it), color = Palette.nowLine)
             }
-            antenna.channels.chunked(3).forEach { row ->
+            dvbChannels.chunked(3).forEach { row ->
                 CardRow {
                     row.forEach { channel ->
                         val info = antenna.onAir[channel.id]
@@ -90,7 +104,7 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                             next = info?.next?.let { CardItem(it.title, it) },
                             emptyText = stringResource(R.string.no_programme_info),
                             now = now,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            modifier = firstModifier(Modifier.weight(1f).fillMaxHeight()),
                             onClick = { onPlay(PlayRequest.DvbLive(channel.id, channel.name)) },
                         )
                     }

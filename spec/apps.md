@@ -110,6 +110,33 @@ the device (no account, no sync, no analytics); only positions are stored, never
   to `start + progress` (fallback offset `max(0, (start + progress) − (now − W))`), CT archive and Anténa recordings
   start at `progress`. A CT programme that began < 3 h ago is entirely in the buffer, so the resume point is too.
 
+## "Kanály" (hide and reorder channels on this TV)
+In **Nastavení → Kanály** the viewer hides channels and changes their order, **on this device only** (like
+"Pokračovat": no sync, no account; another TV keeps its own). Applies to **Živě** and the **TV průvodce** alike.
+Separate from the gateway's `/admin` page: a channel switched off there is not received at all; here a channel is just
+not shown on this TV.
+- **Keys**: CT internet channel `ct:<API id>` (`ct:CH_1`); Anténa channel `dvb:<gateway channel id>`.
+- **Stored**: `{"order": [keys], "hidden": [keys]}` (tvOS `UserDefaults` key `channelPrefs`, Android
+  `SharedPreferences` `channel_prefs`, Samsung `localStorage` `cztvhub.channelPrefs`; JSON, at most 500 keys each).
+  Unknown keys are kept (an Anténa channel switched off in `/admin` keeps its place when it comes back).
+- **Groups stay**: "Internet ČT" first, then "Anténa"; the order applies **within** each group.
+- **arrange(group channels in default order, prefs)** → `all` = keys of `order` that are in the group (first
+  occurrence), then the group's other channels in default order (a new channel is appended at the end);
+  `visible` = `all` without `hidden`. Živě and the guide show `visible`; the settings list shows `all`.
+- **move(key, by ±1)** swaps the channel with its neighbour in `all` (no-op at the edge); the new `order` = the
+  group's `all` followed by the stored keys not in the group. Hiding/showing does not change the order.
+  **Obnovit výchozí** clears both lists.
+- **Nastavení is split into two separate sections**, each its own screen/tab reached from the top of Nastavení:
+  **Kanály** (this list) and **Server** (the Anténa gateway: address, key, "Uložit a ověřit", "Odebrat bránu",
+  discovery in the local network; "O aplikaci" at its end). Kanály is first. Nothing of one appears in the other.
+- **Settings UI (Kanály)**: per group a list of rows `[☑ ČT1] [▲] [▼]` (left/right moves between the three controls; select on
+  the name toggles "zobrazovat", hidden rows dimmed, ▲ on the first / ▼ on the last row disabled), then
+  "Obnovit výchozí pořadí". The Anténa list needs the gateway's channels (no gateway → not shown; unreachable →
+  Czech message). Focus stays on the moved row's button after ▲/▼.
+- A group with every channel hidden is not shown in Živě / the guide; when **all** channels are hidden, Živě says
+  "Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály."
+- Golden cases: `spec/fixtures/channel_prefs_cases.json` (`arrange` and `move`), tested in all three apps.
+
 ## Quality bar
 - Unit tests for API parsing (all fixtures) and decision rules (all golden cases); no network in tests.
 - Builds from the command line (`xcodebuild` / `./gradlew` / `apps/tizen/build.py`), runs in the tvOS simulator /

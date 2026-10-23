@@ -12,7 +12,7 @@ import cz.cztvhub.core.dvb.DvbRepository
 import cz.cztvhub.tv.dvb.DvbSettings
 import cz.cztvhub.tv.ui.ImageCache
 
-/** Process-wide objects; in memory only, except "Pokračovat" positions (no stream URL is ever persisted). */
+/** Process-wide objects; in memory only, except "Pokračovat" positions and "Kanály" (no stream URL is ever persisted). */
 class TvApp : Application() {
     val api by lazy { CtApi() }
     val schedules by lazy { ScheduleRepository(api) }
@@ -22,6 +22,9 @@ class TvApp : Application() {
 
     /** "Pokračovat": remembered positions, on this device only. */
     val resume by lazy { ResumeStore(ResumePrefs(this)) }
+
+    /** "Kanály": hidden channels and their order, on this device only. */
+    val channelPrefs by lazy { ChannelPrefsStore(this) }
 
     private var dvbRepository: DvbRepository? = null
 

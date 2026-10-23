@@ -18,6 +18,8 @@ final class AppModel {
     let planner: PlaybackPlanner
     /// "Pokračovat" positions, on this device only.
     let resume: ResumeStore
+    /// Channels hidden / reordered in Nastavení → Kanály, on this device only.
+    let channelPrefs: ChannelPrefsStore
 
     var session: PlayerSession?
     var alertMessage: String?
@@ -37,6 +39,7 @@ final class AppModel {
         schedules = ScheduleStore(client: client)
         planner = PlaybackPlanner(client: client)
         resume = ResumeStore()
+        channelPrefs = ChannelPrefsStore()
         setGateway(GatewayStore.load(), persist: false)
     }
 

@@ -67,7 +67,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import cz.cztvhub.core.Action
-import cz.cztvhub.core.Channels
+import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.GuideLayout
 import cz.cztvhub.core.Decisions
@@ -143,6 +143,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     }
     val dvb by viewModel.dvb.collectAsStateWithLifecycle()
     val dvbPlans by viewModel.dvbPlans.collectAsStateWithLifecycle()
+    val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val onOpenApp: () -> Unit = remember(selection) {
@@ -162,8 +163,12 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
             is Load.Ready -> {
                 val dvbChannels = dvb?.channels.orEmpty()
                 val dvbPlan = dvbPlans[day].orEmpty()
-                val rows = remember(plan.value, dvbChannels, dvbPlan) { guideRows(plan.value, dvbChannels, dvbPlan) }
-                if (rows.all { it.entries.isEmpty() }) {
+                val rows = remember(plan.value, dvbChannels, dvbPlan, prefs) {
+                    guideRows(plan.value, ChannelOrder.visibleDvb(prefs, dvbChannels), dvbPlan, prefs)
+                }
+                if (rows.isEmpty() && (dvb == null || dvbChannels.isNotEmpty())) {
+                    CenteredMessage(stringResource(R.string.channels_all_hidden))
+                } else if (rows.all { it.entries.isEmpty() }) {
                     CenteredMessage(stringResource(R.string.empty_day))
                 } else {
                     key(day) {
@@ -323,9 +328,17 @@ private fun stateLabel(entry: Entry, now: Instant): String = when (entry) {
     }
 }
 
-/** CT internet channels first, then the "Anténa" channels (empty rows show as "Mimo vysílání"). */
-private fun guideRows(plan: DayPlan, dvbChannels: List<DvbChannel>, dvbPlan: Map<String, List<DvbEvent>>): List<GuideRow> =
-    Channels.all.map { ch -> GuideRow(ch.id, ch.name, plan[ch.id].orEmpty().map { CtEntry(ch, it) }) } +
+/**
+ * CT internet channels first, then the "Anténa" channels (empty rows show as "Mimo vysílání"); only the channels
+ * "Kanály" shows, in its order ([dvbChannels] already arranged).
+ */
+private fun guideRows(
+    plan: DayPlan,
+    dvbChannels: List<DvbChannel>,
+    dvbPlan: Map<String, List<DvbEvent>>,
+    prefs: ChannelPrefs,
+): List<GuideRow> =
+    ChannelOrder.visibleCt(prefs).map { ch -> GuideRow(ch.id, ch.name, plan[ch.id].orEmpty().map { CtEntry(ch, it) }) } +
         dvbChannels.map { ch -> GuideRow("dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) }) }
 
 @OptIn(ExperimentalFoundationApi::class)

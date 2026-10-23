@@ -43,21 +43,35 @@
       </section>
 
       <section id="screen-settings" class="screen">
-        <h1>Anténa (DVB-T2)</h1>
-        <p class="hint">Brána cz-tv-hub na Raspberry Pi doma. Adresa v domácí síti (např. <b>192.168.1.20</b>,
-          <b>cztvhub.local</b>) nebo jméno v Tailscale (<b>pi.tailnet.ts.net</b>). Klíč je v
-          <b>/etc/cztvhub/cztvhub.conf</b> (<b>[dvb] key</b>). Bez nastavení se Anténa nezobrazuje.</p>
-        <label class="field">Adresa brány<input id="set-address" class="focusable" type="text"
-          autocomplete="off" spellcheck="false"></label>
-        <label class="field">Klíč brány<input id="set-key" class="focusable" type="password"
-          autocomplete="off" spellcheck="false"></label>
-        <div class="buttons">
-          <div id="set-save" class="button focusable">Uložit a vyzkoušet</div>
-          <div id="set-clear" class="button focusable">Smazat</div>
+        <nav id="set-tabs">
+          <div class="subtab" data-section="channels">Kanály</div>
+          <div class="subtab" data-section="server">Server</div>
+        </nav>
+
+        <div id="set-section-channels" class="set-section">
+          <p class="hint">Které kanály a v jakém pořadí tato televize ukazuje v Živě a v TV průvodci. OK na názvu kanál
+            skryje nebo zobrazí, ▲ ▼ ho posunou. Platí jen pro tuto televizi.</p>
+          <div id="set-channels"></div>
         </div>
-        <div id="set-status"></div>
-        <p class="hint small">Neoficiální projekt, není spojen s Českou televizí. Aplikace přehrává jen oficiální
-          streamy ČT a vlastní anténu, nic nenahrává ani neobchází DRM.</p>
+
+        <div id="set-section-server" class="set-section">
+          <h1>Anténa (DVB-T2)</h1>
+          <p class="hint">Brána cz-tv-hub na Raspberry Pi doma. Adresa v domácí síti (např. <b>192.168.1.20</b>,
+            <b>cztvhub.local</b>) nebo jméno v Tailscale (<b>pi.tailnet.ts.net</b>). Klíč je v
+            <b>/etc/cztvhub/cztvhub.conf</b> (<b>[dvb] key</b>). Bez nastavení se Anténa nezobrazuje.</p>
+          <label class="field">Adresa brány<input id="set-address" class="focusable" type="text"
+            autocomplete="off" spellcheck="false"></label>
+          <label class="field">Klíč brány<input id="set-key" class="focusable" type="password"
+            autocomplete="off" spellcheck="false"></label>
+          <div class="buttons">
+            <div id="set-save" class="button focusable">Uložit a vyzkoušet</div>
+            <div id="set-clear" class="button focusable">Smazat</div>
+          </div>
+          <div id="set-status"></div>
+          <h2 class="about">O aplikaci</h2>
+          <p class="hint small">Neoficiální projekt, není spojen s Českou televizí. Aplikace přehrává jen oficiální
+            streamy ČT a vlastní anténu, nic nenahrává ani neobchází DRM.</p>
+        </div>
       </section>
     </main>
 
@@ -94,6 +108,7 @@
   <script src="js/core/planner.js"></script>
   <script src="js/core/entries.js"></script>
   <script src="js/core/resume.js"></script>
+  <script src="js/core/channel-prefs.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
   <script src="js/ui/keys.js"></script>

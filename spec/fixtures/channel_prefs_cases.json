@@ -1,0 +1,271 @@
+{
+ "arrange": [
+  {
+   "name": "no prefs: default order",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24"
+   ],
+   "prefs": {
+    "order": [],
+    "hidden": []
+   },
+   "all": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24"
+   ],
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24"
+   ]
+  },
+  {
+   "name": "saved order, hidden channel",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "ct:CH_4"
+   ],
+   "prefs": {
+    "order": [
+     "ct:CH_24",
+     "ct:CH_1"
+    ],
+    "hidden": [
+     "ct:CH_2"
+    ]
+   },
+   "all": [
+    "ct:CH_24",
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_4"
+   ],
+   "visible": [
+    "ct:CH_24",
+    "ct:CH_1",
+    "ct:CH_4"
+   ]
+  },
+  {
+   "name": "keys of the other group and unknown keys are ignored",
+   "channels": [
+    "dvb:a",
+    "dvb:b"
+   ],
+   "prefs": {
+    "order": [
+     "ct:CH_1",
+     "dvb:gone",
+     "dvb:b"
+    ],
+    "hidden": [
+     "ct:CH_2",
+     "dvb:gone"
+    ]
+   },
+   "all": [
+    "dvb:b",
+    "dvb:a"
+   ],
+   "visible": [
+    "dvb:b",
+    "dvb:a"
+   ]
+  },
+  {
+   "name": "duplicates in order: first occurrence wins",
+   "channels": [
+    "dvb:a",
+    "dvb:b",
+    "dvb:c"
+   ],
+   "prefs": {
+    "order": [
+     "dvb:c",
+     "dvb:a",
+     "dvb:c"
+    ],
+    "hidden": []
+   },
+   "all": [
+    "dvb:c",
+    "dvb:a",
+    "dvb:b"
+   ],
+   "visible": [
+    "dvb:c",
+    "dvb:a",
+    "dvb:b"
+   ]
+  },
+  {
+   "name": "new channel appended at the end",
+   "channels": [
+    "dvb:new",
+    "dvb:a",
+    "dvb:b"
+   ],
+   "prefs": {
+    "order": [
+     "dvb:b",
+     "dvb:a"
+    ],
+    "hidden": []
+   },
+   "all": [
+    "dvb:b",
+    "dvb:a",
+    "dvb:new"
+   ],
+   "visible": [
+    "dvb:b",
+    "dvb:a",
+    "dvb:new"
+   ]
+  },
+  {
+   "name": "everything hidden",
+   "channels": [
+    "dvb:a",
+    "dvb:b"
+   ],
+   "prefs": {
+    "order": [],
+    "hidden": [
+     "dvb:b",
+     "dvb:a"
+    ]
+   },
+   "all": [
+    "dvb:a",
+    "dvb:b"
+   ],
+   "visible": []
+  }
+ ],
+ "move": [
+  {
+   "name": "move down without saved order",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24"
+   ],
+   "prefs": {
+    "order": [],
+    "hidden": []
+   },
+   "key": "ct:CH_1",
+   "by": 1,
+   "order": [
+    "ct:CH_2",
+    "ct:CH_1",
+    "ct:CH_24"
+   ]
+  },
+  {
+   "name": "move up keeps the other group's keys after",
+   "channels": [
+    "dvb:a",
+    "dvb:b"
+   ],
+   "prefs": {
+    "order": [
+     "ct:CH_24",
+     "ct:CH_1",
+     "dvb:gone"
+    ],
+    "hidden": [
+     "dvb:b"
+    ]
+   },
+   "key": "dvb:b",
+   "by": -1,
+   "order": [
+    "dvb:b",
+    "dvb:a",
+    "ct:CH_24",
+    "ct:CH_1",
+    "dvb:gone"
+   ]
+  },
+  {
+   "name": "hidden channels move like the others",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24"
+   ],
+   "prefs": {
+    "order": [
+     "ct:CH_24"
+    ],
+    "hidden": [
+     "ct:CH_1"
+    ]
+   },
+   "key": "ct:CH_1",
+   "by": -1,
+   "order": [
+    "ct:CH_1",
+    "ct:CH_24",
+    "ct:CH_2"
+   ]
+  },
+  {
+   "name": "up at the top is a no-op",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2"
+   ],
+   "prefs": {
+    "order": [
+     "ct:CH_2"
+    ],
+    "hidden": []
+   },
+   "key": "ct:CH_2",
+   "by": -1,
+   "order": [
+    "ct:CH_2"
+   ]
+  },
+  {
+   "name": "down at the bottom is a no-op",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2"
+   ],
+   "prefs": {
+    "order": [],
+    "hidden": []
+   },
+   "key": "ct:CH_2",
+   "by": 1,
+   "order": []
+  },
+  {
+   "name": "unknown key is a no-op",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2"
+   ],
+   "prefs": {
+    "order": [
+     "ct:CH_2"
+    ],
+    "hidden": []
+   },
+   "key": "ct:CH_9",
+   "by": 1,
+   "order": [
+    "ct:CH_2"
+   ]
+  }
+ ]
+}

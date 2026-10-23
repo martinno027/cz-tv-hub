@@ -7,6 +7,7 @@
   'use strict';
   var CT = root.CT = root.CT || {};
   var KEY = 'cztvhub.dvb';
+  var PREFS_KEY = 'cztvhub.channelPrefs';
 
   function read() {
     try {
@@ -53,6 +54,25 @@
         root.localStorage.setItem(KEY, JSON.stringify({ cleared: true }));
       } catch (e) {
         // See save().
+      }
+    }
+  };
+
+  /** "Kanály": hidden channels and their order, on this TV only (spec/apps.md). */
+  CT.ChannelPrefsStore = {
+    load: function () {
+      try {
+        return CT.ChannelPrefs.parse(root.localStorage.getItem(PREFS_KEY));
+      } catch (e) {
+        return CT.ChannelPrefs.empty();
+      }
+    },
+
+    save: function (prefs) {
+      try {
+        root.localStorage.setItem(PREFS_KEY, CT.ChannelPrefs.serialise(prefs));
+      } catch (e) {
+        // See save() above: the choice lasts until the app closes.
       }
     }
   };

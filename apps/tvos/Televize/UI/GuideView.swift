@@ -58,7 +58,8 @@ private struct GuideRow: Identifiable {
 }
 
 /// "TV průvodce": EPG grid with channels as rows and time on the horizontal axis.
-/// CT internet channels first, then the "Anténa" channels when a gateway is configured.
+/// CT internet channels first, then the "Anténa" channels when a gateway is configured; both in the
+/// order and with the channels hidden in Nastavení → Kanály (`ChannelPrefs`).
 struct GuideView: View {
     static let pointsPerSecond = 0.21  // ~2 h visible
     static let channelColumnWidth: CGFloat = 190
@@ -158,10 +159,11 @@ struct GuideView: View {
     }
 
     private var rows: [GuideRow] {
-        let ct = Channels.all.map { channel in
+        let prefs = model.channelPrefs
+        let ct = prefs.internet().visible.map { channel in
             GuideRow(id: channel.slug, name: channel.name, entries: (schedule[channel.slug] ?? []).map(GuideEntry.ct))
         }
-        let antenna = antennaChannels.map { channel in
+        let antenna = prefs.antenna(antennaChannels).visible.map { channel in
             GuideRow(id: "dvb|\(channel.id)", name: channel.name,
                      entries: (antennaEPG[channel.id] ?? []).map { GuideEntry.antenna($0, channel) })
         }
@@ -184,6 +186,12 @@ struct GuideView: View {
                     Button("Zkusit znovu") { Task { await load() } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if rows.isEmpty, model.antenna == nil || !antennaChannels.isEmpty {
+                // every channel hidden in Nastavení → Kanály
+                Text(ChannelPrefsUI.allHiddenMessage)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Vertical scrolling once the Anténa rows are added; the channel names scroll along.
                 ScrollViewReader { verticalProxy in
@@ -342,7 +350,7 @@ struct GuideView: View {
         let rows = rows
         var anchorRow = rows.first
         #if DEBUG
-        // `-guideRow 6` starts on that row (6 = first Anténa row), for simulator screenshots.
+        // `-guideRow 6` starts on that row (6 = first Anténa row unless channels are hidden), for simulator screenshots.
         let debugRow = UserDefaults.standard.integer(forKey: "guideRow")
         if debugRow > 0, debugRow < rows.count { anchorRow = rows[debugRow] }
         #endif

@@ -48,6 +48,7 @@
     ctState: { onAir: null, error: null },
     dvbState: null,
     dialog: null,
+    channelPrefs: null,
 
     start: function () {
       var self = this;
@@ -64,6 +65,7 @@
         settings: new CT.SettingsScreen(this)
       };
       this.resumeStore = new CT.ResumeStore(localBackend('cztvhub.resume'));
+      this.channelPrefs = CT.ChannelPrefsStore.load();
       this.player = new CT.Player(this);
       this.setDvbConfig(CT.Demo.enabled ? CT.Demo.dvbConfig() : CT.SettingsStore.config(), true);
 
@@ -139,6 +141,35 @@
 
     renderLive: function () {
       this.screens.live.render(this.ctState, this.dvbState, this.now);
+      if (this.tab === 'settings') this.screens.settings.renderChannels();
+    },
+
+    /** "Kanály": a group's channels (`keyOf` gives `ct:…` / `dvb:…`) in this TV's order; `all` includes hidden ones. */
+    arrange: function (channels, keyOf, all) {
+      var byKey = {};
+      var keys = channels.map(function (ch) {
+        var k = keyOf(ch);
+        byKey[k] = ch;
+        return k;
+      });
+      var arranged = CT.ChannelPrefs.arrange(keys, this.channelPrefs);
+      return (all ? arranged.all : arranged.visible).map(function (k) { return byKey[k]; });
+    },
+
+    ctChannels: function (all) {
+      return this.arrange(CT.Channels.all, function (ch) { return 'ct:' + ch.id; }, all);
+    },
+
+    dvbChannelList: function (channels, all) {
+      return this.arrange(channels || [], function (ch) { return 'dvb:' + ch.id; }, all);
+    },
+
+    /** Stores new "Kanály" prefs and redraws Živě and the guide. */
+    setChannelPrefs: function (prefs) {
+      this.channelPrefs = prefs;
+      CT.ChannelPrefsStore.save(prefs);
+      this.renderLive();
+      this.screens.guide.reload();
     },
 
     showTab: function (tab) {

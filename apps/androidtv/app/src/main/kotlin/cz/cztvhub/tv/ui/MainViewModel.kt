@@ -3,6 +3,7 @@ package cz.cztvhub.tv.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.OnAir
@@ -53,6 +54,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** "Anténa" events per day keyed by channel id; a failed day is just empty. */
     private val _dvbPlans = MutableStateFlow<Map<LocalDate, Map<String, List<DvbEvent>>>>(emptyMap())
     val dvbPlans: StateFlow<Map<LocalDate, Map<String, List<DvbEvent>>>> = _dvbPlans.asStateFlow()
+
+    /** "Kanály": hidden channels and their order on this device. */
+    val channelPrefs: StateFlow<ChannelPrefs> = app.channelPrefs.value
+
+    fun updateChannelPrefs(change: (ChannelPrefs) -> ChannelPrefs) = app.channelPrefs.update(change)
+
+    fun resetChannelPrefs() = app.channelPrefs.reset()
 
     private val _now = MutableStateFlow(Instant.now())
     val now: StateFlow<Instant> = _now.asStateFlow()
