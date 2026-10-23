@@ -1,6 +1,6 @@
 /*
- * "Živě": the CT channels with the programme on air now, then the "Anténa" group if set up. Both in this TV's
- * order without hidden channels ("Kanály" in Nastavení); a group with every channel hidden is left out.
+ * "Živě": the channels with the programme on air now, CT internet and "Anténa" in one mixed list, in this TV's
+ * order without hidden channels or switched-off sources ("Kanály" in Nastavení); each card shows its source icon.
  */
 (function (root) {
   'use strict';
@@ -18,7 +18,7 @@
     this.app = app;
     this.root = document.getElementById('screen-live');
     this.cards = []; // [{el, request}]
-    this.groups = []; // [{start, end}] card index ranges, one per shown group
+    this.groups = []; // [{start, end}] card index ranges (one: the mixed list)
     this.focus = 0;
   }
 
@@ -30,30 +30,24 @@
     this.cards = [];
     this.groups = [];
     var app = this.app;
-    var ctChannels = app.ctChannels();
-    // An Anténa group whose channels all exist but are hidden is left out; while loading it still shows.
-    var dvbChannels = dvb ? app.dvbChannelList(dvb.channels) : [];
-    var showDvb = dvb && (dvbChannels.length > 0 || !dvb.channels.length);
+    var dvbOn = dvb && app.sourceOn('dvb');
+    var list = app.channelList(dvb ? dvb.channels : []);
 
-    if (ctChannels.length) {
-      if (showDvb) this.root.appendChild(el('h2', 'group', 'Internet ČT'));
-      if (ct.error && !ct.onAir) this.root.appendChild(el('div', 'group-error', ct.error));
-      this.group(ctChannels, function (ch) {
-        var info = ct.onAir ? ct.onAir[ch.id] : null;
-        return self.card('ct:' + ch.id, ch.name, info, now, { kind: 'live', channelId: ch.id, title: ch.name });
-      });
-    }
+    if (app.sourceOn('ct') && ct.error && !ct.onAir) this.root.appendChild(el('div', 'group-error', ct.error));
+    if (dvbOn && dvb.error) this.root.appendChild(el('div', 'group-error', dvb.error));
+    this.group(list, function (item) {
+      var ch = item.channel;
+      if (item.source === 'dvb') {
+        return self.card(item.key, 'dvb', ch.name, dvb.onAir ? dvb.onAir[ch.id] : null, now,
+          { kind: 'dvbLive', channelId: ch.id, title: ch.name });
+      }
+      return self.card(item.key, 'ct', ch.name, ct.onAir ? ct.onAir[ch.id] : null, now,
+        { kind: 'live', channelId: ch.id, title: ch.name });
+    });
 
-    if (showDvb) {
-      this.root.appendChild(el('h2', 'group', 'Anténa'));
-      if (dvb.error) this.root.appendChild(el('div', 'group-error', dvb.error));
-      this.group(dvbChannels, function (ch) {
-        var info = dvb.onAir ? dvb.onAir[ch.id] : null;
-        return self.card('dvb:' + ch.id, ch.name, info, now, { kind: 'dvbLive', channelId: ch.id, title: ch.name });
-      });
-    }
-
-    if (!this.cards.length && !showDvb) {
+    // While the Anténa channels are still loading the list may be empty without anything being hidden.
+    var dvbLoading = dvbOn && !dvb.channels.length && !dvb.error;
+    if (!this.cards.length && !dvbLoading) {
       this.root.appendChild(el('div', 'group-error', 'Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály.'));
     }
 
@@ -70,9 +64,12 @@
     this.root.appendChild(grid);
   };
 
-  LiveScreen.prototype.card = function (key, name, info, now, request) {
+  LiveScreen.prototype.card = function (key, source, name, info, now, request) {
     var card = el('div', 'card');
-    card.appendChild(el('div', 'card-channel', name));
+    var channel = el('div', 'card-channel');
+    channel.appendChild(CT.sourceIcon(source));
+    channel.appendChild(el('span', 'card-channel-name', name));
+    card.appendChild(channel);
     var current = info ? info.current : null;
     var next = info ? info.next : null;
     if (current) {
@@ -104,7 +101,7 @@
   LiveScreen.prototype.onKey = function (key) {
     if (!this.cards.length) return key !== 'up';
     var i = this.focus;
-    // Up to two groups (CT, Anténa), each in rows of PER_ROW cards.
+    // Rows of PER_ROW cards; there is one group (the mixed list), the ranges would handle more.
     var g = 0;
     while (g < this.groups.length - 1 && i >= this.groups[g].end) g++;
     var base = this.groups[g].start;

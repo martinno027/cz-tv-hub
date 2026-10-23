@@ -120,7 +120,8 @@ test('days: labels, range and Prague time', () => {
   assert.equal(CT.Days.label(today, today), 'Dnes');
   assert.equal(CT.Days.label('2026-10-16', today), 'Včera');
   assert.equal(CT.Days.label('2026-10-12', today), 'po 12. 10.');
-  assert.equal(CT.Days.label('2026-10-18', today), 'ne 18. 10.');
+  assert.equal(CT.Days.label('2026-10-18', today), 'Zítra');
+  assert.equal(CT.Days.label('2026-10-19', today), 'po 19. 10.');
   assert.equal(CT.Days.label('2026-01-01', today), 'čt 1. 1.');
   const days = CT.Days.guideDays(today);
   assert.equal(days.length, 10);
@@ -182,9 +183,21 @@ test('layout: fillers, overlaps, minimum width, tiny gaps, axis', () => {
   assertContiguous(slots, a0);
   assert.ok(slots.every((s) => s.item));
 
-  assert.equal(L.axisStart([p('x', '03:59', '05:00')]), at('03:30'));
-  assert.equal(L.axisStart([]), null);
+  // clipped to the axis (the broadcast day's edges); items outside it are left out
+  slots = L.row([p('night', '19:00', '20:30'), p('late', '21:30', '22:45'), p('next', '22:50', '22:59')], a0, at('22:00'));
+  assertContiguous(slots, a0);
+  assert.deepEqual(slots.map((s) => s.item && s.item.idec), ['night', null, 'late']);
+  assert.equal(slots[slots.length - 1].end, at('22:00'));
   assert.deepEqual(L.ticks(at('20:00'), at('21:10')), [at('20:00'), at('20:30'), at('21:00')]);
+});
+
+test('broadcast day bounds: 05:00 to 05:00 Prague, DST-aware', () => {
+  assert.deepEqual(CT.Days.bounds('2026-10-17'), [Date.parse('2026-10-17T03:00:00Z'), Date.parse('2026-10-18T03:00:00Z')]);
+  const autumn = CT.Days.bounds('2026-10-24'); // clocks go back on 25 Oct: 25 h
+  assert.deepEqual(autumn, [Date.parse('2026-10-24T03:00:00Z'), Date.parse('2026-10-25T04:00:00Z')]);
+  const spring = CT.Days.bounds('2026-03-28'); // clocks go forward on 29 Mar: 23 h
+  assert.equal((spring[1] - spring[0]) / 3600000, 23);
+  assert.equal(CT.Days.bounds('2026-01-10')[0], Date.parse('2026-01-10T04:00:00Z'));
 });
 
 function fixtureApi(routes, seen) {
@@ -337,4 +350,36 @@ test('GuideLayout.liveSlot picks the programme airing now, else the slot under n
   assert.equal(slots[L.liveSlot(slots, base + 10 * M)].item, null); // "Mimo vysílání"
   assert.equal(L.liveSlot(slots, base + 120 * M), -1);
   assert.equal(L.liveSlot([], base), -1);
+});
+
+test('GuideLayout.window, covers and slotRange keep only the viewport plus a buffer', () => {
+  const L = CT.GuideLayout;
+  const H = 3600 * 1000;
+  const view = { row: 10, rows: 7, start: 10 * H, end: 12 * H };
+  const win = L.window(view, 60);
+  assert.deepEqual(win, { r0: 6, r1: 21, t0: 8 * H, t1: 14 * H });
+  assert.deepEqual(L.window({ row: 0, rows: 7, start: 0, end: 2 * H }, 5, { extraRows: 2, extraMs: H }),
+    { r0: 0, r1: 5, t0: -H, t1: 3 * H });
+  assert.equal(L.covers(win, view, 60, 1, 30 * 60 * 1000), true);
+  assert.equal(L.covers(win, { row: 13, rows: 7, start: 10 * H, end: 12 * H }, 60, 1, 0), true); // one row to spare
+  assert.equal(L.covers(win, { row: 14, rows: 7, start: 10 * H, end: 12 * H }, 60, 1, 0), false); // none left below
+  assert.equal(L.covers(win, { row: 10, rows: 7, start: 11.8 * H, end: 13.8 * H }, 60, 1, 30 * 60 * 1000), false);
+  assert.equal(L.covers({ r0: 0, r1: 60, t0: 0, t1: 99 * H }, { row: 0, rows: 7, start: H, end: 3 * H }, 60, 1, 0), true);
+  assert.equal(L.covers(null, view, 60, 1, 0), false);
+  const slots = [0, 1, 2, 3, 4, 5].map((i) => ({ start: i * H, end: (i + 1) * H }));
+  assert.deepEqual(L.slotRange(slots, 1.5 * H, 3 * H), [1, 3]);
+  assert.deepEqual(L.slotRange(slots, 0, 6 * H), [0, 6]);
+  assert.deepEqual(L.slotRange(slots, 7 * H, 8 * H), [6, 6]);
+  assert.deepEqual(L.slotRange(slots, -2 * H, -H), [0, 0]);
+  assert.deepEqual(L.slotRange([], 0, H), [0, 0]);
+});
+
+test('GuideLayout.neighbourDay stops at the ends of the range', () => {
+  const L = CT.GuideLayout;
+  const days = ['2026-10-21', '2026-10-22', '2026-10-23'];
+  assert.equal(L.neighbourDay(days, '2026-10-22', 1), '2026-10-23');
+  assert.equal(L.neighbourDay(days, '2026-10-22', -1), '2026-10-21');
+  assert.equal(L.neighbourDay(days, '2026-10-23', 1), null);
+  assert.equal(L.neighbourDay(days, '2026-10-21', -1), null);
+  assert.equal(L.neighbourDay(days, '2026-10-30', 1), null);
 });

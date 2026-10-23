@@ -20,9 +20,28 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    Select → full-screen live playback.
 2. **TV průvodce** (the main screen feature): classic EPG grid, channels as rows, time on the horizontal axis
    (e.g. 30-min ticks, ~2 h visible), a "now" line, programme cells sized by duration. Range: 7 days back,
-   2 days ahead; day picker (Dnes, Včera, `po 12. 10.` …). Opens scrolled to now. D-pad/Siri Remote focus
+   2 days ahead; day picker (Dnes, Včera, Zítra, `po 12. 10.` …). Opens scrolled to now. D-pad/Siri Remote focus
    navigation moves cell to cell; focused cell shows detail (title, episode, time, genre, description, image).
    Select a cell → action from **Decision rules**. Past cells clearly playable, unavailable ones dimmed.
+   **Anténa thumbnails**: the detail's image of an Anténa programme is the gateway thumbnail
+   (`spec/dvb-gateway.md` "Thumbnails") when the gateway reports `thumbnails: true` and the TV's switch "Náhledy
+   anténních pořadů" (Nastavení → Server, default on) is on, else the antenna placeholder. Load it with the key
+   (header; Samsung: fetch with the header into a blob URL), memory cache only, never a disk cache; request it only
+   for the focused programme (after the focus rests ~0.3 s), never for every cell.
+   **Across days**: the guide scrolls on past a day's edge. Right on the last cell of a row (the one reaching the
+   broadcast day's end, 05:00) opens the next day (if it is in the range) with focus on that row's cell at the new
+   day's start; left on the first cell opens the previous day with focus on that row's cell at its end. The day strip
+   always highlights the day the grid shows (so "Dnes" is no longer highlighted after scrolling into "Zítra"); the
+   "Live column first" mode ends on a day change. At the range's ends nothing happens. tvOS has no event for a
+   left/right press without a target, so its rows end with a focusable "Zítra ›" cell and start with "‹ Včera" /
+   "‹ Dnes" (none at the range ends); Android TV and Samsung react to the key at the row's edge directly. The grid
+   covers exactly the broadcast day 05:00–05:00 Prague (programmes crossing 05:00 are clipped).
+   **Performance**: with dozens of Anténa channels a day has thousands of cells. Never build them all: build only a
+   window around the focus (about 5 rows above, 10 below, 3 h before and 5 h after the focused cell; empty space of
+   the same size elsewhere so scroll positions stay exact) and move it when focus gets within 3 rows / 2 h of its
+   edge. Compute rows, time axis and cell geometry once per data change, not per focus move; a focus move must not
+   re-render the grid (only the detail). Left/right must never jump to another row because the next cell was not built.
+   Target: smooth D-pad on the device with 60 channels (the fake TVHeadend: `cztvhub dvb-fake --channels 60`).
    **Live column first**: on today's guide, until the viewer presses left or right, up/down moves to the programme
    **airing now** in the next row (like zapping), whatever the cells' widths; a row with nothing airing gets the
    cell (or focusable "Mimo vysílání" gap) under the now line. The first left/right ends this mode until the guide is
@@ -30,6 +49,7 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
 3. **Player**: full-screen, native controls. Live: seek within the timeshift buffer when started from it.
    Archive: normal VOD seeking. Subtitles/audio tracks from the HLS manifest via native UI if cheap.
    On playback error caused by URL expiry, re-resolve once and resume at the same position.
+   Live (no start position) starts playing as soon as the player can, without waiting for a ready state first.
 4. **Errors**: show CT's `labels.textShort` (Czech) when present, else a generic Czech message.
 Out of scope v1: search, show/episode browsing, favourites, settings, DVB-T2 (TVHeadend comes later; keep the
 channel source abstract so a second source can be added).
@@ -120,29 +140,46 @@ In **Nastavení → Kanály** the viewer hides channels and changes their order,
 Separate from the gateway's `/admin` page: a channel switched off there is not received at all; here a channel is just
 not shown on this TV.
 - **Keys**: CT internet channel `ct:<API id>` (`ct:CH_1`); Anténa channel `dvb:<gateway channel id>`.
-- **Stored**: `{"order": [keys], "hidden": [keys]}` (tvOS `UserDefaults` key `channelPrefs`, Android
+- **Stored**: `{"order": [keys], "hidden": [keys], "sourcesOff": ["ct" | "dvb"]}` (missing `sourcesOff` = both on; tvOS `UserDefaults` key `channelPrefs`, Android
   `SharedPreferences` `channel_prefs`, Samsung `localStorage` `cztvhub.channelPrefs`; JSON, at most 500 keys each).
   Unknown keys are kept (an Anténa channel switched off in `/admin` keeps its place when it comes back).
-- **Groups stay**: "Internet ČT" first, then "Anténa"; the order applies **within** each group.
-- **arrange(group channels in default order, prefs)** → `all` = keys of `order` that are in the group (first
-  occurrence), then the group's other channels in default order (a new channel is appended at the end);
-  `visible` = `all` without `hidden`. Živě and the guide show `visible`; the settings list shows `all`.
-- **move(key, by ±1)** swaps the channel with its neighbour in `all` (no-op at the edge); the new `order` = the
-  group's `all` followed by the stored keys not in the group. Hiding/showing does not change the order.
-  **Obnovit výchozí** clears both lists.
+- **Sources**: the whole **Internetová TV** (`ct`, the six CT channels) and the whole **Anténa** (`dvb`, the gateway's
+  channels) can each be switched off. A source that is off contributes no channels anywhere (Živě, guide, the
+  settings order list); its channels keep their stored order/hidden state for when it is switched on again. Anténa
+  without a configured gateway has no channels anyway (its switch is not shown).
+- **One mixed list** (no "Internet ČT" / "Anténa" groups any more): the channels of the sources that are on, in default
+  order CT first (catalogue order), then Anténa (gateway order). The viewer may put Anténa channels between CT ones.
+- **arrange(channels in default order, prefs)** → `all` = keys of `order` that are in the list (first occurrence),
+  then the list's other channels in default order (a new channel is appended at the end); `visible` = `all` without
+  `hidden`. Živě and the guide show `visible`; the settings list shows `all`.
+- **move(key, by ±1)** swaps the channel with its neighbour in `all` (no-op at the edge); the new `order` = `all`
+  followed by the stored keys not in the list (e.g. the channels of a source that is off). Hiding/showing does not
+  change the order. **Obnovit výchozí** clears `order` and `hidden` (and switches both sources on).
+- **Source icon**: every channel shows where it comes from, an internet/globe icon for CT internet channels and an
+  antenna icon for Anténa (SF Symbols `globe` / `antenna.radiowaves.left.and.right`, Material `Language` / `SettingsInputAntenna`
+  or similar, inline SVG on Samsung): in the settings rows (required), on the Živě cards and next to the channel name
+  in the guide (small, so "ČT1" and "ČT1 HD" can be told apart).
+- **Version line**: the top of Nastavení (the choice screen, always visible there) shows
+  "Verze <version> (build <n> · <commit> · <d. m. HH:MM>)": app version, build number = number of git commits
+  (`git rev-list --count HEAD`), short commit hash (`+` appended when built from uncommitted changes) and the build
+  time (Prague), all stamped at build time (tvOS build phase into Info.plist, Gradle `BuildConfig`, Samsung
+  `build.py` into a generated script; the Samsung browser demo shows "vývojová verze"). Nothing is fetched at run time.
 - **Nastavení is a choice of two sections**: the Nastavení screen shows only two large items, **Kanály** (first) and
   **Server**, each with a one-line description. Selecting one opens that section **full screen** (no tab bar row, no
   other section): Kanály = this list; Server = the Anténa gateway (address, key, "Uložit a ověřit", "Odebrat bránu",
   discovery in the local network; "O aplikaci" at its end). The remote's **Back** (Siri Remote Menu/‹, Android
   Back, Samsung Return) returns to the choice, with focus on the item just left; Back on the choice leaves Nastavení
   as before.
-- **Settings UI (Kanály)**: per group a list of rows `[☑ ČT1] [▲] [▼]` (left/right moves between the three controls; select on
-  the name toggles "zobrazovat", hidden rows dimmed, ▲ on the first / ▼ on the last row disabled), then
-  "Obnovit výchozí pořadí". The Anténa list needs the gateway's channels (no gateway → not shown; unreachable →
-  Czech message). Focus stays on the moved row's button after ▲/▼.
-- A group with every channel hidden is not shown in Živě / the guide; when **all** channels are hidden, Živě says
+- **Settings UI (Kanály)**: first the two source switches `[☑ Internetová TV (ČT)]` and `[☑ Anténa]` (the latter only
+  with a gateway), then one list "Pořadí kanálů" of rows `[icon ☑ ČT1] [▲] [▼]` (left/right moves between the three
+  controls; select on the name toggles "zobrazovat", hidden rows dimmed, ▲ on the first / ▼ on the last row
+  disabled), then "Obnovit výchozí pořadí". Anténa channels need the gateway (unreachable → Czech message above the
+  list, the CT channels still listed). Focus stays on the moved row's button after ▲/▼ and the list scrolls so the
+  moved row stays visible.
+- When no channel is left (all hidden or both sources off), Živě and the guide say
   "Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály."
-- Golden cases: `spec/fixtures/channel_prefs_cases.json` (`arrange` and `move`), tested in all three apps.
+- Golden cases: `spec/fixtures/channel_prefs_cases.json` (`arrange` and `move` on mixed lists; the input list is
+  already filtered by the sources that are on), tested in all three apps.
 
 ## Quality bar
 - Unit tests for API parsing (all fixtures) and decision rules (all golden cases); no network in tests.

@@ -8,16 +8,30 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/** A group's channels as Živě, the guide ([visible]) and the settings list ([all]) show them. */
+/** The channels as Živě, the guide ([visible]) and the settings list ([all]) show them. */
 data class Arranged(val all: List<String>, val visible: List<String>)
 
 /**
- * "Kanály": hidden channels and their order, on this device only (spec/apps.md). Keys are
- * `ct:<API id>` and `dvb:<gateway channel id>`; golden cases in spec/fixtures/channel_prefs_cases.json.
- * Unknown keys are kept, so an Anténa channel switched off on the gateway keeps its place.
+ * "Kanály": hidden channels, their order (one list mixing CT internet and Anténa channels) and the sources
+ * switched off, on this device only (spec/apps.md). Keys are `ct:<API id>` and `dvb:<gateway channel id>`;
+ * golden cases in spec/fixtures/channel_prefs_cases.json. Unknown keys are kept, so an Anténa channel switched off
+ * on the gateway (or the channels of a source that is off) keep their place.
  */
-data class ChannelPrefs(val order: List<String> = emptyList(), val hidden: Set<String> = emptySet()) {
-    /** [channels] = one group's keys in default order. */
+data class ChannelPrefs(
+    val order: List<String> = emptyList(),
+    val hidden: Set<String> = emptySet(),
+    val sourcesOff: Set<String> = emptySet(),
+) {
+    fun isSourceOn(source: String): Boolean = source !in sourcesOff
+
+    fun toggleSource(source: String): ChannelPrefs =
+        copy(sourcesOff = if (source in sourcesOff) sourcesOff - source else sourcesOff + source)
+
+    /** The input list for [arrange]: the channels of the sources that are on, CT first, then Anténa. */
+    fun sourceKeys(ct: List<String>, dvb: List<String>): List<String> =
+        (if (isSourceOn(SOURCE_CT)) ct else emptyList()) + (if (isSourceOn(SOURCE_DVB)) dvb else emptyList())
+
+    /** [channels] = the listed keys in default order (already filtered by [sourceKeys]). */
     fun arrange(channels: List<String>): Arranged {
         val inGroup = channels.toSet()
         val all = LinkedHashSet<String>()
@@ -27,7 +41,7 @@ data class ChannelPrefs(val order: List<String> = emptyList(), val hidden: Set<S
         return Arranged(list, list.filter { it !in hidden })
     }
 
-    /** Swaps [key] with its neighbour ([by] = −1 up, +1 down) within the group; no-op at the edge. */
+    /** Swaps [key] with its neighbour ([by] = −1 up, +1 down) in the list; no-op at the edge. */
     fun move(key: String, by: Int, channels: List<String>): ChannelPrefs {
         val all = arrange(channels).all.toMutableList()
         val i = all.indexOf(key)
@@ -46,11 +60,17 @@ data class ChannelPrefs(val order: List<String> = emptyList(), val hidden: Set<S
         mapOf(
             "order" to JsonArray(order.distinct().take(MAX_KEYS).map(::JsonPrimitive)),
             "hidden" to JsonArray(hidden.take(MAX_KEYS).map(::JsonPrimitive)),
+            "sourcesOff" to JsonArray(sourcesOff.filter { it in SOURCES }.map(::JsonPrimitive)),
         ),
     ).toString()
 
     companion object {
         const val MAX_KEYS = 500
+        const val SOURCE_CT = "ct"
+        const val SOURCE_DVB = "dvb"
+        private val SOURCES = setOf(SOURCE_CT, SOURCE_DVB)
+
+        /** Reset ("Obnovit výchozí pořadí") clears order and hidden and switches both sources on. */
         val DEFAULT = ChannelPrefs()
 
         fun ctKey(channelId: String): String = "ct:$channelId"
@@ -67,7 +87,7 @@ data class ChannelPrefs(val order: List<String> = emptyList(), val hidden: Set<S
             }
             fun keys(name: String): List<String> =
                 (root[name] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.take(MAX_KEYS)
-            return ChannelPrefs(keys("order"), keys("hidden").toSet())
+            return ChannelPrefs(keys("order"), keys("hidden").toSet(), keys("sourcesOff").filter { it in SOURCES }.toSet())
         }
     }
 }

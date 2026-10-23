@@ -21,6 +21,15 @@ public struct URLSessionTransport: HTTPTransport {
         self.session = session
     }
 
+    /// No URLCache, no cookies, nothing on disk: for derived images that must stay in memory
+    /// (Anténa thumbnails, spec/dvb-gateway.md).
+    public static func memoryOnly() -> URLSessionTransport {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSessionTransport(session: URLSession(configuration: configuration))
+    }
+
     public func send(_ request: URLRequest) async throws -> HTTPResponse {
         let (data, response) = try await session.data(for: request)
         return HTTPResponse(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)

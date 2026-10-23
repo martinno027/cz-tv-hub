@@ -59,6 +59,28 @@ class DvbTest {
         assertTrue(status.retentionDays in 1..14)
     }
 
+    @Test fun statusThumbnailsFlag() {
+        val on = DvbParser.parseStatus(200, """{"enabled": true, "retentionDays": 3, "tuners": [], "tvheadendReachable": true, "thumbnails": true}""")
+        assertTrue(on.thumbnails)
+        val off = DvbParser.parseStatus(200, """{"enabled": true, "retentionDays": 3, "tuners": [], "thumbnails": false}""")
+        assertFalse(off.thumbnails)
+        // older gateways without the field: no thumbnails
+        assertFalse(client("/dvb/status" to "dvb_status.json").status().thumbnails)
+    }
+
+    @Test fun thumbnailOnlyForRecordedEventsWhenBothAllow() {
+        fun event(state: RecordingState?) = DvbEvent("e", ct1, "t", captured, captured.plusSeconds(1800),
+            recording = state?.let { DvbRecording("rec-${it.name}", it) })
+        assertEquals("rec-COMPLETED", DvbThumbnails.recordingId(event(RecordingState.COMPLETED), true, true))
+        assertEquals("rec-RECORDING", DvbThumbnails.recordingId(event(RecordingState.RECORDING), true, true))
+        assertNull(DvbThumbnails.recordingId(event(RecordingState.SCHEDULED), true, true))
+        assertNull(DvbThumbnails.recordingId(event(RecordingState.FAILED), true, true))
+        assertNull(DvbThumbnails.recordingId(event(null), true, true))
+        assertNull(DvbThumbnails.recordingId(event(RecordingState.COMPLETED), false, true))
+        assertNull(DvbThumbnails.recordingId(event(RecordingState.COMPLETED), true, false))
+        assertEquals("http://10.0.2.2:8098/dvb/recording/abc/thumb.jpg", DvbClient(config).thumbnailUrl("abc"))
+    }
+
     @Test fun epgParsesRecordingStatesAndOpaqueIds() {
         val events = client("/dvb/epg?date=2026-10-18" to "dvb_epg_today.json").epg(LocalDate.of(2026, 10, 18))
         assertTrue(events.size > 100)

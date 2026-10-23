@@ -32,7 +32,24 @@ data class DvbStatus(
     val retentionDays: Int,
     val tuners: List<DvbTuner>,
     val tvheadendReachable: Boolean,
+    /** The household allows programme thumbnails (`/admin` "Náhledy pořadů"; spec/dvb-gateway.md "Thumbnails"). */
+    val thumbnails: Boolean = false,
 )
+
+/**
+ * "Anténa thumbnails" (spec/apps.md, approved 2026-10-23): the recording whose still the guide detail may show, or
+ * null. Only for completed or still-recording events, and only when both the gateway and this TV allow it.
+ */
+object DvbThumbnails {
+    fun recordingId(event: DvbEvent, gatewayAllows: Boolean, tvAllows: Boolean): String? {
+        if (!gatewayAllows || !tvAllows) return null
+        val recording = event.recording ?: return null
+        return when (recording.state) {
+            RecordingState.COMPLETED, RecordingState.RECORDING -> recording.id
+            RecordingState.SCHEDULED, RecordingState.FAILED -> null
+        }
+    }
+}
 
 object DvbMessages {
     const val UNREACHABLE = "Brána antény není dostupná"

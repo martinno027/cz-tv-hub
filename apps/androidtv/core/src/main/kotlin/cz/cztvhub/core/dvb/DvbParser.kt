@@ -51,6 +51,7 @@ object DvbParser {
             retentionDays = root.str("retentionDays")?.toIntOrNull() ?: 0,
             tuners = tuners,
             tvheadendReachable = root.str("tvheadendReachable") == "true",
+            thumbnails = root.str("thumbnails") == "true",
         )
     }
 

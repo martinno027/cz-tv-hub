@@ -7,6 +7,8 @@ Developer Mode. Without the CLI it stops after the copy and prints what to do.
 
 ``--gateway``/``--key-file`` preset the "Anténa" gateway in the build only (``js/local-config.js``),
 so the 43-character key does not have to be typed with the remote. The preset never enters git.
+Every build also gets ``js/build-info.js`` (version, build number = git commit count, short commit, build
+time) for the version line in Nastavení (spec/apps.md); it is not in git either.
 """
 from __future__ import annotations
 
@@ -14,9 +16,12 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 APP_DIR = ROOT / "apps" / "tizen" / "app"
@@ -44,12 +49,39 @@ def local_config(gateway: str, key: str) -> str:
     return "window.CT_LOCAL_CONFIG = " + json.dumps(preset) + ";\n"
 
 
+def _git(*args: str) -> str:
+    try:
+        return subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
+
+def build_info(now: datetime | None = None) -> dict:
+    """Version (config.xml), build number (git commit count), short commit (+ = uncommitted changes), build time."""
+    match = re.search(r'<widget[^>]*\sversion="([^"]+)"', (APP_DIR / "config.xml").read_text(encoding="utf-8"))
+    commit = _git("rev-parse", "--short", "HEAD") or "?"
+    if commit != "?" and _git("status", "--porcelain"):
+        commit += "+"
+    moment = (now or datetime.now(ZoneInfo("Europe/Prague"))).astimezone(ZoneInfo("Europe/Prague"))
+    return {
+        "version": match.group(1) if match else "?",
+        "build": _git("rev-list", "--count", "HEAD") or "?",
+        "commit": commit,
+        "time": f"{moment.day}. {moment.month}. {moment:%H:%M}",
+    }
+
+
+def build_info_script(info: dict) -> str:
+    return "window.CT_BUILD_INFO = " + json.dumps(info, ensure_ascii=False) + ";\n"
+
+
 def stage(out_dir: pathlib.Path, gateway: str | None = None, key: str | None = None) -> pathlib.Path:
-    """Copy the app into ``out_dir/Televize`` (fresh), with the optional gateway preset."""
+    """Copy the app into ``out_dir/Televize`` (fresh), with the build info and the optional gateway preset."""
     target = out_dir / "Televize"
     if target.exists():
         shutil.rmtree(target)
-    shutil.copytree(APP_DIR, target, ignore=shutil.ignore_patterns(".*", "local-config.js"))
+    shutil.copytree(APP_DIR, target, ignore=shutil.ignore_patterns(".*", "local-config.js", "build-info.js"))
+    (target / "js" / "build-info.js").write_text(build_info_script(build_info()), encoding="utf-8")
     if gateway and key:
         (target / "js" / "local-config.js").write_text(local_config(gateway, key), encoding="utf-8")
     return target

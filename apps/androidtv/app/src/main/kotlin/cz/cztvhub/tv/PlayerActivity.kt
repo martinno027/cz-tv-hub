@@ -27,6 +27,7 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.ui.PlayerView
@@ -155,7 +156,17 @@ class PlayerActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         if (!::request.isInitialized) return
-        val exo = ExoPlayer.Builder(this).build().apply {
+        // Start (or restart after a seek) once ~1 s is buffered instead of the default 2.5 s: live
+        // channels begin sooner; after a stall the default (5 s) still applies.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                START_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+            )
+            .build()
+        val exo = ExoPlayer.Builder(this).setLoadControl(loadControl).build().apply {
             trackSelectionParameters = trackSelectionParameters.buildUpon()
                 .setPreferredAudioLanguage("cs")
                 .setPreferredAudioRoleFlags(C.ROLE_FLAG_MAIN)
@@ -452,6 +463,7 @@ class PlayerActivity : ComponentActivity() {
         const val SKIP_CHECK_MS = 500L
         const val SAVE_INTERVAL_MS = 10_000L
         const val HTTP_TIMEOUT_MS = 20_000
+        const val START_BUFFER_MS = 1_000
         const val RE_RESOLVE_COOLDOWN_MS = 5 * 60 * 1000L
         const val LIVE_EDGE_GUARD_MS = 10_000L
     }

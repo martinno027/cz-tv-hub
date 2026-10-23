@@ -5,8 +5,18 @@ enum ChannelPrefsUI {
     static let allHiddenMessage = "Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály."
 }
 
+/// Where a channel comes from: internet (CT) or the household's antenna (spec/apps.md "Source icon").
+struct SourceIcon: View {
+    let source: ChannelPrefs.Source
+
+    var body: some View {
+        Image(systemName: source == .ct ? "globe" : "antenna.radiowaves.left.and.right")
+            .accessibilityLabel(source == .ct ? "internet" : "anténa")
+    }
+}
+
 /// Nastavení → Kanály (its own section, see SettingsView): hide and reorder channels on this TV (spec/apps.md "Kanály").
-/// One list per group; each row is `[☑ name] [▲] [▼]`.
+/// Source switches first, then one mixed list; each row is `[icon ☑ name] [▲] [▼]`.
 struct ChannelSettingsSection: View {
     @Environment(AppModel.self) private var model
     @State private var antennaChannels: [DVBChannel] = []
@@ -20,6 +30,7 @@ struct ChannelSettingsSection: View {
     private struct Item: Identifiable {
         let id: String  // ChannelPrefs key
         let name: String
+        let source: ChannelPrefs.Source
     }
 
     var body: some View {
@@ -32,18 +43,25 @@ struct ChannelSettingsSection: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-            if model.antenna != nil { groupTitle("Internet ČT") }
-            list(prefs.internet().all.map { Item(id: ChannelPrefs.ctKey($0), name: $0.name) }, proxy: proxy)
+            VStack(alignment: .leading, spacing: 12) {
+                sourceSwitch(.ct, title: "Internetová TV (ČT)")
+                if model.antenna != nil { sourceSwitch(.dvb, title: "Anténa") }
+            }
+            .focusSection()
 
-            if model.antenna != nil {
-                groupTitle("Anténa")
+            groupTitle("Pořadí kanálů")
+            if model.antenna != nil, prefs.prefs.isOn(.dvb) {
                 if let antennaError {
                     Text(antennaError).font(.callout).foregroundStyle(.secondary)
                 } else if antennaChannels.isEmpty {
                     Text("Načítám kanály antény…").font(.callout).foregroundStyle(.secondary)
                 }
-                list(prefs.antenna(antennaChannels).all.map { Item(id: ChannelPrefs.dvbKey($0), name: $0.name) }, proxy: proxy)
             }
+            let items = prefs.channels(antenna: antennaChannels).all.map { Item(id: $0.key, name: $0.name, source: $0.source) }
+            if items.isEmpty {
+                Text("Žádný zdroj není zapnutý.").font(.callout).foregroundStyle(.secondary)
+            }
+            list(items, proxy: proxy)
 
             Button("Obnovit výchozí pořadí") {
                 prefs.update { $0.reset() }
@@ -56,6 +74,22 @@ struct ChannelSettingsSection: View {
         }
         }
         .task(id: model.gateway) { await loadAntenna() }
+    }
+
+    /// Switches a whole source (all CT internet / all Anténa channels) on or off.
+    private func sourceSwitch(_ source: ChannelPrefs.Source, title: String) -> some View {
+        let isOn = model.channelPrefs.prefs.isOn(source)
+        return Button {
+            model.channelPrefs.update { $0.setOn(source, !isOn) }
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                SourceIcon(source: source)
+                Text(title)
+            }
+            .frame(width: 560, alignment: .leading)
+        }
+        .accessibilityValue(isOn ? "zapnuto" : "vypnuto")
     }
 
     private func groupTitle(_ text: String) -> some View {
@@ -71,9 +105,15 @@ struct ChannelSettingsSection: View {
                     Button {
                         model.channelPrefs.update { $0.toggleHidden(item.id) }
                     } label: {
-                        Label(item.name, systemImage: hidden ? "square" : "checkmark.square.fill")
-                            .frame(width: 560, alignment: .leading)
-                            .opacity(hidden ? 0.5 : 1)
+                        HStack(spacing: 16) {
+                            Image(systemName: hidden ? "square" : "checkmark.square.fill")
+                            SourceIcon(source: item.source)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 34)
+                            Text(item.name)
+                        }
+                        .frame(width: 560, alignment: .leading)
+                        .opacity(hidden ? 0.5 : 1)
                     }
                     .focused($focused, equals: .toggle(item.id))
                     .accessibilityValue(hidden ? "skrytý" : "zobrazený")

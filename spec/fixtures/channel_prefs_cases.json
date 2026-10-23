@@ -146,6 +146,64 @@
     "dvb:b"
    ],
    "visible": []
+  },
+  {
+   "name": "mixed list: Anténa channel between CT ones",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "dvb:a",
+    "dvb:b"
+   ],
+   "prefs": {
+    "order": [
+     "ct:CH_1",
+     "dvb:b",
+     "ct:CH_2"
+    ],
+    "hidden": [
+     "dvb:a"
+    ]
+   },
+   "all": [
+    "ct:CH_1",
+    "dvb:b",
+    "ct:CH_2",
+    "dvb:a"
+   ],
+   "visible": [
+    "ct:CH_1",
+    "dvb:b",
+    "ct:CH_2"
+   ]
+  },
+  {
+   "name": "source off: its channels are not in the input, their keys stay stored",
+   "channels": [
+    "ct:CH_1",
+    "ct:CH_2"
+   ],
+   "prefs": {
+    "order": [
+     "dvb:b",
+     "ct:CH_2",
+     "ct:CH_1"
+    ],
+    "hidden": [
+     "dvb:a"
+    ],
+    "sourcesOff": [
+     "dvb"
+    ]
+   },
+   "all": [
+    "ct:CH_2",
+    "ct:CH_1"
+   ],
+   "visible": [
+    "ct:CH_2",
+    "ct:CH_1"
+   ]
   }
  ],
  "move": [
@@ -264,6 +322,25 @@
    "key": "ct:CH_9",
    "by": 1,
    "order": [
+    "ct:CH_2"
+   ]
+  },
+  {
+   "name": "move a CT channel past an Anténa one",
+   "channels": [
+    "ct:CH_1",
+    "dvb:a",
+    "ct:CH_2"
+   ],
+   "prefs": {
+    "order": [],
+    "hidden": []
+   },
+   "key": "ct:CH_1",
+   "by": 1,
+   "order": [
+    "dvb:a",
+    "ct:CH_1",
     "ct:CH_2"
    ]
   }

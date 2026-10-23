@@ -5,19 +5,29 @@ import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Channels
 import cz.cztvhub.core.dvb.DvbChannel
 
-/** "Kanály" applied to the two groups: what Živě and the guide show, in the viewer's order. */
+/** A channel of the mixed list: a CT internet channel ([ct]) or an Anténa channel ([dvb]). */
+data class ListedChannel(val key: String, val name: String, val ct: Channel? = null, val dvb: DvbChannel? = null) {
+    val isAntenna: Boolean get() = dvb != null
+}
+
+/**
+ * "Kanály" applied (spec/apps.md): one list mixing CT internet and Anténa channels in the viewer's order, without
+ * the channels of a source that is switched off. Živě and the guide show [visible], the settings list [all].
+ */
 object ChannelOrder {
-    val ctKeys: List<String> get() = Channels.all.map { ChannelPrefs.ctKey(it.id) }
+    /** The input list for [ChannelPrefs.arrange] and [ChannelPrefs.move]: sources that are on, CT first. */
+    fun keys(prefs: ChannelPrefs, dvbChannels: List<DvbChannel>): List<String> =
+        prefs.sourceKeys(Channels.all.map { ChannelPrefs.ctKey(it.id) }, dvbChannels.map { ChannelPrefs.dvbKey(it.id) })
 
-    fun dvbKeys(channels: List<DvbChannel>): List<String> = channels.map { ChannelPrefs.dvbKey(it.id) }
+    fun all(prefs: ChannelPrefs, dvbChannels: List<DvbChannel>): List<ListedChannel> =
+        listed(prefs.arrange(keys(prefs, dvbChannels)).all, dvbChannels)
 
-    fun visibleCt(prefs: ChannelPrefs): List<Channel> {
-        val byKey = Channels.all.associateBy { ChannelPrefs.ctKey(it.id) }
-        return prefs.arrange(ctKeys).visible.mapNotNull(byKey::get)
-    }
+    fun visible(prefs: ChannelPrefs, dvbChannels: List<DvbChannel>): List<ListedChannel> =
+        listed(prefs.arrange(keys(prefs, dvbChannels)).visible, dvbChannels)
 
-    fun visibleDvb(prefs: ChannelPrefs, channels: List<DvbChannel>): List<DvbChannel> {
-        val byKey = channels.associateBy { ChannelPrefs.dvbKey(it.id) }
-        return prefs.arrange(dvbKeys(channels)).visible.mapNotNull(byKey::get)
+    private fun listed(keys: List<String>, dvbChannels: List<DvbChannel>): List<ListedChannel> {
+        val byKey = Channels.all.associate { ChannelPrefs.ctKey(it.id) to ListedChannel(ChannelPrefs.ctKey(it.id), it.name, ct = it) } +
+            dvbChannels.associate { ChannelPrefs.dvbKey(it.id) to ListedChannel(ChannelPrefs.dvbKey(it.id), it.name, dvb = it) }
+        return keys.mapNotNull(byKey::get)
     }
 }

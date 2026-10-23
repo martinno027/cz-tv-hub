@@ -26,6 +26,9 @@ class TvApp : Application() {
     /** "Kanály": hidden channels and their order, on this device only. */
     val channelPrefs by lazy { ChannelPrefsStore(this) }
 
+    /** "Náhledy anténních pořadů": this TV's own switch for gateway thumbnails. */
+    val thumbnailPrefs by lazy { ThumbnailPrefs(this) }
+
     private var dvbRepository: DvbRepository? = null
 
     /** Repository for the configured gateway, or null when "Anténa" is not set up. */

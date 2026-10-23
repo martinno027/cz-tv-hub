@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -30,7 +31,7 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
-import cz.cztvhub.core.Channels
+import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.Timed
@@ -41,7 +42,10 @@ import java.time.Instant
 /** Title and time span of what a card shows. */
 private data class CardItem(val title: String, val span: Timed)
 
-/** "Živě": the CT channels with the programme on air now, then the "Anténa" group if set up; "Kanály" applied. */
+/**
+ * "Živě": one list mixing CT internet and Anténa channels in the viewer's order ("Kanály", spec/apps.md), each
+ * card with its source icon and the programme on air now.
+ */
 @Composable
 fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val onAir by viewModel.onAir.collectAsStateWithLifecycle()
@@ -52,14 +56,12 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val firstCard = remember { FocusRequester() }
     val antenna = dvb
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
-    val ctChannels = ChannelOrder.visibleCt(prefs)
-    val dvbChannels = antenna?.let { ChannelOrder.visibleDvb(prefs, it.channels) }.orEmpty()
-    // The very first card of the screen takes the initial focus, whichever group it is in.
-    var firstTaken = false
-    fun firstModifier(modifier: Modifier): Modifier =
-        if (firstTaken) modifier else modifier.focusRequester(firstCard).also { firstTaken = true }
+    val channels = ChannelOrder.visible(prefs, antenna?.channels.orEmpty())
+    // Anténa switched on but the gateway has not answered yet: not "everything hidden".
+    val antennaPending = antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
+        antenna.channels.isEmpty() && antenna.error == null
 
-    if (ctChannels.isEmpty() && (antenna == null || (antenna.channels.isNotEmpty() && dvbChannels.isEmpty()))) {
+    if (channels.isEmpty() && !antennaPending) {
         CenteredMessage(stringResource(R.string.channels_all_hidden))
         return
     }
@@ -68,48 +70,44 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        if (ctChannels.isNotEmpty()) {
-            if (antenna != null) GroupTitle(stringResource(R.string.group_internet))
-            ctChannels.chunked(3).forEach { row ->
-                CardRow {
-                    row.forEach { channel ->
-                        val info = current[channel.id]
+        if (antenna?.error != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)) {
+            Text(stringResource(R.string.antenna_unavailable, antenna.error), color = Palette.nowLine)
+        }
+        channels.chunked(3).forEachIndexed { rowIndex, row ->
+            CardRow {
+                row.forEachIndexed { index, channel ->
+                    // The very first card takes the initial focus.
+                    val base = Modifier.weight(1f).fillMaxHeight()
+                    val modifier = if (rowIndex == 0 && index == 0) base.focusRequester(firstCard) else base
+                    val ct = channel.ct
+                    val dvbChannel = channel.dvb
+                    if (ct != null) {
+                        val info = current[ct.id]
                         ChannelCard(
-                            name = channel.name,
+                            name = ct.name,
+                            antenna = false,
                             current = info?.current?.let { CardItem(it.title, it) },
                             next = info?.next?.let { CardItem(it.title, it) },
                             emptyText = stringResource(if (loading) R.string.loading else R.string.no_programme_info),
                             now = now,
-                            modifier = firstModifier(Modifier.weight(1f).fillMaxHeight()),
-                            onClick = { onPlay(PlayRequest.Live(channel.id, channel.name)) },
+                            modifier = modifier,
+                            onClick = { onPlay(PlayRequest.Live(ct.id, ct.name)) },
                         )
-                    }
-                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                }
-            }
-        }
-        // A group whose channels are all hidden is left out; a gateway that has not answered yet still shows.
-        if (antenna != null && (dvbChannels.isNotEmpty() || antenna.channels.isEmpty())) {
-            GroupTitle(stringResource(R.string.group_antenna))
-            antenna.error?.let {
-                Text(stringResource(R.string.antenna_unavailable, it), color = Palette.nowLine)
-            }
-            dvbChannels.chunked(3).forEach { row ->
-                CardRow {
-                    row.forEach { channel ->
-                        val info = antenna.onAir[channel.id]
+                    } else if (dvbChannel != null) {
+                        val info = antenna?.onAir?.get(dvbChannel.id)
                         ChannelCard(
-                            name = channel.name,
+                            name = dvbChannel.name,
+                            antenna = true,
                             current = info?.current?.let { CardItem(it.title, it) },
                             next = info?.next?.let { CardItem(it.title, it) },
                             emptyText = stringResource(R.string.no_programme_info),
                             now = now,
-                            modifier = firstModifier(Modifier.weight(1f).fillMaxHeight()),
-                            onClick = { onPlay(PlayRequest.DvbLive(channel.id, channel.name)) },
+                            modifier = modifier,
+                            onClick = { onPlay(PlayRequest.DvbLive(dvbChannel.id, dvbChannel.name)) },
                         )
                     }
-                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -123,11 +121,6 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
 }
 
 @Composable
-private fun GroupTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleLarge, color = Palette.textDim)
-}
-
-@Composable
 private fun CardRow(content: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth().height(200.dp), horizontalArrangement = Arrangement.spacedBy(20.dp), content = content)
 }
@@ -135,6 +128,7 @@ private fun CardRow(content: @Composable RowScope.() -> Unit) {
 @Composable
 private fun ChannelCard(
     name: String,
+    antenna: Boolean,
     current: CardItem?,
     next: CardItem?,
     emptyText: String,
@@ -155,7 +149,10 @@ private fun ChannelCard(
         ),
     ) {
         Column(Modifier.fillMaxSize().padding(20.dp)) {
-            Text(name, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SourceIcon(antenna, size = 26.dp)
+                Text(name, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             Spacer(Modifier.height(8.dp))
             if (current == null) {
                 Text(emptyText, style = MaterialTheme.typography.bodyLarge)

@@ -149,6 +149,34 @@ main {
   font-size: 34px;
   font-weight: 700;
   margin-bottom: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Where a channel comes from: globe = internet (ČT), antenna = Anténa (DVB-T2) */
+.source-icon {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.3em;
+  vertical-align: -0.06em;
+  color: var(--muted);
+}
+
+.source-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.focused .source-icon {
+  color: inherit;
 }
 
 .card-title {
@@ -226,6 +254,19 @@ main {
   border-radius: 10px;
   background: var(--surface) center / cover no-repeat;
   flex: none;
+}
+
+#detail-image.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+#detail-image.placeholder .source-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0;
 }
 
 #detail-text {
@@ -307,6 +348,9 @@ main {
 }
 
 .row {
+  /* placed by top (guide.js): only rows near the screen exist */
+  position: absolute;
+  left: 0;
   display: flex;
   height: 76px;
 }
@@ -466,6 +510,21 @@ main {
   color: #000;
 }
 
+/* Nastavení → Server: "Náhledy anténních pořadů" (this TV only) */
+.setting-toggle {
+  display: inline-block;
+  font-size: 28px;
+  margin-top: 24px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  background: var(--surface-hi);
+}
+
+.setting-toggle.focused {
+  background: var(--focus);
+  color: #000;
+}
+
 #screen-settings {
   overflow: hidden;
 }
@@ -473,6 +532,12 @@ main {
 /* Nastavení: a choice of two sections (Kanály, Server); the chosen one opens full screen */
 #set-choice {
   margin-top: 40px;
+}
+
+#version-line {
+  font-size: 22px;
+  color: var(--muted);
+  margin-bottom: 24px;
 }
 
 .choice {
@@ -536,7 +601,7 @@ main {
   margin-top: 8px;
 }
 
-/* Nastavení → Kanály: rows [☑ name] [▲] [▼] */
+/* Nastavení → Kanály: source switches, then one mixed list of rows [☑ icon name] [▲] [▼] */
 .ch-group {
   font-size: 26px;
   color: var(--muted);
@@ -565,6 +630,14 @@ main {
 .ch-row.off .ch-name {
   color: var(--muted);
   text-decoration: line-through;
+}
+
+.ch-source .ch-name {
+  font-weight: 700;
+}
+
+.ch-row.ch-source.off .ch-name {
+  text-decoration: none;
 }
 
 .ch-btn {

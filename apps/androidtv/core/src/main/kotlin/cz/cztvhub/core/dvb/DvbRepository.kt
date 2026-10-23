@@ -14,6 +14,7 @@ class DvbRepository(
     private val freshFor: Duration = Duration.ofMinutes(5),
 ) {
     private var channels: Pair<Instant, List<DvbChannel>>? = null
+    private var status: Pair<Instant, DvbStatus>? = null
     private val days = HashMap<LocalDate, Pair<Instant, Map<String, List<DvbEvent>>>>()
 
     @Synchronized
@@ -21,6 +22,14 @@ class DvbRepository(
         val now = clock()
         channels?.let { (at, list) -> if (Duration.between(at, now) < Duration.ofHours(1)) return list }
         return client.channels().also { channels = now to it }
+    }
+
+    /** Gateway status, refreshed every 5 minutes (the household switches change rarely). */
+    @Synchronized
+    fun status(): DvbStatus {
+        val now = clock()
+        status?.let { (at, value) -> if (Duration.between(at, now) < freshFor) return value }
+        return client.status().also { status = now to it }
     }
 
     /** Events of [day] keyed by channel id, sorted by start, de-duplicated by id. */

@@ -140,7 +140,9 @@
         tuners: J.arr(root, 'tuners').filter(isObject).map(function (t) {
           return { name: J.str(t, 'name') || '', inUse: J.bool(t, 'inUse') };
         }),
-        tvheadendReachable: J.bool(root, 'tvheadendReachable')
+        tvheadendReachable: J.bool(root, 'tvheadendReachable'),
+        // gateway switch for programme thumbnails (spec/dvb-gateway.md "Thumbnails"); missing = off
+        thumbnails: J.bool(root, 'thumbnails')
       };
     },
 

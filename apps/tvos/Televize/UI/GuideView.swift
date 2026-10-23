@@ -1,5 +1,6 @@
 import CTCore
 import SwiftUI
+import UIKit
 
 /// One guide cell: a CT internet programme or an "Anténa" (DVB-T2) event.
 enum GuideEntry: Identifiable, TimedItem {
@@ -54,6 +55,7 @@ enum GuideEntry: Identifiable, TimedItem {
 private struct GuideRow: Identifiable {
     let id: String
     let name: String
+    let source: ChannelPrefs.Source
     let entries: [GuideEntry]
 }
 
@@ -67,8 +69,30 @@ private struct GuideLayout {
     var entries: [String: GuideEntry] = [:]
     /// Row index of every focusable cell id (programmes and "Mimo vysílání" gaps).
     var rowOf: [String: Int] = [:]
+    /// Segment index of every focusable cell id within its row.
+    var segmentOf: [String: Int] = [:]
+    /// x of each segment's leading edge, per row (`segments` start at the timeline's start).
+    var starts: [[Double]] = []
+
+    /// Horizontal extent of a focusable cell.
+    func span(of id: String) -> (row: Int, from: Double, to: Double)? {
+        guard let row = rowOf[id], let index = segmentOf[id] else { return nil }
+        let from = starts[row][index]
+        return (row, from, from + Self.width(segments[row][index]))
+    }
+
+    static func width(_ segment: GuideTimeline.Segment<GuideEntry>) -> Double {
+        switch segment {
+        case .gap(let width): return width
+        case .item(_, let width): return width
+        }
+    }
 
     static func gapID(row: GuideRow, index: Int) -> String { "gap|\(row.id)|\(index)" }
+
+    /// "Across days": the focusable "‹ Včera" / "Zítra ›" cell before the first / after the last cell of a row.
+    static let dayEdgeWidth: Double = 170
+    static func edgeID(next: Bool, rowID: String) -> String { "\(next ? "next" : "prev")|\(rowID)" }
 
     /// Focus id of the cell under the now line in `row` ("Live column first", spec/apps.md).
     func cellID(row: Int, at date: Date) -> String? {
@@ -83,15 +107,44 @@ private struct GuideLayout {
 }
 
 /// "TV průvodce": EPG grid with channels as rows and time on the horizontal axis.
-/// CT internet channels first, then the "Anténa" channels when a gateway is configured; both in the
-/// order and with the channels hidden in Nastavení → Kanály (`ChannelPrefs`).
+/// One mixed list of CT internet and "Anténa" channels in this TV's order, without hidden channels and
+/// switched-off sources (Nastavení → Kanály, `ChannelPrefs`).
 struct GuideView: View {
     nonisolated static let pointsPerSecond = 0.21  // ~2 h visible
-    static let channelColumnWidth: CGFloat = 190
+    static let channelColumnWidth: CGFloat = 220
     static let headerHeight: CGFloat = 44
     static let rowHeight: CGFloat = 80
     static let rowSpacing: CGFloat = 8
     nonisolated static let minFocusableGap: CGFloat = 60
+
+    /// The part of the grid that is actually built (rows × x range in points). Building every cell of
+    /// a day for dozens of Anténa channels (thousands of buttons) made a real Apple TV lag by a minute;
+    /// the rest is empty space of the same size, so scrolling and positions are unchanged.
+    fileprivate struct Window: Equatable {
+        var rows: Range<Int> = 0..<0
+        var x: Range<Double> = 0..<0
+
+        // ~7 rows and ~2 h are on screen; a little more around them is enough to move into.
+        // Rows are cheap to add per press; time needs a wider margin (long programmes, quick presses):
+        // the next cell must already exist, else tvOS moves focus into another row.
+        static let rowsBefore = 5, rowsAfter = 10, rowMargin = 3
+        static let before: Double = 3 * 3600 * GuideView.pointsPerSecond
+        static let after: Double = 5 * 3600 * GuideView.pointsPerSecond
+        static let margin: Double = 2 * 3600 * GuideView.pointsPerSecond
+
+        static func around(row: Int, from: Double, to: Double, rowCount: Int) -> Window {
+            Window(rows: max(0, row - rowsBefore)..<min(rowCount, row + rowsAfter + 1),
+                   x: max(0, from - before)..<(to + after))
+        }
+
+        /// Still fine for a focused cell: enough rows and time around it to move into.
+        func covers(row: Int, from: Double, to: Double, rowCount: Int) -> Bool {
+            let top = rows.lowerBound == 0 || row >= rows.lowerBound + Self.rowMargin
+            let bottom = rows.upperBound == rowCount || row < rows.upperBound - Self.rowMargin
+            let left = x.lowerBound == 0 || from >= x.lowerBound + Self.margin
+            return top && bottom && left && to <= x.upperBound - Self.margin
+        }
+    }
 
     fileprivate struct ScrollRequest: Equatable {
         let id = UUID()
@@ -107,6 +160,7 @@ struct GuideView: View {
     @State private var antennaEPG: AntennaStore.EPG = [:]
     @State private var loadError: String?
     @State private var layout = GuideLayout()
+    @State private var window = Window()
     @State private var focusedEntry: GuideEntry?
     /// "Live column first": up/down follows what is airing until the first left/right (today only).
     @State private var liveColumn = false
@@ -116,6 +170,14 @@ struct GuideView: View {
     @State private var scrollRequest: ScrollRequest?
     @State private var choice: Choice?
     @FocusState private var focusedID: String?
+    /// "Across days": where focus goes once the next/previous day is loaded.
+    @State private var dayAnchor: DayAnchor?
+
+    private struct DayAnchor {
+        let rowID: String
+        /// Left past the first cell: land on the row's cell at the new day's end, else at its start.
+        let atEnd: Bool
+    }
 
     /// The "Pokračovat / Od začátku / Živě" choice for a selected programme.
     private struct Choice {
@@ -146,8 +208,11 @@ struct GuideView: View {
         .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
         .onChange(of: focusedID) { old, id in
             guard let id else { return }
+            if crossDay(from: old, to: id) { return }
             followLiveColumn(from: old, to: id)
-            focusedEntry = layout.entries[focusedID ?? id]
+            let current = focusedID ?? id
+            focusedEntry = layout.entries[current]
+            keepWindow(around: current)
         }
         .confirmationDialog(
             choice?.entry.title ?? "",
@@ -191,36 +256,52 @@ struct GuideView: View {
     }
 
     private func buildRows() -> [GuideRow] {
-        let prefs = model.channelPrefs
-        let ct = prefs.internet().visible.map { channel in
-            GuideRow(id: channel.slug, name: channel.name, entries: (schedule[channel.slug] ?? []).map(GuideEntry.ct))
+        model.channelPrefs.channels(antenna: antennaChannels).visible.map { channel in
+            switch channel {
+            case .ct(let ct):
+                return GuideRow(id: ct.slug, name: ct.name, source: .ct,
+                                entries: (schedule[ct.slug] ?? []).map(GuideEntry.ct))
+            case .antenna(let dvb):
+                return GuideRow(id: "dvb|\(dvb.id)", name: dvb.name, source: .dvb,
+                                entries: (antennaEPG[dvb.id] ?? []).map { GuideEntry.antenna($0, dvb) })
+            }
         }
-        let antenna = prefs.antenna(antennaChannels).visible.map { channel in
-            GuideRow(id: "dvb|\(channel.id)", name: channel.name,
-                     entries: (antennaEPG[channel.id] ?? []).map { GuideEntry.antenna($0, channel) })
-        }
-        return ct + antenna
     }
 
     /// Version 0 = nothing loaded yet: the grid stays mounted (empty) until then, so focus lands on
     /// the anchor cell instead of wherever a re-created grid puts it.
     private func rebuildLayout() {
         let rows = buildRows()
-        let timeline = GuideTimeline(spans: rows.flatMap(\.entries), fallbackDay: day, pointsPerSecond: Self.pointsPerSecond)
+        // Exactly the broadcast day (05:00–05:00): programmes crossing its edges are clipped, and the next or
+        // previous day is reached by "Across days", so the day strip always matches what the grid shows.
+        let bounds = Self.bounds(of: day)
+        let timeline = GuideTimeline(start: bounds.start, end: bounds.end, pointsPerSecond: Self.pointsPerSecond)
         let segments = rows.map { timeline.segments(for: $0.entries, splitGapsAtTicks: true) }
         var entries: [String: GuideEntry] = [:]
         var rowOf: [String: Int] = [:]
+        var segmentOf: [String: Int] = [:]
+        var starts: [[Double]] = []
         for (index, row) in rows.enumerated() {
-            for entry in row.entries {
-                entries[entry.id] = entry
-                rowOf[entry.id] = index
+            var x = 0.0
+            var rowStarts: [Double] = []
+            for (position, segment) in segments[index].enumerated() {
+                rowStarts.append(x)
+                x += GuideLayout.width(segment)
+                let id: String
+                switch segment {
+                case .item(let entry, _):
+                    entries[entry.id] = entry
+                    id = entry.id
+                case .gap:
+                    id = GuideLayout.gapID(row: row, index: position)
+                }
+                rowOf[id] = index
+                segmentOf[id] = position
             }
-            for (gap, segment) in segments[index].enumerated() {
-                if case .gap = segment { rowOf[GuideLayout.gapID(row: row, index: gap)] = index }
-            }
+            starts.append(rowStarts)
         }
         layout = GuideLayout(version: layout.version + 1, rows: rows, timeline: timeline, segments: segments,
-                             entries: entries, rowOf: rowOf)
+                             entries: entries, rowOf: rowOf, segmentOf: segmentOf, starts: starts)
     }
 
     // MARK: grid
@@ -233,7 +314,8 @@ struct GuideView: View {
                     Button("Zkusit znovu") { Task { await load() } }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if layout.version > 0, layout.rows.isEmpty, model.antenna == nil || !antennaChannels.isEmpty {
+            } else if layout.version > 0, layout.rows.isEmpty,
+                      model.antenna == nil || !antennaChannels.isEmpty || !model.channelPrefs.prefs.isOn(.dvb) {
                 // every channel hidden in Nastavení → Kanály
                 Text(ChannelPrefsUI.allHiddenMessage)
                     .font(.headline)
@@ -241,8 +323,9 @@ struct GuideView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Equatable: a focus move re-renders GuideView (detail), not the thousands of cells.
-                GuideGrid(layout: layout, now: now, focusedID: $focusedID, defaultFocusID: defaultFocusID,
-                          scrollRequest: scrollRequest, select: select)
+                GuideGrid(layout: layout, window: window, now: now, focusedID: $focusedID, defaultFocusID: defaultFocusID,
+                          scrollRequest: scrollRequest, previousDay: edgeLabel(next: false),
+                          nextDay: edgeLabel(next: true), select: select)
                     .equatable()
             }
         }
@@ -268,6 +351,7 @@ struct GuideView: View {
         today = BroadcastDay(containing: now)
         loadError = nil
         await loadAntenna()
+        await model.thumbnails.refreshStatus()  // at most every 5 min
         do {
             let loaded = try await model.schedules.schedule(for: day)
             schedule = loaded
@@ -277,6 +361,7 @@ struct GuideView: View {
             return
         } catch {
             schedule = [:]
+            dayAnchor = nil
             rebuildLayout()
             loadError = AppModel.message(for: error)
         }
@@ -295,25 +380,93 @@ struct GuideView: View {
 
     /// Scroll to now (today) or to the evening (other days) and pick the cell focus lands on.
     private func positionAtAnchor(now: Date) {
-        let anchor = day == today
-            ? now
-            : Calendar.prague.date(byAdding: .hour, value: 20, to: day.startDate()) ?? day.startDate()
+        let crossing = dayAnchor
+        dayAnchor = nil
+        let anchor: Date
+        if let crossing {
+            let bounds = Self.bounds(of: day)
+            anchor = crossing.atEnd ? bounds.end.addingTimeInterval(-60) : bounds.start
+        } else if day == today {
+            anchor = now
+        } else {
+            anchor = Calendar.prague.date(byAdding: .hour, value: 20, to: day.startDate()) ?? day.startDate()
+        }
         let rows = layout.rows
         var anchorRow = rows.first
+        if let crossing, let row = rows.first(where: { $0.id == crossing.rowID }) { anchorRow = row }
         #if DEBUG
-        // `-guideRow 6` starts on that row (6 = first Anténa row unless channels are hidden), for simulator screenshots.
+        // `-guideRow 6` starts on that row (6 = first Anténa row in the default order), for simulator screenshots.
         let debugRow = UserDefaults.standard.integer(forKey: "guideRow")
         if debugRow > 0, debugRow < rows.count { anchorRow = rows[debugRow] }
         #endif
         let firstRow = anchorRow?.entries ?? []
-        let target = firstRow.first { $0.isAiring(at: anchor) } ?? firstRow.first { $0.start >= anchor } ?? firstRow.last
-        defaultFocusID = target?.id
-        focusedEntry = target
-        liveColumn = day == today
-        let tick = layout.timeline.tickIndex(for: anchor.addingTimeInterval(-30 * 60))
+        let anchorIndex = anchorRow.flatMap { row in rows.firstIndex { $0.id == row.id } } ?? 0
+        var targetID: String?
+        if crossing != nil {
+            // the row's cell (programme or "Mimo vysílání") at the new day's edge
+            targetID = layout.cellID(row: anchorIndex, at: anchor)
+        } else {
+            targetID = (firstRow.first { $0.isAiring(at: anchor) } ?? firstRow.first { $0.start >= anchor } ?? firstRow.last)?.id
+        }
+        defaultFocusID = targetID
+        focusedEntry = targetID.flatMap { layout.entries[$0] }
+        if let id = targetID, let span = layout.span(of: id) {
+            window = Window.around(row: span.row, from: span.from, to: span.to, rowCount: rows.count)
+        } else {
+            let x = layout.timeline.x(for: anchor)
+            window = Window.around(row: anchorIndex, from: x, to: x, rowCount: rows.count)
+        }
+        liveColumn = day == today && crossing == nil
+        let tick = layout.timeline.tickIndex(for: anchor.addingTimeInterval(crossing?.atEnd == true ? -90 * 60 : -30 * 60))
         // Let the new rows lay out before scrolling.
         let rowID = anchorRow?.id == rows.first?.id ? nil : anchorRow?.id
-        Task { @MainActor in scrollRequest = ScrollRequest(tick: tick, rowID: rowID) }
+        Task { @MainActor in
+            scrollRequest = ScrollRequest(tick: tick, rowID: rowID)
+            // Focus is still in the grid (on a cell of the old day): move it to the anchor cell.
+            guard crossing != nil, let targetID else { return }
+            try? await Task.sleep(for: .milliseconds(150))
+            focusedID = targetID
+        }
+    }
+
+    /// The broadcast day shown by the grid: 05:00 to 05:00 Prague time (local 05:00, also on DST days).
+    static func bounds(of day: BroadcastDay) -> (start: Date, end: Date) {
+        func five(_ day: BroadcastDay) -> Date {
+            Calendar.prague.date(bySettingHour: 5, minute: 0, second: 0, of: day.startDate()) ?? day.startDate()
+        }
+        return (five(day), five(day.adding(days: 1)))
+    }
+
+    /// Label of the "Across days" cell, nil at the ends of the guide's range.
+    private func edgeLabel(next: Bool) -> String? {
+        let target = day.adding(days: next ? 1 : -1)
+        guard GuideRange.days(today: today).contains(target) else { return nil }
+        let label = target.label(today: today)
+        return next ? "\(label) ›" : "‹ \(label)"
+    }
+
+    /// Focus reached a "‹ Včera" / "Zítra ›" cell. From its own row (left/right past the day's edge) that
+    /// opens the previous/next day, focused on the same row at the new day's end/start; reached any other
+    /// way (up/down) it hands focus back to the row's cell at the edge. True when `id` was such a cell.
+    private func crossDay(from old: String?, to id: String) -> Bool {
+        let next = id.hasPrefix("next|")
+        guard next || id.hasPrefix("prev|") else { return false }
+        let rowID = String(id.dropFirst(5))
+        guard let row = layout.rows.firstIndex(where: { $0.id == rowID }) else { return true }
+        if let old, layout.rowOf[old] == row, dayAnchor == nil {
+            dayAnchor = DayAnchor(rowID: rowID, atEnd: !next)
+            liveColumn = false
+            focusedEntry = nil
+            day = day.adding(days: next ? 1 : -1)
+        } else if dayAnchor == nil {
+            let bounds = Self.bounds(of: day)
+            let edge = next ? bounds.end.addingTimeInterval(-60) : bounds.start
+            if let target = layout.cellID(row: row, at: edge) {
+                redirectID = target
+                focusedID = target
+            }
+        }
+        return true
     }
 
     /// Up/down (or coming down from the day strip) lands on the programme airing now in that row
@@ -331,6 +484,15 @@ struct GuideView: View {
         if let target = layout.cellID(row: row, at: Date()), target != id {
             redirectID = target
             focusedID = target
+        }
+    }
+
+    /// Moves the built window along when focus gets near its edge (a cheap rebuild of ~20 rows).
+    private func keepWindow(around id: String) {
+        guard let span = layout.span(of: id) else { return }
+        let count = layout.rows.count
+        if !window.covers(row: span.row, from: span.from, to: span.to, rowCount: count) {
+            window = Window.around(row: span.row, from: span.from, to: span.to, rowCount: count)
         }
     }
 
@@ -384,16 +546,24 @@ struct GuideView: View {
 /// elsewhere (the detail above) does not rebuild it.
 private struct GuideGrid: View, Equatable {
     let layout: GuideLayout
+    let window: GuideView.Window
     let now: Date
     let focusedID: FocusState<String?>.Binding
     let defaultFocusID: String?
     let scrollRequest: GuideView.ScrollRequest?
+    /// "‹ Včera" / "Zítra ›" labels of the "Across days" cells, nil at the range's ends.
+    let previousDay: String?
+    let nextDay: String?
     let select: (GuideEntry) -> Void
 
     nonisolated static func == (lhs: GuideGrid, rhs: GuideGrid) -> Bool {
-        lhs.layout.version == rhs.layout.version && lhs.now == rhs.now
+        lhs.layout.version == rhs.layout.version && lhs.window == rhs.window && lhs.now == rhs.now
             && lhs.defaultFocusID == rhs.defaultFocusID && lhs.scrollRequest == rhs.scrollRequest
+            && lhs.previousDay == rhs.previousDay && lhs.nextDay == rhs.nextDay
     }
+
+    private var leadingEdge: Double { previousDay == nil ? 0 : GuideLayout.dayEdgeWidth }
+    private var trailingEdge: Double { nextDay == nil ? 0 : GuideLayout.dayEdgeWidth }
 
     var body: some View {
         let rows = layout.rows
@@ -406,11 +576,17 @@ private struct GuideGrid: View, Equatable {
                     Color.clear
                         .frame(width: GuideView.channelColumnWidth, height: GuideView.headerHeight)
                     ForEach(rows) { row in
-                        Text(row.name)
-                            .font(.system(size: 28, weight: .bold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .frame(width: GuideView.channelColumnWidth - 12, height: GuideView.rowHeight, alignment: .leading)
+                        HStack(spacing: 8) {
+                            SourceIcon(source: row.source)
+                                .font(.system(size: 18))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 24)
+                            Text(row.name)
+                                .font(.system(size: 28, weight: .bold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        }
+                        .frame(width: GuideView.channelColumnWidth - 12, height: GuideView.rowHeight, alignment: .leading)
                             .padding(.trailing, 12)
                             .id("row|\(row.id)")
                     }
@@ -421,8 +597,13 @@ private struct GuideGrid: View, Equatable {
                         VStack(alignment: .leading, spacing: GuideView.rowSpacing) {
                             timeHeader(timeline)
                             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                self.row(row, layout.segments[index], now: now)
-                                    .frame(height: GuideView.rowHeight)
+                                if window.rows.contains(index) {
+                                    self.row(row, index: index, now: now)
+                                        .frame(height: GuideView.rowHeight)
+                                } else {
+                                    Color.clear.frame(width: leadingEdge + timeline.width + trailingEdge,
+                                                      height: GuideView.rowHeight)
+                                }
                             }
                         }
                         .overlay(alignment: .topLeading) { nowLine(timeline, now: now) }
@@ -445,6 +626,7 @@ private struct GuideGrid: View, Equatable {
 
     private func timeHeader(_ timeline: GuideTimeline) -> some View {
         HStack(spacing: 0) {
+            Color.clear.frame(width: leadingEdge)
             ForEach(Array(timeline.ticks.enumerated()), id: \.offset) { index, tick in
                 Text(Formatting.time(tick))
                     .font(.system(size: 22, weight: .medium))
@@ -456,9 +638,21 @@ private struct GuideGrid: View, Equatable {
         .frame(height: GuideView.headerHeight)
     }
 
-    private func row(_ row: GuideRow, _ segments: [GuideTimeline.Segment<GuideEntry>], now: Date) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+    /// The row's cells inside the window's x range; empty space of the same width around them.
+    private func row(_ row: GuideRow, index rowIndex: Int, now: Date) -> some View {
+        let segments = layout.segments[rowIndex]
+        let starts = layout.starts[rowIndex]
+        let visible = segments.indices.filter { index in
+            let from = starts[index]
+            return from < window.x.upperBound && from + GuideLayout.width(segments[index]) > window.x.lowerBound
+        }
+        let lead = visible.first.map { starts[$0] } ?? layout.timeline.width
+        let tail = visible.last.map { layout.timeline.width - starts[$0] - GuideLayout.width(segments[$0]) } ?? 0
+        return HStack(spacing: 0) {
+            if let previousDay { dayEdge(previousDay, id: GuideLayout.edgeID(next: false, rowID: row.id)) }
+            Color.clear.frame(width: max(0, lead))
+            ForEach(visible, id: \.self) { index in
+                let segment = segments[index]
                 switch segment {
                 case .gap(let width) where width < GuideView.minFocusableGap:
                     Color.clear.frame(width: width)
@@ -475,6 +669,7 @@ private struct GuideGrid: View, Equatable {
                     }
                     .buttonStyle(GuideCellStyle(state: .offAir))
                     .focused(focusedID, equals: GuideLayout.gapID(row: row, index: index))
+                    .accessibilityIdentifier("guide.\(rowIndex).\(index)")
                     .padding(.horizontal, 3)
                 case .item(let entry, let width):
                     let state = entry.state(at: now)
@@ -486,10 +681,27 @@ private struct GuideGrid: View, Equatable {
                     }
                     .buttonStyle(GuideCellStyle(state: state))
                     .focused(focusedID, equals: entry.id)
+                    .accessibilityIdentifier("guide.\(rowIndex).\(index)")
                     .padding(.horizontal, 3)
                 }
             }
+            Color.clear.frame(width: max(0, tail))
+            if let nextDay { dayEdge(nextDay, id: GuideLayout.edgeID(next: true, rowID: row.id)) }
         }
+    }
+
+    /// "‹ Včera" / "Zítra ›" at a row's start / end: moving onto it opens that day (GuideView.crossDay).
+    private func dayEdge(_ label: String, id: String) -> some View {
+        Button {} label: {
+            Text(label)
+                .font(.system(size: 22, weight: .semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(GuideCellStyle(state: .offAir))
+        .focused(focusedID, equals: id)
+        .frame(width: GuideLayout.dayEdgeWidth - 6)
+        .padding(.horizontal, 3)
     }
 
     @ViewBuilder
@@ -499,7 +711,7 @@ private struct GuideGrid: View, Equatable {
                 .fill(Color.red)
                 .frame(width: 3)
                 .padding(.top, GuideView.headerHeight - 8)
-                .offset(x: timeline.x(for: now) - 1.5)
+                .offset(x: leadingEdge + timeline.x(for: now) - 1.5)
                 .allowsHitTesting(false)
         }
     }
@@ -588,7 +800,7 @@ private struct GuideCell: View {
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(fill))
             .opacity((state == .unavailable || state == .offAir) && !isFocused ? 0.4 : 1)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
-            .shadow(color: .black.opacity(isFocused ? 0.5 : 0), radius: 12, y: 6)
+            .shadow(color: .black.opacity(isFocused ? 0.5 : 0), radius: isFocused ? 12 : 0, y: isFocused ? 6 : 0)
             .zIndex(isFocused ? 1 : 0)
             .animation(.easeOut(duration: 0.15), value: isFocused)
     }
@@ -667,15 +879,8 @@ private struct EntryDetail: View {
                     Color(white: 0.15)
                 }
             }
-        case .antenna(_, let channel):
-            ZStack {
-                Color(white: 0.15)
-                VStack(spacing: 8) {
-                    Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 44))
-                    Text(channel.name).font(.headline)
-                }
-                .foregroundStyle(.secondary)
-            }
+        case .antenna(let event, let channel):
+            AntennaArtwork(event: event, channel: channel)
         }
     }
 
@@ -719,5 +924,42 @@ private struct EntryDetail: View {
         return [channel, "\(day) \(range)", genre]
             .filter { !$0.isEmpty }
             .joined(separator: "  ·  ")
+    }
+}
+
+/// Anténa detail image: the gateway thumbnail of the recording (spec/apps.md "Anténa thumbnails"), loaded
+/// once the focus has rested 0.3 s on the programme; the antenna placeholder otherwise.
+private struct AntennaArtwork: View {
+    let event: DVBEvent
+    let channel: DVBChannel
+    @Environment(AppModel.self) private var model
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color(white: 0.15)
+            if let image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                VStack(spacing: 8) {
+                    Image(systemName: "antenna.radiowaves.left.and.right").font(.system(size: 44))
+                    Text(channel.name).font(.headline)
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .task(id: LoadKey(event: event, allowed: model.thumbnails.recordingID(for: event) != nil)) {
+            image = nil
+            guard model.thumbnails.recordingID(for: event) != nil else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let loaded = await model.thumbnails.image(for: event)
+            if !Task.isCancelled { image = loaded }
+        }
+    }
+
+    private struct LoadKey: Equatable {
+        let event: DVBEvent
+        let allowed: Bool
     }
 }

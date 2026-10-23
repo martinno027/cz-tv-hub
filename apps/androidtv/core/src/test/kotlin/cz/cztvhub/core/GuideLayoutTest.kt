@@ -5,6 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
+import java.time.LocalDate
 
 class GuideLayoutTest {
     private fun t(hm: String) = Instant.parse("2026-10-17T${hm}:00Z")
@@ -60,8 +61,30 @@ class GuideLayoutTest {
         assertNull(withSliver.firstOrNull { it.item == null })
     }
 
-    @Test fun axisStartsOnHalfHourAndTicksAreWholeLabels() {
-        assertEquals(t("03:30"), GuideLayout.axisStart(listOf(p("x", "03:59", "05:00"))))
+    @Test fun axisIsTheBroadcastDayInPrague() {
+        // summer time: 05:00 CEST = 03:00 UTC, 24 h
+        assertEquals(Instant.parse("2026-10-17T03:00:00Z") to Instant.parse("2026-10-18T03:00:00Z"),
+            GuideLayout.axis(LocalDate.of(2026, 10, 17)))
+        val dst = GuideLayout.axis(LocalDate.of(2026, 10, 24)) // clocks go back on 25 Oct: a 25 h day
+        assertEquals(Instant.parse("2026-10-24T03:00:00Z"), dst.first)
+        assertEquals(Instant.parse("2026-10-25T04:00:00Z"), dst.second)
+        assertEquals(25L, java.time.Duration.between(dst.first, dst.second).toHours())
+        val spring = GuideLayout.axis(LocalDate.of(2026, 3, 28)) // 29 Mar: a 23 h day
+        assertEquals(23L, java.time.Duration.between(spring.first, spring.second).toHours())
+    }
+
+    @Test fun programmesCrossingTheDayEdgeAreClipped() {
+        val slots = GuideLayout.row(
+            listOf(p("night", "19:00", "20:30"), p("late", "22:30", "23:45"), p("tomorrow", "23:50", "23:59")),
+            axisStart, axisEnd,
+        )
+        assertContiguous(slots)
+        assertEquals(listOf("night", null, "late"), slots.map { it.item?.idec })
+        assertEquals(axisStart, slots.first().start) // clipped at the start
+        assertEquals(axisEnd, slots.last().end) // clipped at the end, "tomorrow" left out
+    }
+
+    @Test fun ticksAreWholeLabels() {
         assertEquals(listOf(t("20:00"), t("20:30"), t("21:00")), GuideLayout.ticks(t("20:00"), t("21:10")))
     }
 

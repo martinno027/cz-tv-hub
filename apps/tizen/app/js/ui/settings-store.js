@@ -8,6 +8,7 @@
   var CT = root.CT = root.CT || {};
   var KEY = 'cztvhub.dvb';
   var PREFS_KEY = 'cztvhub.channelPrefs';
+  var THUMBS_KEY = 'cztvhub.thumbs'; // only this TV's switch; the images themselves are never stored
 
   function read() {
     try {
@@ -54,6 +55,25 @@
         root.localStorage.setItem(KEY, JSON.stringify({ cleared: true }));
       } catch (e) {
         // See save().
+      }
+    }
+  };
+
+  /** "Náhledy anténních pořadů" on this TV (Nastavení → Server), default on. */
+  CT.ThumbsSwitch = {
+    on: function () {
+      try {
+        return root.localStorage.getItem(THUMBS_KEY) !== 'off';
+      } catch (e) {
+        return true;
+      }
+    },
+
+    set: function (on) {
+      try {
+        root.localStorage.setItem(THUMBS_KEY, on ? 'on' : 'off');
+      } catch (e) {
+        // See SettingsStore.save().
       }
     }
   };

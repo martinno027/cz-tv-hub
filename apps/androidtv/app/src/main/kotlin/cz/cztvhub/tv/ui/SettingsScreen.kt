@@ -55,6 +55,7 @@ import androidx.tv.material3.Text
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.dvb.DvbClient
 import cz.cztvhub.core.dvb.DvbConfig
+import cz.cztvhub.tv.BuildConfig
 import cz.cztvhub.tv.R
 import cz.cztvhub.tv.dvb.GatewayDiscovery
 import cz.cztvhub.tv.tvApp
@@ -105,6 +106,18 @@ fun SettingsScreen(viewModel: MainViewModel, open: SettingsSection?, onOpen: (Se
         Modifier.fillMaxSize().padding(top = 24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
+        // Which build this is (spec/apps.md "Version line").
+        Text(
+            stringResource(
+                R.string.version_line,
+                BuildConfig.VERSION_NAME,
+                BuildConfig.BUILD_NUMBER,
+                BuildConfig.GIT_COMMIT,
+                BuildConfig.BUILD_TIME,
+            ),
+            style = MaterialTheme.typography.bodyLarge,
+            color = Palette.textDim,
+        )
         SectionItem(
             stringResource(R.string.settings_tab_channels),
             stringResource(R.string.settings_channels_detail),
@@ -207,6 +220,18 @@ private fun ServerSettings(viewModel: MainViewModel) {
             }
         }
         message?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+
+        // "Náhledy anténních pořadů": only offered when the gateway allows thumbnails (its /admin switch).
+        val dvb by viewModel.dvb.collectAsState()
+        val thumbnailsOn by viewModel.antennaThumbnails.collectAsState()
+        if (configured != null && dvb?.thumbnails == true) {
+            Button(
+                onClick = { viewModel.setAntennaThumbnails(!thumbnailsOn) },
+                modifier = Modifier.padding(top = 8.dp),
+            ) { Text((if (thumbnailsOn) "☑  " else "☐  ") + stringResource(R.string.settings_thumbnails)) }
+            Text(stringResource(R.string.settings_thumbnails_hint), style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
+        }
+
         Text(stringResource(R.string.settings_about), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
         Text(stringResource(R.string.disclaimer), style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
     }

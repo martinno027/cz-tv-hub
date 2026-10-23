@@ -1,24 +1,50 @@
 import Foundation
 import Observation
 
-/// "Kanály" (spec/apps.md): channels hidden and reordered on this TV only.
+/// "Kanály" (spec/apps.md): channels hidden and reordered on this TV only, in one list that mixes
+/// CT internet and Anténa channels, plus a switch per source.
 /// Keys: `ct:<API id>` for CT internet channels, `dvb:<gateway channel id>` for Anténa channels.
-/// The order applies within each group; unknown keys are kept.
+/// Unknown keys are kept (channels of a source that is off keep their place).
 public struct ChannelPrefs: Codable, Equatable, Sendable {
     public static let maxKeys = 500
 
+    /// Where a channel comes from; a whole source can be switched off.
+    public enum Source: String, Codable, Sendable, CaseIterable {
+        case ct, dvb
+    }
+
     public var order: [String]
     public var hidden: [String]
+    /// Sources switched off (raw values of `Source`); missing in stored JSON = both on.
+    public var sourcesOff: [String]
 
-    public init(order: [String] = [], hidden: [String] = []) {
+    public init(order: [String] = [], hidden: [String] = [], sourcesOff: [String] = []) {
         self.order = order
         self.hidden = hidden
+        self.sourcesOff = sourcesOff
+    }
+
+    private enum CodingKeys: String, CodingKey { case order, hidden, sourcesOff }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        order = try container.decodeIfPresent([String].self, forKey: .order) ?? []
+        hidden = try container.decodeIfPresent([String].self, forKey: .hidden) ?? []
+        sourcesOff = try container.decodeIfPresent([String].self, forKey: .sourcesOff) ?? []
+    }
+
+    public func isOn(_ source: Source) -> Bool { !sourcesOff.contains(source.rawValue) }
+
+    public mutating func setOn(_ source: Source, _ isOn: Bool) {
+        sourcesOff.removeAll { $0 == source.rawValue }
+        if !isOn { sourcesOff.append(source.rawValue) }
     }
 
     public static func ctKey(_ channel: Channel) -> String { "ct:\(channel.id)" }
     public static func dvbKey(_ channel: DVBChannel) -> String { "dvb:\(channel.id)" }
 
-    /// `all` = the group's keys in the saved order, then the rest in default order; `visible` = `all` without hidden.
+    /// `all` = the list's keys in the saved order, then the rest in default order; `visible` = `all` without hidden.
+    /// The input is already limited to the sources that are on.
     public func arrange(_ channels: [String]) -> (all: [String], visible: [String]) {
         let group = Set(channels)
         var all: [String] = []
@@ -41,7 +67,7 @@ public struct ChannelPrefs: Codable, Equatable, Sendable {
 
     public func isHidden(_ key: String) -> Bool { hidden.contains(key) }
 
-    /// Swaps `key` with its neighbour in the group's arranged order; no-op at the edge or for an unknown key.
+    /// Swaps `key` with its neighbour in the arranged order; no-op at the edge or for an unknown key.
     public mutating func move(_ key: String, by delta: Int, in channels: [String]) {
         var all = arrange(channels).all
         guard let index = all.firstIndex(of: key) else { return }
@@ -89,13 +115,45 @@ public final class ChannelPrefsStore {
         backend.set(try? JSONEncoder().encode(next), forKey: Self.storageKey)
     }
 
-    // MARK: arranged groups
+    // MARK: arranged list
 
-    public func internet() -> (all: [Channel], visible: [Channel]) {
-        prefs.arrange(Channels.all, key: ChannelPrefs.ctKey)
+    /// The mixed channel list: CT internet channels then the Anténa ones by default, only of the sources
+    /// that are on, in this TV's order.
+    public func channels(antenna: [DVBChannel]) -> (all: [MixedChannel], visible: [MixedChannel]) {
+        prefs.arrange(MixedChannel.defaultList(antenna: antenna, prefs: prefs), key: \.key)
+    }
+}
+
+/// One entry of the mixed channel list (Živě, guide, settings).
+public enum MixedChannel: Sendable, Hashable, Identifiable {
+    case ct(Channel)
+    case antenna(DVBChannel)
+
+    public var key: String {
+        switch self {
+        case .ct(let channel): return ChannelPrefs.ctKey(channel)
+        case .antenna(let channel): return ChannelPrefs.dvbKey(channel)
+        }
     }
 
-    public func antenna(_ channels: [DVBChannel]) -> (all: [DVBChannel], visible: [DVBChannel]) {
-        prefs.arrange(channels, key: ChannelPrefs.dvbKey)
+    public var id: String { key }
+
+    public var name: String {
+        switch self {
+        case .ct(let channel): return channel.name
+        case .antenna(let channel): return channel.name
+        }
+    }
+
+    public var source: ChannelPrefs.Source {
+        switch self {
+        case .ct: return .ct
+        case .antenna: return .dvb
+        }
+    }
+
+    /// Default order: the CT catalogue, then the gateway's channels; sources that are off are left out.
+    public static func defaultList(antenna: [DVBChannel], prefs: ChannelPrefs) -> [MixedChannel] {
+        (prefs.isOn(.ct) ? Channels.all.map(MixedChannel.ct) : []) + (prefs.isOn(.dvb) ? antenna.map(MixedChannel.antenna) : [])
     }
 }

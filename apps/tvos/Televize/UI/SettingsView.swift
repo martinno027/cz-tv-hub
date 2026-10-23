@@ -24,6 +24,10 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 40) {
+            Text(BuildInfo.versionLine)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(width: 1000, alignment: .leading)
             ForEach(Section.allCases) { section in
                 Button {
                     open = section
@@ -123,6 +127,19 @@ struct ServerSettingsSection: View {
                     Text(statusText).font(.callout)
                 }
 
+                if model.gateway != nil, model.thumbnails.gatewayAllows {
+                    @Bindable var thumbnails = model.thumbnails
+                    Toggle(isOn: $thumbnails.tvAllows) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Náhledy anténních pořadů")
+                            Text("Snímek z nahrávky v detailu TV průvodce. Jen v paměti, nic se neukládá.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 10)
+                }
+
                 Text("Nalezeno v místní síti")
                     .font(.headline)
                     .padding(.top, 20)
@@ -174,6 +191,7 @@ struct ServerSettingsSection: View {
         do {
             let status = try await DVBClient(config: config).status()
             model.setGateway(config)
+            await model.thumbnails.refreshStatus(force: true)
             let tuners = status.tuners.count
             statusText = status.tvheadendReachable
                 ? "Uloženo. Brána odpovídá · tunery: \(tuners) · záznamy \(status.retentionDays) dny."
@@ -181,5 +199,13 @@ struct ServerSettingsSection: View {
         } catch {
             statusText = "Neuloženo: \(AppModel.message(for: error))"
         }
+    }
+}
+
+/// "Verze 1.0 (build 123 · abc1234 · 23. 10. 15:20)"; `BuildStamp` is generated at build time (project.yml).
+enum BuildInfo {
+    static var versionLine: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        return "Verze \(version) (build \(BuildStamp.number) · \(BuildStamp.commit) · \(BuildStamp.time))"
     }
 }

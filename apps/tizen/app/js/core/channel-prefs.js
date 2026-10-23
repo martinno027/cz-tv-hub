@@ -1,7 +1,9 @@
 /*
- * "Kanály" (spec/apps.md): channels hidden and reordered on this TV only. Prefs = {order: [keys], hidden: [keys]};
- * keys `ct:<API id>` and `dvb:<gateway channel id>`. The order applies within a group (Internet ČT, Anténa);
- * keys of other groups and unknown keys are kept. Pure functions: every change returns new prefs.
+ * "Kanály" (spec/apps.md): channels hidden and reordered on this TV only.
+ * Prefs = {order: [keys], hidden: [keys], sourcesOff: ['ct' | 'dvb']}; keys `ct:<API id>` and
+ * `dvb:<gateway channel id>`. One mixed list (CT and Anténa channels in any order); the list passed in holds only
+ * the channels of the sources that are on, and stored keys not in it (unknown, or of a source that is off) are
+ * kept. Pure functions: every change returns new prefs.
  */
 (function (root) {
   'use strict';
@@ -26,14 +28,25 @@
     return list.indexOf(key) >= 0;
   }
 
+  var SOURCES = ['ct', 'dvb'];
+
+  function sourceList(value) {
+    return keyList(value).filter(function (s) { return contains(SOURCES, s); });
+  }
+
+  function make(order, hidden, sourcesOff) {
+    return { order: order, hidden: hidden, sourcesOff: sourcesOff };
+  }
+
   var ChannelPrefs = {
     MAX_KEYS: MAX_KEYS,
 
     empty: function () {
-      return { order: [], hidden: [] };
+      return make([], [], []);
     },
 
-    /** Defensive: anything that is not {order: [...], hidden: [...]} becomes empty lists. */
+    /** Defensive: anything that is not {order: [...], hidden: [...], sourcesOff: [...]} becomes empty lists
+     *  (a missing `sourcesOff` = both sources on). */
     parse: function (data) {
       if (typeof data === 'string') {
         try {
@@ -43,15 +56,15 @@
         }
       }
       if (!data || typeof data !== 'object' || Array.isArray(data)) return ChannelPrefs.empty();
-      return { order: keyList(data.order), hidden: keyList(data.hidden) };
+      return make(keyList(data.order), keyList(data.hidden), sourceList(data.sourcesOff));
     },
 
     serialise: function (prefs) {
       var p = ChannelPrefs.parse(prefs);
-      return JSON.stringify({ order: p.order, hidden: p.hidden });
+      return JSON.stringify({ order: p.order, hidden: p.hidden, sourcesOff: p.sourcesOff });
     },
 
-    /** `channels` = the group's keys in default order → {all, visible}. */
+    /** `channels` = the keys of the sources that are on, in default order (CT, then Anténa) → {all, visible}. */
     arrange: function (channels, prefs) {
       var p = ChannelPrefs.parse(prefs);
       var all = [];
@@ -75,7 +88,7 @@
       all[i] = all[j];
       all[j] = key;
       var rest = p.order.filter(function (k) { return !contains(all, k); });
-      return { order: all.concat(rest).slice(0, MAX_KEYS), hidden: p.hidden };
+      return make(all.concat(rest).slice(0, MAX_KEYS), p.hidden, p.sourcesOff);
     },
 
     isHidden: function (prefs, key) {
@@ -88,10 +101,23 @@
       var hidden = contains(p.hidden, key)
         ? p.hidden.filter(function (k) { return k !== key; })
         : p.hidden.concat([key]).slice(0, MAX_KEYS);
-      return { order: p.order, hidden: hidden };
+      return make(p.order, hidden, p.sourcesOff);
     },
 
-    /** "Obnovit výchozí pořadí": both lists cleared. */
+    /** Whole source switched off ('ct' = Internetová TV, 'dvb' = Anténa). */
+    isSourceOff: function (prefs, source) {
+      return contains(ChannelPrefs.parse(prefs).sourcesOff, source);
+    },
+
+    /** Switches a whole source on or off; the stored order and hidden channels stay. */
+    setSource: function (prefs, source, on) {
+      var p = ChannelPrefs.parse(prefs);
+      var off = p.sourcesOff.filter(function (s) { return s !== source; });
+      if (!on && contains(SOURCES, source)) off.push(source);
+      return make(p.order, p.hidden, off);
+    },
+
+    /** "Obnovit výchozí pořadí": order and hidden cleared, both sources on. */
     reset: function () {
       return ChannelPrefs.empty();
     }

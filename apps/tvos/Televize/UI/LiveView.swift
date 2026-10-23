@@ -1,8 +1,8 @@
 import CTCore
 import SwiftUI
 
-/// "Živě": the six CT channels with what is on air now, plus the "Anténa" group when a
-/// DVB-T2 gateway is configured; order and hidden channels from Nastavení → Kanály. Select → live playback.
+/// "Živě": one mixed list of CT internet and Anténa channels with what is on air now, in this TV's
+/// order (Nastavení → Kanály: hidden channels and switched-off sources left out). Select → live playback.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
     @State private var onAir: [String: Programme] = [:]
@@ -13,51 +13,28 @@ struct LiveView: View {
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
 
     var body: some View {
-        let internet = model.channelPrefs.internet().visible
-        let antenna = model.channelPrefs.antenna(antennaChannels).visible
-        // A group whose channels are all hidden is left out (the Anténa one only once its channels are known).
-        let showAntenna = model.antenna != nil && (antennaChannels.isEmpty || !antenna.isEmpty)
+        let prefs = model.channelPrefs
+        let channels = prefs.channels(antenna: antennaChannels).visible
+        // "All hidden" only once the Anténa channels are known (or Anténa is off / not configured).
+        let antennaPending = model.antenna != nil && prefs.prefs.isOn(.dvb) && antennaChannels.isEmpty && antennaError == nil
         return TimelineView(.periodic(from: .now, by: 30)) { context in
             ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
-                    if internet.isEmpty && !showAntenna {
+                    if channels.isEmpty && !antennaPending {
                         Text(ChannelPrefsUI.allHiddenMessage)
                             .font(.headline)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 200)
                     }
-                    if showAntenna && !internet.isEmpty { sectionTitle("Internet ČT") }
-                    LazyVGrid(columns: columns, spacing: 56) {
-                        ForEach(internet) { channel in
-                            let programme = onAir[channel.slug]
-                            Button {
-                                model.play(.live(channel))
-                            } label: {
-                                ChannelCard(name: channel.name, title: programme?.title,
-                                            start: programme?.start, end: programme?.end, now: context.date)
-                            }
-                            .buttonStyle(.card)
-                        }
+                    if let antennaError, model.antenna != nil, prefs.prefs.isOn(.dvb) {
+                        Text(antennaError).font(.callout).foregroundStyle(.secondary)
                     }
-                    if showAntenna {
-                        sectionTitle("Anténa")
-                            .id("antenna")
-                        if let antennaError {
-                            Text(antennaError).font(.callout).foregroundStyle(.secondary)
-                        }
-                        LazyVGrid(columns: columns, spacing: 56) {
-                            ForEach(antenna) { channel in
-                                let event = antennaOnAir[channel.id]
-                                Button {
-                                    model.playAntennaLive(channel)
-                                } label: {
-                                    ChannelCard(name: channel.name, title: event?.title,
-                                                start: event?.start, end: event?.end, now: context.date)
-                                }
-                                .buttonStyle(.card)
-                            }
+                    LazyVGrid(columns: columns, spacing: 56) {
+                        ForEach(channels) { channel in
+                            card(channel, now: context.date)
+                                .id(channel.key)
                         }
                     }
                 }
@@ -65,10 +42,11 @@ struct LiveView: View {
                 .padding(.vertical, 40)
             }
             #if DEBUG
-            // `-liveScroll antenna` shows the Anténa group, for simulator screenshots.
+            // `-liveScroll antenna` scrolls to the first Anténa card, for simulator screenshots.
             .onChange(of: antennaChannels.count) { _, count in
-                if count > 0, UserDefaults.standard.string(forKey: "liveScroll") == "antenna" {
-                    proxy.scrollTo("antenna", anchor: .top)
+                if count > 0, UserDefaults.standard.string(forKey: "liveScroll") == "antenna",
+                   let first = channels.first(where: { $0.source == .dvb }) {
+                    proxy.scrollTo(first.key, anchor: .top)
                 }
             }
             #endif
@@ -84,8 +62,25 @@ struct LiveView: View {
         }
     }
 
-    private func sectionTitle(_ text: String) -> some View {
-        Text(text).font(.title3.weight(.bold)).foregroundStyle(.secondary)
+    private func card(_ channel: MixedChannel, now: Date) -> some View {
+        Button {
+            switch channel {
+            case .ct(let ct): model.play(.live(ct))
+            case .antenna(let dvb): model.playAntennaLive(dvb)
+            }
+        } label: {
+            switch channel {
+            case .ct(let ct):
+                let programme = onAir[ct.slug]
+                ChannelCard(name: ct.name, source: .ct, title: programme?.title,
+                            start: programme?.start, end: programme?.end, now: now)
+            case .antenna(let dvb):
+                let event = antennaOnAir[dvb.id]
+                ChannelCard(name: dvb.name, source: .dvb, title: event?.title,
+                            start: event?.start, end: event?.end, now: now)
+            }
+        }
+        .buttonStyle(.card)
     }
 
     private func loadAntenna() async {
@@ -106,6 +101,7 @@ struct LiveView: View {
 
 private struct ChannelCard: View {
     let name: String
+    let source: ChannelPrefs.Source
     let title: String?
     let start: Date?
     let end: Date?
@@ -113,8 +109,15 @@ private struct ChannelCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(name)
-                .font(.title2.weight(.bold))
+            HStack(spacing: 14) {
+                Text(name)
+                    .font(.title2.weight(.bold))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                SourceIcon(source: source)
+                    .font(.system(size: 26))
+                    .foregroundStyle(.secondary)
+            }
             if let title, let start, let end, end > now {
                 Text(title)
                     .font(.headline)

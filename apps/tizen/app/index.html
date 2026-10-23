@@ -44,6 +44,7 @@
 
       <section id="screen-settings" class="screen">
         <div id="set-choice">
+          <div id="version-line"></div>
           <div class="choice" data-section="channels">
             <div class="choice-title">Kanály</div>
             <div class="choice-detail">Které kanály se zobrazují v Živě a v TV průvodci, a v jakém pořadí</div>
@@ -56,8 +57,9 @@
 
         <div id="set-section-channels" class="set-section">
           <h1 class="page-title">Kanály</h1>
-          <p class="hint">Které kanály a v jakém pořadí tato televize ukazuje v Živě a v TV průvodci. OK na názvu kanál
-            skryje nebo zobrazí, ▲ ▼ ho posunou. Platí jen pro tuto televizi.</p>
+          <p class="hint">Které kanály a v jakém pořadí tato televize ukazuje v Živě a v TV průvodci. Internetové a
+            anténní kanály jdou libovolně promíchat. OK na názvu kanál skryje nebo zobrazí, ▲ ▼ ho posunou. Platí jen
+            pro tuto televizi.</p>
           <div id="set-channels"></div>
         </div>
 
@@ -75,6 +77,7 @@
             <div id="set-save" class="button focusable">Uložit a vyzkoušet</div>
             <div id="set-clear" class="button focusable">Smazat</div>
           </div>
+          <div id="set-thumbs" class="setting-toggle focusable hidden"></div>
           <div id="set-status"></div>
           <h2 class="about">O aplikaci</h2>
           <p class="hint small">Neoficiální projekt, není spojen s Českou televizí. Aplikace přehrává jen oficiální
@@ -117,8 +120,11 @@
   <script src="js/core/entries.js"></script>
   <script src="js/core/resume.js"></script>
   <script src="js/core/channel-prefs.js"></script>
+  <script src="js/core/thumbs.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
+  <!-- Optional, written only into the build by build.py (version, build number, commit, build time). -->
+  <script src="js/build-info.js"></script>
   <script src="js/ui/keys.js"></script>
   <script src="js/ui/settings-store.js"></script>
   <script src="js/ui/demo.js"></script>

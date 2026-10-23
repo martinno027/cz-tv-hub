@@ -1,8 +1,9 @@
 /*
  * "Nastavení" is a choice of two sections (spec/apps.md); OK opens the chosen one full screen (the app's tabs are
- * hidden), Return goes back to the choice. "Kanály" = which channels this TV shows, and in what order (rows
- * [☑ name] [▲] [▼] per group); "Server" = gateway address and key for "Anténa" (saving tests the gateway right
- * away) and "O aplikaci".
+ * hidden), Return goes back to the choice. "Kanály" = the source switches (Internetová TV, Anténa) and which
+ * channels this TV shows in what order (one mixed list of rows [icon ☑ name] [▲] [▼]); "Server" = gateway address
+ * and key for "Anténa" (saving tests the gateway right away) and "O aplikaci". The choice screen starts with the
+ * version line (js/build-info.js, written by build.py; "vývojová verze" without it).
  */
 (function (root) {
   'use strict';
@@ -21,11 +22,13 @@
 
   function SettingsScreen(app) {
     this.app = app;
-    this.items = ['set-address', 'set-key', 'set-save', 'set-clear'].map($);
+    // 0 address, 1 key, 2 save, 3 clear, 4 "Náhledy anténních pořadů" (only when the gateway offers them)
+    this.items = ['set-address', 'set-key', 'set-save', 'set-clear', 'set-thumbs'].map($);
     this.focus = 0;
     this.section = 'channels'; // the choice item focused, or the section open: 'channels' | 'server'
     this.zone = 'choice'; // 'choice' | 'channels' | 'form' (the Server fields and buttons)
-    this.chItems = []; // [{key, keys (the group's), controls: [name, up, down], enabled: [bool ×3]}] | {reset, controls}
+    // [{key, keys (the list's), controls: [name, up, down], enabled: [bool ×3]}] | {source, controls} | {reset, controls}
+    this.chItems = [];
     this.chRow = 0;
     this.chCol = 0;
     var self = this;
@@ -35,13 +38,39 @@
     });
   }
 
+  /** "Verze 0.1.0 (build 123 · abc1234 · 23. 10. 15:20)" from the build; spec/apps.md "Version line". */
+  SettingsScreen.versionText = function (info) {
+    if (!info || !info.version) return 'Verze: vývojová verze';
+    return 'Verze ' + info.version + ' (build ' + info.build + ' · ' + info.commit + ' · ' + info.time + ')';
+  };
+
   SettingsScreen.prototype.show = function () {
+    $('version-line').textContent = SettingsScreen.versionText(root.CT_BUILD_INFO);
     var s = CT.SettingsStore.load();
     $('set-address').value = s ? s.address : '';
     $('set-key').value = s ? s.key : '';
     this.closeSection();
     this.showStatus();
     this.renderChannels();
+    this.renderThumbs();
+  };
+
+  /** The TV's thumbnail switch, shown only when the gateway has thumbnails on (spec/apps.md). */
+  SettingsScreen.prototype.renderThumbs = function () {
+    var toggle = $('set-thumbs');
+    var visible = this.app.dvbThumbs === true;
+    toggle.classList.toggle('hidden', !visible);
+    toggle.textContent = (CT.ThumbsSwitch.on() ? '☑ ' : '☐ ') + 'Náhledy anténních pořadů';
+    if (!visible && this.focus === 4) {
+      this.focus = 2;
+      this.applyFocus();
+    }
+  };
+
+  SettingsScreen.prototype.toggleThumbs = function () {
+    CT.ThumbsSwitch.set(!CT.ThumbsSwitch.on());
+    this.renderThumbs();
+    this.app.screens.guide.refreshDetail();
   };
 
   /** Opens a section full screen, focus on its first control. */
@@ -80,30 +109,42 @@
     return true;
   };
 
-  /** The "Kanály" lists; keeps focus on the same channel and control across re-renders. */
+  /** "Kanály": source switches, then the mixed list; keeps focus on the same item and control across re-renders. */
   SettingsScreen.prototype.renderChannels = function () {
+    var self = this;
     var app = this.app;
     var box = $('set-channels');
     var current = this.chItems[this.chRow];
-    var focusKey = current ? (current.reset ? 'reset' : current.key) : null;
+    var focusKey = current ? this.itemKey(current) : null;
     box.innerHTML = '';
     this.chItems = [];
 
     var dvb = app.dvbConfig ? app.dvbState : null;
-    var ctList = app.ctChannels(true);
-    if (dvb) box.appendChild(el('div', 'ch-group', 'Internet ČT'));
-    this.groupRows(box, ctList.map(function (ch) { return { key: 'ct:' + ch.id, name: ch.name }; }));
+    var sources = [{ source: 'ct', label: 'Internetová TV (ČT)' }];
+    if (dvb) sources.push({ source: 'dvb', label: 'Anténa' });
+    sources.forEach(function (s) {
+      var on = !CT.ChannelPrefs.isSourceOff(app.channelPrefs, s.source);
+      var row = el('div', 'ch-row ch-source' + (on ? '' : ' off'));
+      var name = el('div', 'ch-name');
+      name.appendChild(document.createTextNode(on ? '☑ ' : '☐ '));
+      name.appendChild(CT.sourceIcon(s.source));
+      name.appendChild(document.createTextNode(s.label));
+      row.appendChild(name);
+      box.appendChild(row);
+      self.chItems.push({ source: s.source, controls: [name], enabled: [true] });
+    });
 
-    if (dvb) {
-      box.appendChild(el('div', 'ch-group', 'Anténa'));
-      var dvbList = app.dvbChannelList(dvb.channels, true);
-      if (dvbList.length) {
-        this.groupRows(box, dvbList.map(function (ch) { return { key: 'dvb:' + ch.id, name: ch.name }; }));
-      } else if (dvb.error) {
-        box.appendChild(el('div', 'ch-message error', 'Kanály antény se nepodařilo načíst: ' + dvb.error));
-      } else {
-        box.appendChild(el('div', 'ch-message', 'Načítám kanály antény…'));
-      }
+    box.appendChild(el('div', 'ch-group', 'Pořadí kanálů'));
+    if (dvb && app.sourceOn('dvb') && !dvb.channels.length) {
+      box.appendChild(dvb.error
+        ? el('div', 'ch-message error', 'Kanály antény se nepodařilo načíst: ' + dvb.error)
+        : el('div', 'ch-message', 'Načítám kanály antény…'));
+    }
+    var list = app.channelList(dvb ? dvb.channels : [], true);
+    if (list.length) {
+      this.listRows(box, list);
+    } else {
+      box.appendChild(el('div', 'ch-message', 'Žádný kanál: zapněte Internetovou TV nebo Anténu.'));
     }
 
     var reset = el('div', 'button', 'Obnovit výchozí pořadí');
@@ -112,7 +153,7 @@
 
     var restored = -1;
     this.chItems.forEach(function (item, i) {
-      if ((item.reset && focusKey === 'reset') || (!item.reset && item.key === focusKey)) restored = i;
+      if (self.itemKey(item) === focusKey) restored = i;
     });
     this.chRow = restored >= 0 ? restored : Math.min(this.chRow, this.chItems.length - 1);
     // After ▲/▼ focus stays on that button even when it is now disabled (moved to the edge).
@@ -120,32 +161,41 @@
     this.applyFocus();
   };
 
-  SettingsScreen.prototype.groupRows = function (box, channels) {
+  SettingsScreen.prototype.itemKey = function (item) {
+    if (item.reset) return 'reset';
+    return item.source && !item.key ? 'source:' + item.source : item.key;
+  };
+
+  SettingsScreen.prototype.listRows = function (box, list) {
     var self = this;
-    var keys = channels.map(function (c) { return c.key; });
+    var keys = list.map(function (item) { return item.key; });
     var prefs = this.app.channelPrefs;
-    channels.forEach(function (c, i) {
-      var hidden = CT.ChannelPrefs.isHidden(prefs, c.key);
+    list.forEach(function (item, i) {
+      var hidden = CT.ChannelPrefs.isHidden(prefs, item.key);
       var row = el('div', 'ch-row' + (hidden ? ' off' : ''));
-      var name = el('div', 'ch-name', (hidden ? '☐ ' : '☑ ') + c.name);
+      var name = el('div', 'ch-name');
+      name.appendChild(document.createTextNode(hidden ? '☐ ' : '☑ '));
+      name.appendChild(CT.sourceIcon(item.source));
+      name.appendChild(document.createTextNode(item.channel.name));
       var up = el('div', 'ch-btn' + (i === 0 ? ' disabled' : ''), '▲');
-      var down = el('div', 'ch-btn' + (i === channels.length - 1 ? ' disabled' : ''), '▼');
+      var down = el('div', 'ch-btn' + (i === list.length - 1 ? ' disabled' : ''), '▼');
       row.appendChild(name);
       row.appendChild(up);
       row.appendChild(down);
       box.appendChild(row);
-      self.chItems.push({ key: c.key, keys: keys, controls: [name, up, down],
-        enabled: [true, i > 0, i < channels.length - 1] });
+      self.chItems.push({ key: item.key, keys: keys, controls: [name, up, down],
+        enabled: [true, i > 0, i < list.length - 1] });
     });
   };
 
-  /** OK on a "Kanály" control: toggle the channel, move it, or reset everything. */
+  /** OK on a "Kanály" control: switch a source, toggle the channel, move it, or reset everything. */
   SettingsScreen.prototype.activateChannel = function () {
     var item = this.chItems[this.chRow];
     var P = CT.ChannelPrefs;
     var prefs = this.app.channelPrefs;
     if (!item || !item.enabled[this.chCol]) return;
     if (item.reset) prefs = P.reset();
+    else if (!item.key) prefs = P.setSource(prefs, item.source, P.isSourceOff(prefs, item.source));
     else if (this.chCol === 0) prefs = P.toggle(prefs, item.key);
     else prefs = P.move(item.keys, prefs, item.key, this.chCol === 1 ? -1 : 1);
     this.app.setChannelPrefs(prefs); // re-renders this list; focus follows the row (same key, same control)
@@ -192,7 +242,9 @@
     }
     box.textContent = 'Zjišťuji stav brány…';
     box.className = '';
+    var app = this.app;
     new CT.DvbClient(config, this.app.transport).status().then(function (st) {
+      if (app.dvbConfig === config) app.setDvbThumbs(st.thumbnails);
       var parts = ['Brána je v pořádku'];
       if (!st.tvheadendReachable) parts = ['Brána odpovídá, ale TVHeadend ne'];
       if (st.tuners.length) {
@@ -275,10 +327,15 @@
     if (this.zone === 'channels') return this.onChannelsKey(key);
     switch (key) {
       case 'up':
-        if (this.focus > 0) this.focus = this.focus === 3 ? 1 : this.focus - 1;
+        if (this.focus === 4) this.focus = 2;
+        else if (this.focus > 0) this.focus = this.focus === 3 ? 1 : this.focus - 1;
         break;
       case 'down':
-        this.focus = Math.min(this.focus === 2 ? 2 : this.focus + 1, this.items.length - 1);
+        if (this.focus >= 2) {
+          if (this.app.dvbThumbs === true) this.focus = 4;
+        } else {
+          this.focus += 1;
+        }
         break;
       case 'left':
         if (this.focus === 3) this.focus = 2;
@@ -292,7 +349,8 @@
           return true;
         }
         if (this.focus === 2) this.save();
-        else this.clear();
+        else if (this.focus === 3) this.clear();
+        else this.toggleThumbs();
         break;
       default:
         break;

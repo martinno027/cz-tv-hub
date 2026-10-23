@@ -27,22 +27,39 @@ test('move: golden cases', () => {
 
 test('toggle and reset', () => {
   let p = P.toggle(P.empty(), 'ct:CH_2');
-  assert.deepEqual(p, { order: [], hidden: ['ct:CH_2'] });
+  assert.deepEqual(p, { order: [], hidden: ['ct:CH_2'], sourcesOff: [] });
   assert.ok(P.isHidden(p, 'ct:CH_2'));
   p = P.move(['ct:CH_1', 'ct:CH_2'], p, 'ct:CH_2', -1);
   p = P.toggle(p, 'ct:CH_2');
-  assert.deepEqual(p, { order: ['ct:CH_2', 'ct:CH_1'], hidden: [] }, 'showing keeps the order');
-  assert.deepEqual(P.reset(), { order: [], hidden: [] });
+  assert.deepEqual(p, { order: ['ct:CH_2', 'ct:CH_1'], hidden: [], sourcesOff: [] }, 'showing keeps the order');
+  assert.deepEqual(P.reset(), { order: [], hidden: [], sourcesOff: [] });
 });
 
 test('parse is defensive and serialise round-trips', () => {
   for (const raw of [null, undefined, 'not json', '[1,2]', 42, [], { order: 'x', hidden: { a: 1 } }]) {
-    assert.deepEqual(P.parse(raw), { order: [], hidden: [] }, JSON.stringify(raw));
+    assert.deepEqual(P.parse(raw), { order: [], hidden: [], sourcesOff: [] }, JSON.stringify(raw));
   }
   assert.deepEqual(P.parse({ order: ['ct:CH_1', 5, '', 'ct:CH_1', 'dvb:a'], hidden: ['dvb:a', null] }),
-    { order: ['ct:CH_1', 'dvb:a'], hidden: ['dvb:a'] });
+    { order: ['ct:CH_1', 'dvb:a'], hidden: ['dvb:a'], sourcesOff: [] });
   const many = Array.from({ length: 600 }, (_, i) => 'dvb:' + i);
   assert.equal(P.parse({ order: many, hidden: many }).order.length, P.MAX_KEYS);
-  const p = { order: ['dvb:b', 'ct:CH_1'], hidden: ['ct:CH_4'] };
+  const p = { order: ['dvb:b', 'ct:CH_1'], hidden: ['ct:CH_4'], sourcesOff: ['dvb'] };
   assert.deepEqual(P.parse(P.serialise(p)), p);
+});
+
+test('sources on and off', () => {
+  let p = P.parse({ order: ['dvb:a', 'ct:CH_1'], hidden: ['dvb:b'] });
+  assert.equal(P.isSourceOff(p, 'dvb'), false, 'missing sourcesOff = both on');
+  p = P.setSource(p, 'dvb', false);
+  assert.ok(P.isSourceOff(p, 'dvb'));
+  assert.deepEqual(p, { order: ['dvb:a', 'ct:CH_1'], hidden: ['dvb:b'], sourcesOff: ['dvb'] }, 'order and hidden stay');
+  p = P.setSource(P.setSource(p, 'dvb', false), 'ct', false);
+  assert.deepEqual(p.sourcesOff, ['dvb', 'ct'], 'no duplicates');
+  assert.deepEqual(P.setSource(p, 'dvb', true).sourcesOff, ['ct']);
+  assert.deepEqual(P.setSource(p, 'xyz', false).sourcesOff, ['dvb', 'ct'], 'unknown source ignored');
+  assert.deepEqual(P.parse({ sourcesOff: ['dvb', 'tv', 5, 'dvb'] }).sourcesOff, ['dvb']);
+  // moving and toggling keep the switches; reset turns both sources on again
+  assert.deepEqual(P.move(['ct:CH_1', 'ct:CH_2'], p, 'ct:CH_2', -1).sourcesOff, ['dvb', 'ct']);
+  assert.deepEqual(P.toggle(p, 'ct:CH_1').sourcesOff, ['dvb', 'ct']);
+  assert.deepEqual(P.reset().sourcesOff, []);
 });

@@ -30,6 +30,9 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
 
     fun recordingUrl(recordingId: String): String = config.url("/dvb/recording/$recordingId.m3u8")
 
+    /** One still of a recording (needs [DvbConfig.authHeaders]); never cache it on disk. */
+    fun thumbnailUrl(recordingId: String): String = config.url("/dvb/recording/$recordingId/thumb.jpg")
+
     private fun <T> call(path: String, parse: (Int, String) -> T): T {
         val response = try {
             transport.get(config.url(path), config.authHeaders + ("Accept" to "application/json"))

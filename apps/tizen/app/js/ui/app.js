@@ -18,6 +18,21 @@
     else element.scrollIntoView(false);
   };
 
+  var ICONS = {
+    // globe = CT internet channel, antenna = "Anténa" (DVB-T2); stroke follows the text colour
+    ct: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>',
+    dvb: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 10v11M8.5 21h7M12 10l-3.5 11M12 10l3.5 11"/><circle cx="12" cy="8" r="1.6"/><path d="M8 4.5a5 5 0 0 0 0 7M16 4.5a5 5 0 0 1 0 7M5.2 2.2a9 9 0 0 0 0 11.6M18.8 2.2a9 9 0 0 1 0 11.6"/></svg>'
+  };
+
+  /** Small icon telling where a channel comes from (spec/apps.md "Source icon"). */
+  CT.sourceIcon = function (source) {
+    var icon = document.createElement('span');
+    icon.className = 'source-icon source-' + source;
+    icon.title = source === 'dvb' ? 'Anténa' : 'Internetová TV';
+    icon.innerHTML = ICONS[source] || '';
+    return icon;
+  };
+
   /** localStorage as a ResumeStore backend; a failing storage just forgets (private, per TV). */
   function localBackend(key) {
     return {
@@ -49,10 +64,14 @@
     dvbState: null,
     dialog: null,
     channelPrefs: null,
+    dvbThumbs: false, // the gateway has thumbnails on (from /dvb/status)
+    thumbCache: null,
 
     start: function () {
       var self = this;
       this.transport = CT.Demo.enabled ? CT.Demo.transport : CT.xhrTransport(20000);
+      this.blobTransport = CT.Demo.enabled ? CT.Demo.blobTransport : CT.xhrBlobTransport(10000);
+      this.thumbCache = new CT.ThumbCache(CT.Thumbs.MAX_ENTRIES, function (url) { root.URL.revokeObjectURL(url); });
       this.api = new CT.CtApi(this.transport);
       this.schedules = new CT.ScheduleRepository(this.api);
       this.live = new CT.LiveResolver(this.api);
@@ -105,9 +124,55 @@
       this.dvbRepo = config ? new CT.DvbRepository(new CT.DvbClient(config, this.transport)) : null;
       this.dvbChannels = [];
       this.dvbState = config ? { channels: [], onAir: {}, error: null } : null;
+      this.dvbThumbs = false;
+      this.thumbCache.clear();
+      this.checkThumbs();
       if (initial) return;
       this.refresh();
       this.screens.guide.reload();
+    },
+
+    /** Whether the gateway offers thumbnails (asked on setup and every few minutes; off when it does not answer). */
+    checkThumbs: function () {
+      var self = this;
+      var repo = this.dvbRepo;
+      if (!repo) return;
+      this.thumbsCheckedAt = Date.now();
+      repo.client.status().then(function (st) {
+        if (self.dvbRepo === repo) self.setDvbThumbs(st.thumbnails);
+      }, function () {
+        if (self.dvbRepo === repo) self.setDvbThumbs(false);
+      });
+    },
+
+    setDvbThumbs: function (on) {
+      if (this.dvbThumbs === on) return;
+      this.dvbThumbs = on;
+      if (!on) this.thumbCache.clear();
+      this.screens.guide.refreshDetail();
+      if (this.tab === 'settings') this.screens.settings.renderThumbs();
+    },
+
+    /** Thumbnails shown on this TV: the gateway offers them and this TV's switch is on. */
+    thumbsOn: function () {
+      return this.dvbThumbs && CT.ThumbsSwitch.on();
+    },
+
+    /** Object URL of a recording's thumbnail (memory only), or null. `final` = the recording has finished. */
+    loadThumb: function (recordingId, final) {
+      var self = this;
+      var config = this.dvbConfig;
+      var cache = this.thumbCache;
+      var cached = cache.get(recordingId, Date.now());
+      if (cached) return Promise.resolve(cached);
+      if (!config) return Promise.resolve(null);
+      return this.blobTransport({ url: config.url(CT.Thumbs.path(recordingId)), headers: config.authHeaders() })
+        .then(function (r) {
+          if (self.dvbConfig !== config || r.status !== 200 || !r.blob || !/^image\/jpeg/.test(r.type)) return null;
+          var url = root.URL.createObjectURL(r.blob);
+          cache.put(recordingId, url, Date.now(), final);
+          return url;
+        }, function () { return null; });
     },
 
     /** Every 30 s: now, what is on air (CT and Anténa), guide colours. */
@@ -137,6 +202,7 @@
         }).then(function () { self.renderLive(); });
       }
       this.screens.guide.refreshLooks();
+      if (this.dvbRepo && Date.now() - (this.thumbsCheckedAt || 0) > 5 * 60 * 1000) this.checkThumbs();
     },
 
     renderLive: function () {
@@ -144,24 +210,28 @@
       if (this.tab === 'settings') this.screens.settings.renderChannels();
     },
 
-    /** "Kanály": a group's channels (`keyOf` gives `ct:…` / `dvb:…`) in this TV's order; `all` includes hidden ones. */
-    arrange: function (channels, keyOf, all) {
+    /** A whole source ('ct' Internetová TV, 'dvb' Anténa) is on; Anténa also needs a gateway. */
+    sourceOn: function (source) {
+      if (source === 'dvb' && !this.dvbConfig) return false;
+      return !CT.ChannelPrefs.isSourceOff(this.channelPrefs, source);
+    },
+
+    /**
+     * "Kanály": one mixed list of the sources that are on, in this TV's order: [{key, source, channel}]
+     * (`ct:…` / `dvb:…`). `dvbChannels` = the gateway's channels; `all` includes the hidden ones.
+     */
+    channelList: function (dvbChannels, all) {
       var byKey = {};
-      var keys = channels.map(function (ch) {
-        var k = keyOf(ch);
-        byKey[k] = ch;
-        return k;
-      });
+      var keys = [];
+      function add(source, channel) {
+        var key = source + ':' + channel.id;
+        byKey[key] = { key: key, source: source, channel: channel };
+        keys.push(key);
+      }
+      if (this.sourceOn('ct')) CT.Channels.all.forEach(function (ch) { add('ct', ch); });
+      if (this.sourceOn('dvb')) (dvbChannels || []).forEach(function (ch) { add('dvb', ch); });
       var arranged = CT.ChannelPrefs.arrange(keys, this.channelPrefs);
       return (all ? arranged.all : arranged.visible).map(function (k) { return byKey[k]; });
-    },
-
-    ctChannels: function (all) {
-      return this.arrange(CT.Channels.all, function (ch) { return 'ct:' + ch.id; }, all);
-    },
-
-    dvbChannelList: function (channels, all) {
-      return this.arrange(channels || [], function (ch) { return 'dvb:' + ch.id; }, all);
     },
 
     /** Stores new "Kanály" prefs and redraws Živě and the guide. */

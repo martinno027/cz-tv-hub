@@ -66,6 +66,7 @@
     label: function (day, today) {
       if (day === today) return 'Dnes';
       if (day === Days.addDays(today, -1)) return 'Včera';
+      if (day === Days.addDays(today, 1)) return 'Zítra';
       var d = new Date(parseDay(day));
       return WEEKDAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + '. ' + (d.getUTCMonth() + 1) + '.';
     },
@@ -83,6 +84,14 @@
     atMinute: function (day, minutes) {
       var wall = parseDay(day) + minutes * 60 * 1000;
       return wall - offsetMs(wall - HOUR);
+    },
+
+    /**
+     * The broadcast day as [start, end): 05:00 to 05:00 Prague, 23 or 25 h on DST days
+     * (spec/apps.md "Across days": the guide's time axis is exactly this).
+     */
+    bounds: function (day) {
+      return [Days.atMinute(day, 5 * 60), Days.atMinute(Days.addDays(day, 1), 5 * 60)];
     },
 
     /** Minutes after Prague midnight of `ms`. */

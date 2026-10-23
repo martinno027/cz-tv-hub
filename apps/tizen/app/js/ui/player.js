@@ -42,6 +42,14 @@
     av.setDisplayRect(0, 0, 1920, 1080);
     av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
     if (target.dvb) av.setStreamingProperty('COOKIE', target.dvb.config.cookie());
+    if (target.kind === 'live') {
+      // Live: start once ~2 s (one gateway segment) is buffered; not every firmware accepts this.
+      try {
+        av.setBufferingParam('PLAYER_BUFFER_FOR_PLAY', 'PLAYER_BUFFER_SIZE_IN_SECOND', 2);
+      } catch (e) {
+        // keep the player's default
+      }
+    }
     av.setListener({
       onbufferingstart: function () { cb.onBuffering(true); },
       onbufferingcomplete: function () { cb.onBuffering(false); },

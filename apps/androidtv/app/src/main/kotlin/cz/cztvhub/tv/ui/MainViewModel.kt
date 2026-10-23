@@ -11,6 +11,7 @@ import cz.cztvhub.core.OnAirLike
 import cz.cztvhub.core.Programme
 import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbEvent
+import cz.cztvhub.core.dvb.DvbThumbnails
 import cz.cztvhub.tv.tvApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -41,6 +42,8 @@ data class DvbState(
     val channels: List<DvbChannel> = emptyList(),
     val onAir: Map<String, OnAirLike<DvbEvent>> = emptyMap(),
     val error: String? = null,
+    /** The gateway allows programme thumbnails (`/dvb/status`). */
+    val thumbnails: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -61,6 +64,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateChannelPrefs(change: (ChannelPrefs) -> ChannelPrefs) = app.channelPrefs.update(change)
 
     fun resetChannelPrefs() = app.channelPrefs.reset()
+
+    /** "Náhledy anténních pořadů" on this TV. */
+    val antennaThumbnails: StateFlow<Boolean> = app.thumbnailPrefs.on
+
+    fun setAntennaThumbnails(on: Boolean) = app.thumbnailPrefs.set(on)
+
+    /** Thumbnail URL and headers of an Anténa event when the gateway and this TV allow it (spec/apps.md). */
+    fun thumbnail(event: DvbEvent): Pair<String, Map<String, String>>? {
+        val client = app.dvb()?.client ?: return null
+        val id = DvbThumbnails.recordingId(event, _dvb.value?.thumbnails == true, antennaThumbnails.value) ?: return null
+        return client.thumbnailUrl(id) to client.config.authHeaders
+    }
 
     private val _now = MutableStateFlow(Instant.now())
     val now: StateFlow<Instant> = _now.asStateFlow()
@@ -107,9 +122,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val state = withContext(Dispatchers.IO) {
                 try {
-                    DvbState(repo.channels(), repo.onAir(Instant.now()))
+                    val thumbnails = try {
+                        repo.status().thumbnails
+                    } catch (_: CtException) {
+                        _dvb.value?.thumbnails ?: false
+                    }
+                    DvbState(repo.channels(), repo.onAir(Instant.now()), thumbnails = thumbnails)
                 } catch (e: CtException) {
-                    DvbState(_dvb.value?.channels.orEmpty(), _dvb.value?.onAir.orEmpty(), e.userMessage)
+                    DvbState(_dvb.value?.channels.orEmpty(), _dvb.value?.onAir.orEmpty(), e.userMessage,
+                        _dvb.value?.thumbnails ?: false)
                 }
             }
             if (app.dvb() === repo) _dvb.value = state

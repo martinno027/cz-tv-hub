@@ -163,7 +163,30 @@
     };
   }
 
+  /**
+   * Like xhrTransport, but resolves {status, blob, type} (gateway thumbnails). The blob only lives in memory;
+   * nothing is written to any storage (spec/dvb-gateway.md "Thumbnails").
+   */
+  function xhrBlobTransport(timeoutMs) {
+    return function (request) {
+      return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', request.url, true);
+        xhr.timeout = timeoutMs || 10000;
+        xhr.responseType = 'blob';
+        Object.keys(request.headers || {}).forEach(function (k) { xhr.setRequestHeader(k, request.headers[k]); });
+        xhr.onload = function () {
+          resolve({ status: xhr.status, blob: xhr.response, type: xhr.getResponseHeader('Content-Type') || '' });
+        };
+        xhr.onerror = function () { reject(new Error('network error')); };
+        xhr.ontimeout = function () { reject(new Error('timeout')); };
+        xhr.send(null);
+      });
+    };
+  }
+
   CT.CtParser = CtParser;
+  CT.xhrBlobTransport = xhrBlobTransport;
   CT.CtApi = CtApi;
   CT.xhrTransport = xhrTransport;
 })(typeof window !== 'undefined' ? window : global);

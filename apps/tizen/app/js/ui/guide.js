@@ -1,7 +1,8 @@
 /*
  * "TV průvodce": EPG grid with channels as rows and time on the horizontal axis (~2 h visible), a "now"
  * line, a day picker (7 days back, 2 ahead) and the focused programme's detail. The remote moves cell to
- * cell; up/down keep the focused moment, so focus walks straight down a column of time.
+ * cell; up/down keep the focused moment, so focus walks straight down a column of time. Only the cells near
+ * the screen have DOM (syncWindow), so a big Anténa line-up stays responsive on a TV.
  */
 (function (root) {
   'use strict';
@@ -32,7 +33,7 @@
     this.days = [];
     this.dayFocus = 0;
     this.zone = 'grid'; // 'days' | 'grid'
-    this.rows = []; // [{name, slots: [{start, end, item, el}]}]
+    this.rows = []; // [{name, slots: [{start, end, item, el | null}], line | null, range | null}]
     this.axisStart = 0;
     this.axisEnd = 0;
     this.focusRow = 0;
@@ -76,15 +77,22 @@
     return this.slotAt(rowIndex, this.anchor);
   };
 
-  GuideScreen.prototype.selectDay = function (day) {
+  /** `edge` ('start' | 'end'): "Across days", focus that row's first or last cell once the day is built. */
+  GuideScreen.prototype.selectDay = function (day, edge) {
     var self = this;
     this.day = day;
+    this.pendingEdge = edge || null;
     var today = CT.Days.today(this.app.now);
     this.days = CT.Days.guideDays(today);
     this.renderDays();
     $('grid-message').textContent = 'Načítání…';
     $('grid-rows').innerHTML = '';
     $('grid-ticks').innerHTML = '';
+    // The old rows' DOM is gone: nothing may point at it while the new day loads.
+    this.rows = [];
+    this.win = null;
+    this.focusEl = null;
+    this.nowLine = null;
     var app = this.app;
     var ct = app.schedules.day(day).then(function (plan) {
       return { plan: plan };
@@ -133,80 +141,67 @@
   };
 
   /**
-   * CT internet channels first, then the "Anténa" channels (empty rows show as "Mimo vysílání"), each group in
-   * this TV's order without hidden channels ("Kanály" in Nastavení).
+   * One row per channel, CT internet and "Anténa" mixed in this TV's order without hidden channels or
+   * switched-off sources ("Kanály" in Nastavení); empty rows show as "Mimo vysílání".
    */
   GuideScreen.prototype.build = function (ct, dvb) {
-    var app = this.app;
-    var rows = app.ctChannels().map(function (ch) {
+    var rows = this.app.channelList(dvb ? dvb.channels : []).map(function (item) {
+      var ch = item.channel;
+      if (item.source === 'dvb') {
+        var events = dvb.plan[ch.id] || [];
+        return { name: ch.name, source: 'dvb', entries: events.map(function (e) { return CT.Entries.dvb(ch, e); }) };
+      }
       var list = ct.plan ? ct.plan[ch.id] || [] : [];
-      return { name: ch.name, entries: list.map(function (p) { return CT.Entries.ct(ch, p); }) };
+      return { name: ch.name, source: 'ct', entries: list.map(function (p) { return CT.Entries.ct(ch, p); }) };
     });
-    if (dvb) {
-      app.dvbChannelList(dvb.channels).forEach(function (ch) {
-        var list = dvb.plan[ch.id] || [];
-        rows.push({ name: ch.name, entries: list.map(function (e) { return CT.Entries.dvb(ch, e); }) });
-      });
-    }
     var all = [];
     rows.forEach(function (r) { all = all.concat(r.entries); });
     if (!rows.length) {
       $('grid-message').textContent = 'Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály.';
       this.rows = [];
       this.nowLine = null;
+      this.win = null;
+      this.focusEl = null;
       $('grid-rows').innerHTML = '';
       $('grid-ticks').innerHTML = '';
       this.showDetail(null);
       return;
     }
-    $('grid-message').textContent = ct.error ? ct.error : (all.length ? '' : 'Pro tento den není program');
+    var ctError = this.app.sourceOn('ct') ? ct.error : null;
+    $('grid-message').textContent = ctError || (all.length ? '' : 'Pro tento den není program');
 
-    var axisStart = CT.GuideLayout.axisStart(all);
-    if (axisStart === null) axisStart = CT.Days.atMinute(this.day, 5 * 60);
-    var axisEnd = all.length ? Math.max.apply(null, all.map(function (e) { return e.end; })) : axisStart + 24 * 60 * MINUTE;
+    // Exactly the broadcast day 05:00–05:00 Prague; programmes crossing 05:00 are clipped.
+    var bounds = CT.Days.bounds(this.day);
+    var axisStart = bounds[0];
+    var axisEnd = bounds[1];
     this.axisStart = axisStart;
     this.axisEnd = axisEnd;
 
     var ticks = $('grid-ticks');
     ticks.innerHTML = '';
     ticks.style.width = px(axisEnd - axisStart) + 'px';
+    var tickBox = document.createDocumentFragment();
     CT.GuideLayout.ticks(axisStart, axisEnd).forEach(function (t) {
       var tick = el('div', 'tick', CT.Days.time(t));
       tick.style.left = px(t - axisStart) + 'px';
-      ticks.appendChild(tick);
+      tickBox.appendChild(tick);
     });
+    ticks.appendChild(tickBox);
 
+    // Only data here: cells get DOM when they come near the screen (see syncWindow).
+    this.rows = rows.map(function (row) {
+      return { name: row.name, source: row.source, slots: CT.GuideLayout.row(row.entries, axisStart, axisEnd),
+        line: null, nameEl: null, nameX: null, range: null };
+    });
     var container = $('grid-rows');
     container.innerHTML = '';
-    this.rows = rows.map(function (row) {
-      var line = el('div', 'row');
-      line.appendChild(el('div', 'row-name', row.name));
-      var track = el('div', 'row-track');
-      track.style.width = px(axisEnd - axisStart) + 'px';
-      var slots = CT.GuideLayout.row(row.entries, axisStart, axisEnd);
-      slots.forEach(function (slot) {
-        var cell = el('div', 'cell');
-        cell.style.left = px(slot.start - axisStart) + 'px';
-        cell.style.width = Math.max(1, px(slot.end - slot.start) - 4) + 'px';
-        var label = el('div', 'cell-label');
-        if (slot.item) {
-          label.appendChild(el('span', 'cell-time', CT.Days.time(slot.item.start)));
-          label.appendChild(el('span', 'cell-title', slot.item.title));
-        } else {
-          cell.classList.add('filler');
-          label.appendChild(el('span', 'cell-title', 'Mimo vysílání'));
-        }
-        cell.appendChild(label);
-        track.appendChild(cell);
-        slot.el = cell;
-        slot.label = label;
-      });
-      line.appendChild(track);
-      container.appendChild(line);
-      return { name: row.name, slots: slots, track: track };
-    });
+    container.style.height = this.rows.length * ROW_HEIGHT + 'px';
     this.nowLine = el('div', 'now-line');
     container.appendChild(this.nowLine);
+    this.win = null;
+    this.focusEl = null;
+    this.viewRows = this.visibleRows();
+    this.viewPx = this.viewWidth();
     this.refreshLooks();
 
     // Open at "now" (or the same time of day on other days), half an hour of past on the left.
@@ -219,19 +214,114 @@
     if (this.scrollRow > this.focusRow) this.scrollRow = this.focusRow;
     this.liveMode = this.isToday();
     this.focusSlot = this.liveMode ? this.verticalSlot(this.focusRow) : this.slotAt(this.focusRow, anchor);
+    if (this.pendingEdge) {
+      // Scrolled past the previous day's edge: continue at this day's start (or end), in the same row.
+      var slots = this.rows[this.focusRow].slots;
+      this.liveMode = false;
+      this.focusSlot = this.pendingEdge === 'start' ? 0 : slots.length - 1;
+      var edgeSlot = slots[this.focusSlot];
+      this.anchor = this.pendingEdge === 'start' ? edgeSlot.start + MINUTE : edgeSlot.end - MINUTE;
+      this.scrollX = this.pendingEdge === 'start' ? 0 : Math.max(0, px(axisEnd - axisStart) - this.viewPx + 20);
+      this.pendingEdge = null;
+    }
     this.zone = this.zone === 'days' && this.app.inContent() ? 'days' : 'grid';
     this.applyFocus();
   };
 
-  /** Re-colours cells and moves the now line; called every 30 s. */
+  /**
+   * Gives DOM only to the cells in the window around the viewport (spec/apps.md, performance): a day of
+   * dozens of Anténa channels is thousands of cells, far too many for a TV to lay out and restyle.
+   */
+  GuideScreen.prototype.syncWindow = function () {
+    var L = CT.GuideLayout;
+    var view = {
+      row: this.scrollRow,
+      rows: this.viewRows,
+      start: this.axisStart + this.scrollX / PX_PER_MIN * MINUTE,
+      end: this.axisStart + (this.scrollX + this.viewPx) / PX_PER_MIN * MINUTE
+    };
+    if (L.covers(this.win, view, this.rows.length, 1, 30 * MINUTE)) return;
+    var old = this.win;
+    var win = L.window(view, this.rows.length);
+    var container = $('grid-rows');
+    var r;
+    if (old) {
+      for (r = old.r0; r < old.r1; r++) if (r < win.r0 || r >= win.r1) this.dropRow(this.rows[r]);
+    }
+    for (r = win.r0; r < win.r1; r++) this.fillRow(this.rows[r], r, L.slotRange(this.rows[r].slots, win.t0, win.t1), container);
+    this.win = win;
+  };
+
+  GuideScreen.prototype.dropRow = function (row) {
+    if (!row || !row.line) return;
+    if (row.line.parentNode) row.line.parentNode.removeChild(row.line);
+    if (row.range) for (var i = row.range[0]; i < row.range[1]; i++) row.slots[i].el = row.slots[i].label = null;
+    row.line = row.nameEl = row.nameX = row.range = null;
+  };
+
+  /** Creates the row's line once, then adds/removes cells so exactly `range` [from, to) has DOM. */
+  GuideScreen.prototype.fillRow = function (row, index, range, container) {
+    var i;
+    if (!row.line) {
+      row.line = el('div', 'row');
+      row.line.style.top = index * ROW_HEIGHT + 'px';
+      row.nameEl = el('div', 'row-name');
+      row.nameEl.appendChild(CT.sourceIcon(row.source));
+      row.nameEl.appendChild(el('span', 'row-name-text', row.name));
+      row.line.appendChild(row.nameEl);
+      row.track = el('div', 'row-track');
+      row.track.style.width = px(this.axisEnd - this.axisStart) + 'px';
+      row.line.appendChild(row.track);
+      container.insertBefore(row.line, this.nowLine);
+      row.range = [0, 0];
+    }
+    var had = row.range;
+    for (i = had[0]; i < had[1]; i++) {
+      if (i < range[0] || i >= range[1]) {
+        row.track.removeChild(row.slots[i].el);
+        row.slots[i].el = row.slots[i].label = null;
+      }
+    }
+    var added = document.createDocumentFragment();
+    for (i = range[0]; i < range[1]; i++) if (!row.slots[i].el) added.appendChild(this.cell(row.slots[i]));
+    row.track.appendChild(added);
+    row.range = range;
+  };
+
+  GuideScreen.prototype.cell = function (slot) {
+    var cell = el('div', 'cell');
+    cell.style.left = px(slot.start - this.axisStart) + 'px';
+    cell.style.width = Math.max(1, px(slot.end - slot.start) - 4) + 'px';
+    var label = el('div', 'cell-label');
+    if (slot.item) {
+      slot.look = CT.Entries.look(slot.item, this.app.now);
+      cell.className = 'cell look-' + slot.look;
+      label.appendChild(el('span', 'cell-time', CT.Days.time(slot.item.start)));
+      label.appendChild(el('span', 'cell-title', slot.item.title));
+    } else {
+      cell.classList.add('filler');
+      label.appendChild(el('span', 'cell-title', 'Mimo vysílání'));
+    }
+    cell.appendChild(label);
+    slot.el = cell;
+    slot.label = label;
+    slot.shift = 0;
+    return cell;
+  };
+
+  /** Re-colours the cells that have DOM (others get their look when created) and moves the now line; every 30 s. */
   GuideScreen.prototype.refreshLooks = function () {
     var now = this.app.now;
     this.rows.forEach(function (row) {
-      row.slots.forEach(function (slot) {
-        if (!slot.item) return;
+      if (!row.range) return;
+      for (var i = row.range[0]; i < row.range[1]; i++) {
+        var slot = row.slots[i];
+        if (!slot.item) continue;
         var look = CT.Entries.look(slot.item, now);
+        if (look === slot.look) continue;
+        slot.look = look;
         slot.el.className = 'cell look-' + look + (slot.el.classList.contains('focused') ? ' focused' : '');
-      });
+      }
     });
     if (this.nowLine) {
       var inRange = now >= this.axisStart && now <= this.axisEnd;
@@ -257,24 +347,31 @@
     Array.prototype.forEach.call($('days').children, function (chip, i) {
       chip.classList.toggle('focused', active && self.zone === 'days' && i === self.dayFocus);
     });
-    this.rows.forEach(function (row, r) {
-      row.slots.forEach(function (slot, s) {
-        slot.el.classList.toggle('focused', active && self.zone === 'grid' && r === self.focusRow && s === self.focusSlot);
-      });
-    });
     var slot = this.focused();
-    if (slot) this.scrollTo(slot);
+    if (slot) this.scrollTo(slot, this.verticalMove); // also gives the focused cell its DOM
+    this.verticalMove = false;
+    // Only the previous and the new focused cell change, not every cell of the grid.
+    var target = active && this.zone === 'grid' && slot ? slot.el : null;
+    if (this.focusEl && this.focusEl !== target) this.focusEl.classList.remove('focused');
+    if (target) target.classList.add('focused');
+    this.focusEl = target;
     this.showDetail(slot ? slot.item : null);
   };
 
-  /** Keeps the focused cell on screen; a cell wider than the view only scrolls when it is out of sight. */
-  GuideScreen.prototype.scrollTo = function (slot) {
-    var view = this.viewWidth();
+  /**
+   * Keeps the focused cell on screen; a cell wider than the view only scrolls when it is out of sight.
+   * After up/down (`keepTime`) a cell that is partly on screen does not scroll the time axis: the rows'
+   * cells start at different times, and scrolling for each would move (and rebuild) the window per press.
+   */
+  GuideScreen.prototype.scrollTo = function (slot, keepTime) {
+    var view = this.viewPx;
     var left = px(slot.start - this.axisStart);
     var right = px(slot.end - this.axisStart);
     var total = px(this.axisEnd - this.axisStart);
     var x = this.scrollX;
-    if (right - left > view - 120) {
+    if (keepTime && right > x + 60 && left < x + view - 60) {
+      // stays: the cell is visible where the viewer looks
+    } else if (right - left > view - 120) {
       if (right < x + 120 || left > x + view - 120) x = left - 60;
     } else if (left < x) {
       x = left - 60;
@@ -283,37 +380,61 @@
     }
     this.scrollX = Math.max(0, Math.min(x, Math.max(0, total - view + 20)));
 
-    var visible = this.visibleRows();
+    var visible = this.viewRows;
     if (this.focusRow < this.scrollRow) this.scrollRow = this.focusRow;
     if (this.focusRow >= this.scrollRow + visible) this.scrollRow = this.focusRow - visible + 1;
+    this.syncWindow();
 
     var tx = 'translate(' + (-this.scrollX) + 'px, ' + (-this.scrollRow * ROW_HEIGHT) + 'px)';
     $('grid-rows').style.transform = tx;
     $('grid-ticks').style.transform = 'translateX(' + (-this.scrollX) + 'px)';
-    // Channel names stay put horizontally.
-    Array.prototype.forEach.call(document.querySelectorAll('#grid-rows .row-name'), function (name) {
-      name.style.transform = 'translateX(' + this.scrollX + 'px)';
-    }, this);
-    // Titles of cells that began left of the view stay readable.
+    // Channel names stay put horizontally; titles of cells that began left of the view stay readable.
+    // Only cells with DOM, and only when the value changes.
     var viewStart = this.scrollX;
     this.rows.forEach(function (row) {
-      row.slots.forEach(function (s) {
+      if (!row.range) return;
+      if (row.nameX !== viewStart) {
+        row.nameEl.style.transform = 'translateX(' + viewStart + 'px)';
+        row.nameX = viewStart;
+      }
+      for (var i = row.range[0]; i < row.range[1]; i++) {
+        var s = row.slots[i];
         var l = px(s.start - this.axisStart);
         var w = px(s.end - s.start);
         var shift = l < viewStart ? Math.min(viewStart - l, Math.max(0, w - 160)) : 0;
-        s.label.style.transform = shift ? 'translateX(' + shift + 'px)' : '';
-      }, this);
+        if (shift !== s.shift) {
+          s.label.style.transform = shift ? 'translateX(' + shift + 'px)' : '';
+          s.shift = shift;
+        }
+      }
     }, this);
   };
 
-  GuideScreen.prototype.showDetail = function (entry) {
+  /** Shows the image of the detail panel: a URL, the antenna placeholder, or nothing. */
+  function setDetailImage(url, placeholder) {
     var image = $('detail-image');
+    image.style.backgroundImage = url ? 'url("' + url.replace(/"/g, '%22') + '")' : '';
+    image.classList.toggle('placeholder', !url && !!placeholder);
+    image.innerHTML = '';
+    if (!url && placeholder) image.appendChild(CT.sourceIcon('dvb'));
+    image.style.visibility = url || placeholder ? 'visible' : 'hidden';
+  }
+
+  /** Again for the same entry (e.g. the gateway's thumbnail switch changed). */
+  GuideScreen.prototype.refreshDetail = function () {
+    if (this.detailEntry !== undefined) this.showDetail(this.detailEntry);
+  };
+
+  GuideScreen.prototype.showDetail = function (entry) {
+    var self = this;
+    var image = $('detail-image');
+    this.detailEntry = entry || null;
+    clearTimeout(this.thumbTimer);
     if (!entry) {
       $('detail-title').textContent = '';
       $('detail-meta').textContent = '';
       $('detail-description').textContent = '';
-      image.style.backgroundImage = '';
-      image.style.visibility = 'hidden';
+      setDetailImage('', false);
       return;
     }
     $('detail-title').textContent = entry.title + (entry.subtitle ? ' · ' + entry.subtitle : '');
@@ -324,10 +445,22 @@
     if (look === 'dimmed') meta.push(entry.source === 'dvb' ? CT.DvbMessages.NOT_RECORDED : 'Nedostupné');
     $('detail-meta').textContent = meta.join('  ·  ');
     $('detail-description').textContent = entry.description;
+    if (entry.source === 'dvb') {
+      // Anténa: placeholder, then the gateway thumbnail once focus rests (spec/apps.md "Anténa thumbnails").
+      setDetailImage('', true);
+      var recordingId = CT.Thumbs.wanted(this.app.dvbThumbs, CT.ThumbsSwitch.on(), entry);
+      if (!recordingId) return;
+      var final = entry.item.recording.state === 'completed';
+      this.thumbTimer = setTimeout(function () {
+        self.app.loadThumb(recordingId, final).then(function (url) {
+          if (url && self.detailEntry === entry) setDetailImage(url, true);
+        });
+      }, CT.Thumbs.DELAY_MS);
+      return;
+    }
     // Only https images from the API; nothing is cached by the app.
     var url = /^https:\/\//.test(entry.imageUrl) ? entry.imageUrl : '';
-    image.style.backgroundImage = url ? 'url("' + url.replace(/"/g, '%22') + '")' : '';
-    image.style.visibility = url ? 'visible' : 'hidden';
+    setDetailImage(url, false);
   };
 
   /** Returns false when the key leaves the screen upwards (to the tabs). */
@@ -345,7 +478,16 @@
       case 'right': {
         var slots = this.rows[this.focusRow].slots;
         var next = this.focusSlot + (key === 'left' ? -1 : 1);
-        if (next < 0 || next >= slots.length) break;
+        if (next < 0 || next >= slots.length) {
+          // "Across days": past the first/last cell continues in the previous/next day (none at the range's ends).
+          var other = CT.GuideLayout.neighbourDay(this.days, this.day, key === 'left' ? -1 : 1);
+          if (other) {
+            this.liveMode = false;
+            this.selectDay(other, key === 'left' ? 'end' : 'start');
+            return true;
+          }
+          break;
+        }
         this.liveMode = false; // the viewer browses the timeline now
         this.focusSlot = next;
         this.anchor = Math.max(slots[next].start, viewStartTime) + MINUTE;
@@ -358,11 +500,13 @@
         }
         this.focusRow--;
         this.focusSlot = this.verticalSlot(this.focusRow);
+        this.verticalMove = true;
         break;
       case 'down':
         if (this.focusRow < this.rows.length - 1) {
           this.focusRow++;
           this.focusSlot = this.verticalSlot(this.focusRow);
+          this.verticalMove = true;
         }
         break;
       case 'chup':
@@ -370,6 +514,7 @@
         var page = this.visibleRows() * (key === 'chup' ? -1 : 1);
         this.focusRow = Math.max(0, Math.min(this.rows.length - 1, this.focusRow + page));
         this.focusSlot = this.verticalSlot(this.focusRow);
+        this.verticalMove = true;
         break;
       }
       case 'enter':

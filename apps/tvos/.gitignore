@@ -4,3 +4,5 @@ CTCore/.build/
 CTCore/.swiftpm/
 build/
 DerivedData/
+# Written by the "Stamp build info" build phase
+Televize/App/BuildStamp.generated.swift

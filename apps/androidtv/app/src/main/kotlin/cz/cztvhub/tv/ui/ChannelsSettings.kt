@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -31,17 +32,14 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import cz.cztvhub.core.ChannelPrefs
-import cz.cztvhub.core.Channels
 import cz.cztvhub.tv.R
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.yield
 import androidx.compose.ui.unit.IntSize
 
-/** A row of the settings list: a channel's key and name. */
-private data class ChannelItem(val key: String, val name: String)
-
 /**
- * "Kanály" in Nastavení (spec/apps.md): per group rows `[☑ name] [▲] [▼]` that hide/show and reorder the
+ * "Kanály" in Nastavení (spec/apps.md): the source switches "Internetová TV (ČT)" and "Anténa" (with a gateway),
+ * then one list "Pořadí kanálů" mixing both sources, rows `[icon ☑ name] [▲] [▼]` that hide/show and reorder the
  * channels of Živě and the guide on this device, then "Obnovit výchozí pořadí".
  */
 @Composable
@@ -53,31 +51,53 @@ fun ChannelsSection(viewModel: MainViewModel) {
         Text(stringResource(R.string.channels_intro), color = Palette.textDim)
 
         val antenna = dvb
-        if (antenna != null) Text(stringResource(R.string.group_internet), style = MaterialTheme.typography.titleMedium)
-        val ctNames = Channels.all.associate { ChannelPrefs.ctKey(it.id) to it.name }
-        GroupList(prefs, ChannelOrder.ctKeys, ctNames, viewModel)
+        Text(stringResource(R.string.channels_sources), style = MaterialTheme.typography.titleMedium)
+        SourceSwitch(prefs, ChannelPrefs.SOURCE_CT, R.string.source_internet, viewModel)
+        if (antenna != null) SourceSwitch(prefs, ChannelPrefs.SOURCE_DVB, R.string.source_antenna, viewModel)
 
-        if (antenna != null) {
-            Text(stringResource(R.string.group_antenna), style = MaterialTheme.typography.titleMedium)
-            when {
-                antenna.channels.isNotEmpty() -> {
-                    val names = antenna.channels.associate { ChannelPrefs.dvbKey(it.id) to it.name }
-                    GroupList(prefs, ChannelOrder.dvbKeys(antenna.channels), names, viewModel)
-                }
-                antenna.error != null ->
-                    Text(stringResource(R.string.channels_antenna_unavailable, antenna.error), color = Palette.nowLine)
-                else -> Text(stringResource(R.string.loading), color = Palette.textDim)
+        Text(
+            stringResource(R.string.channels_order),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(top = 12.dp),
+        )
+        if (antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) && antenna.channels.isEmpty()) {
+            if (antenna.error != null) {
+                Text(stringResource(R.string.channels_antenna_unavailable, antenna.error), color = Palette.nowLine)
+            } else {
+                Text(stringResource(R.string.loading), color = Palette.textDim)
             }
+        }
+        val dvbChannels = antenna?.channels.orEmpty()
+        val keys = ChannelOrder.keys(prefs, dvbChannels)
+        if (keys.isEmpty()) {
+            Text(stringResource(R.string.channels_none_listed), color = Palette.textDim)
+        } else {
+            OrderList(prefs, keys, ChannelOrder.all(prefs, dvbChannels), viewModel)
         }
 
         Button(onClick = { viewModel.resetChannelPrefs() }) { Text(stringResource(R.string.channels_reset)) }
     }
 }
 
+/** `[☑ icon Internetová TV (ČT)]`: the whole source on or off. */
+@Composable
+private fun SourceSwitch(prefs: ChannelPrefs, source: String, label: Int, viewModel: MainViewModel) {
+    val on = prefs.isSourceOn(source)
+    Button(
+        onClick = { viewModel.updateChannelPrefs { it.toggleSource(source) } },
+        modifier = Modifier.width(520.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (on) "☑" else "☐")
+            SourceIcon(source == ChannelPrefs.SOURCE_DVB)
+            Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GroupList(prefs: ChannelPrefs, keys: List<String>, names: Map<String, String>, viewModel: MainViewModel) {
-    val all = prefs.arrange(keys).all.map { ChannelItem(it, names[it].orEmpty()) }
+private fun OrderList(prefs: ChannelPrefs, keys: List<String>, all: List<ListedChannel>, viewModel: MainViewModel) {
     // One requester per button and channel, so focus can follow a moved row when its button turns disabled.
     val ups = remember { mutableMapOf<String, FocusRequester>() }
     val downs = remember { mutableMapOf<String, FocusRequester>() }
@@ -88,7 +108,7 @@ private fun GroupList(prefs: ChannelPrefs, keys: List<String>, names: Map<String
     val margin = with(LocalDensity.current) { 48.dp.toPx() }
     val scope = rememberCoroutineScope()
 
-    fun move(item: ChannelItem, by: Int) {
+    fun move(item: ListedChannel, by: Int) {
         val index = all.indexOfFirst { it.key == item.key }
         val target = index + by
         viewModel.updateChannelPrefs { it.move(item.key, by, keys) }
@@ -134,11 +154,11 @@ private fun GroupList(prefs: ChannelPrefs, keys: List<String>, names: Map<String
                             .alpha(if (hidden) 0.5f else 1f)
                             .semantics { contentDescription = showLabel },
                     ) {
-                        Text(
-                            (if (hidden) "☐  " else "☑  ") + item.name,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (hidden) "☐" else "☑")
+                            SourceIcon(item.isAntenna)
+                            Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                     Button(
                         onClick = { move(item, -1) },

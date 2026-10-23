@@ -85,6 +85,28 @@ final class DVBTests: XCTestCase {
         XCTAssertTrue(status.tvheadendReachable)
     }
 
+    func testStatusThumbnailsFlag() throws {
+        let fixture = try dvbFixture("dvb_tvos_status")
+        XCTAssertFalse(try DVBParser.status(status: fixture.status, body: fixture.body).thumbnails, "missing = off")
+        let on = Data(#"{"enabled": true, "retentionDays": 3, "tuners": [], "tvheadendReachable": true, "thumbnails": true}"#.utf8)
+        XCTAssertTrue(try DVBParser.status(status: 200, body: on).thumbnails)
+    }
+
+    func testThumbnailOnlyForRecordedEventsWhenBothAllow() {
+        func event(_ state: DVBRecording.State?) -> DVBEvent {
+            DVBEvent(id: "e", channel: "c", title: "t", start: Date(timeIntervalSince1970: 0),
+                     end: Date(timeIntervalSince1970: 60), recording: state.map { DVBRecording(id: "r", state: $0) })
+        }
+        XCTAssertEqual(AntennaThumbnails.recordingID(for: event(.completed), gatewayAllows: true, tvAllows: true), "r")
+        XCTAssertEqual(AntennaThumbnails.recordingID(for: event(.recording), gatewayAllows: true, tvAllows: true), "r")
+        for state in [DVBRecording.State.scheduled, .failed, .unknown] {
+            XCTAssertNil(AntennaThumbnails.recordingID(for: event(state), gatewayAllows: true, tvAllows: true))
+        }
+        XCTAssertNil(AntennaThumbnails.recordingID(for: event(nil), gatewayAllows: true, tvAllows: true))
+        XCTAssertNil(AntennaThumbnails.recordingID(for: event(.completed), gatewayAllows: false, tvAllows: true))
+        XCTAssertNil(AntennaThumbnails.recordingID(for: event(.completed), gatewayAllows: true, tvAllows: false))
+    }
+
     func testErrorsUseGatewayCzechText() throws {
         for (fixture, message) in [("dvb_tvos_unauthorized", "Chybí nebo nesedí klíč"),
                                    ("dvb_tvos_epg_bad_date", "Program je k dispozici jen od 2026-10-15 do 2026-10-20")] {

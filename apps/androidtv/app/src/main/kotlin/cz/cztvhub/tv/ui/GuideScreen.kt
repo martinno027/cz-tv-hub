@@ -35,11 +35,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -70,10 +71,10 @@ import cz.cztvhub.core.Action
 import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.GuideLayout
+import cz.cztvhub.core.GuideWindow
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.dvb.DvbAction
-import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
 import cz.cztvhub.tv.OfficialAppLauncher
@@ -97,13 +98,30 @@ private class AppButtonLink {
     var lastCell: FocusRequester = FocusRequester.Default
 }
 
+/** Where focus lands after scrolling past a day's edge: [rowKey]'s first cell, or its last when [atEnd]. */
+private data class DayEdge(val rowKey: String, val atEnd: Boolean)
+
 private class GridNav(var cursor: Instant, var live: Boolean) {
     var row = -1
+    /** Index of the focused cell in its row. */
+    var cell = -1
+    /** The focused cell; always composed (the window follows it), so focus can return to it. */
+    var last: Cell? = null
     var vertical = false
 }
 
-/** A laid-out slot; [entry] is null for a "Mimo vysílání" filler. */
-private class Cell(val slot: GuideLayout.Slot<Entry>, val x: Dp, val width: Dp, val startLabel: String) {
+/**
+ * A laid-out slot; [entry] is null for a "Mimo vysílání" filler. [fromMin]/[toMin] are minutes from the
+ * axis start (for the composed [GuideWindow]).
+ */
+private class Cell(
+    val slot: GuideLayout.Slot<Entry>,
+    val x: Dp,
+    val width: Dp,
+    val startLabel: String,
+    val fromMin: Double,
+    val toMin: Double,
+) {
     val entry: Entry? get() = slot.item
     val requester = FocusRequester()
 }
@@ -144,6 +162,20 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val dvb by viewModel.dvb.collectAsStateWithLifecycle()
     val dvbPlans by viewModel.dvbPlans.collectAsStateWithLifecycle()
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
+    val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
+    // "Anténa thumbnails": only for the focused programme, when the gateway (dvb) and this TV allow it.
+    val thumbnailOf: (DvbEvent) -> Pair<String, Map<String, String>>? =
+        remember(dvb?.thumbnails, thumbnailsOnTv) { { event -> viewModel.thumbnail(event) } }
+
+    // "Across days" (spec/apps.md): left/right past a row's end opens the neighbouring day.
+    var edge by remember { mutableStateOf<DayEdge?>(null) }
+    val onEdge: (String, Boolean) -> Unit = { rowKey, forward ->
+        Days.adjacentGuideDay(day, viewModel.today, forward)?.let { next ->
+            edge = DayEdge(rowKey, atEnd = !forward)
+            selection.focused = null
+            viewModel.selectDay(next)
+        }
+    }
 
     val context = LocalContext.current
     val onOpenApp: () -> Unit = remember(selection) {
@@ -151,9 +183,9 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        DayPicker(viewModel.today, day, onSelect = { selection.focused = null; viewModel.selectDay(it) })
+        DayPicker(viewModel.today, day, onSelect = { edge = null; selection.focused = null; viewModel.selectDay(it) })
         Spacer(Modifier.height(8.dp))
-        DetailPanel(selection, now, appButton, onOpenApp)
+        DetailPanel(selection, now, appButton, onOpenApp, thumbnailOf)
         Spacer(Modifier.height(8.dp))
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
@@ -164,15 +196,21 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                 val dvbChannels = dvb?.channels.orEmpty()
                 val dvbPlan = dvbPlans[day].orEmpty()
                 val rows = remember(plan.value, dvbChannels, dvbPlan, prefs) {
-                    guideRows(plan.value, ChannelOrder.visibleDvb(prefs, dvbChannels), dvbPlan, prefs)
+                    guideRows(plan.value, ChannelOrder.visible(prefs, dvbChannels), dvbPlan)
                 }
-                if (rows.isEmpty() && (dvb == null || dvbChannels.isNotEmpty())) {
+                // Anténa on but its channels not loaded yet: not "everything hidden".
+                val antennaPending = dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
+                    dvbChannels.isEmpty() && dvb?.error == null
+                if (rows.isEmpty() && !antennaPending) {
                     CenteredMessage(stringResource(R.string.channels_all_hidden))
                 } else if (rows.all { it.entries.isEmpty() }) {
                     CenteredMessage(stringResource(R.string.empty_day))
                 } else {
                     key(day) {
-                        EpgGrid(rows = rows, now = now, appButton = appButton, onFocus = onFocus, onSelect = onSelect)
+                        EpgGrid(
+                            rows = rows, day = day, now = now, appButton = appButton, onFocus = onFocus, onSelect = onSelect,
+                            startAt = edge, onStarted = { edge = null }, onEdge = onEdge,
+                        )
                     }
                 }
             }
@@ -250,20 +288,27 @@ private fun DayPicker(today: LocalDate, selected: LocalDate, onSelect: (LocalDat
 }
 
 @Composable
-private fun DetailPanel(selection: GuideSelection, now: Instant, appButton: AppButtonLink, onOpenApp: () -> Unit) {
+private fun DetailPanel(
+    selection: GuideSelection,
+    now: Instant,
+    appButton: AppButtonLink,
+    onOpenApp: () -> Unit,
+    thumbnailOf: (DvbEvent) -> Pair<String, Map<String, String>>?,
+) {
     val focused = selection.focused
     val notice = selection.notice
     appButton.shown = focused is CtEntry && !now.isBefore(focused.start)
     Row(Modifier.fillMaxWidth().height(118.dp)) {
         if (focused == null) return@Row
         val p = focused
-        RemoteImage(
-            p.imageUrl,
-            Modifier
-                .width(210.dp)
-                .fillMaxHeight()
-                .background(Palette.surfaceDim, RoundedCornerShape(8.dp)),
-        )
+        val imageModifier = Modifier
+            .width(210.dp)
+            .fillMaxHeight()
+            .background(Palette.surfaceDim, RoundedCornerShape(8.dp))
+        when (p) {
+            is CtEntry -> RemoteImage(p.imageUrl, imageModifier)
+            is DvbEntry -> AntennaImage(remember(p.event.id, thumbnailOf) { thumbnailOf(p.event) }, imageModifier)
+        }
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Text(p.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -329,36 +374,48 @@ private fun stateLabel(entry: Entry, now: Instant): String = when (entry) {
 }
 
 /**
- * CT internet channels first, then the "Anténa" channels (empty rows show as "Mimo vysílání"); only the channels
- * "Kanály" shows, in its order ([dvbChannels] already arranged).
+ * One row per channel "Kanály" shows, CT internet and Anténa mixed in its order ([channels] already arranged);
+ * empty rows show as "Mimo vysílání".
  */
 private fun guideRows(
     plan: DayPlan,
-    dvbChannels: List<DvbChannel>,
+    channels: List<ListedChannel>,
     dvbPlan: Map<String, List<DvbEvent>>,
-    prefs: ChannelPrefs,
-): List<GuideRow> =
-    ChannelOrder.visibleCt(prefs).map { ch -> GuideRow(ch.id, ch.name, plan[ch.id].orEmpty().map { CtEntry(ch, it) }) } +
-        dvbChannels.map { ch -> GuideRow("dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) }) }
+): List<GuideRow> = channels.mapNotNull { listed ->
+    val ct = listed.ct
+    val ch = listed.dvb
+    when {
+        ct != null -> GuideRow(ct.id, ct.name, plan[ct.id].orEmpty().map { CtEntry(ct, it) })
+        ch != null -> GuideRow("dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) })
+        else -> null
+    }
+}
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun EpgGrid(
     rows: List<GuideRow>,
+    day: LocalDate,
     now: Instant,
     appButton: AppButtonLink,
     onFocus: (Entry?) -> Unit,
     onSelect: (Entry) -> Unit,
+    startAt: DayEdge? = null,
+    onStarted: () -> Unit = {},
+    onEdge: (rowKey: String, forward: Boolean) -> Unit = { _, _ -> },
 ) {
     val plan = rows // remember() key
-    val all = rows.flatMap { it.entries }
-    val axisStart = remember(plan) { GuideLayout.axisStart(all) ?: Instant.now() }
-    val axisEnd = remember(plan) { all.maxOfOrNull { it.end } ?: axisStart }
+    // Opened by scrolling past the previous/next day's edge: start on that row's first/last cell.
+    val edgeStart = remember(plan) { startAt }
+    // Exactly the broadcast day 05:00–05:00 Prague; programmes crossing 05:00 are clipped.
+    val axis = remember(day) { GuideLayout.axis(day) }
+    val axisStart = axis.first
+    val axisEnd = axis.second
     val totalWidth = durationToDp(axisStart, axisEnd) + 8.dp
     // Open at "now" on the current day, at the same time of day on other days.
     val anchor = remember(plan) {
         val current = Instant.now()
-        val sameTimeOfDay = Days.today(axisStart).atTime(current.atZone(Days.ZONE).toLocalTime())
+        val sameTimeOfDay = day.atTime(current.atZone(Days.ZONE).toLocalTime())
             .atZone(Days.ZONE).toInstant()
         val candidate = if (current in axisStart..axisEnd) current else sameTimeOfDay
         if (candidate.isBefore(axisStart) || candidate.isAfter(axisEnd)) axisStart else candidate
@@ -371,29 +428,81 @@ private fun EpgGrid(
                     x = durationToDp(axisStart, slot.start),
                     width = durationToDp(slot.start, slot.end),
                     startLabel = slot.item?.let { Days.time(it.start) }.orEmpty(),
+                    fromMin = minutesBetween(axisStart, slot.start),
+                    toMin = minutesBetween(axisStart, slot.end),
                 )
             }
         }
     }
-    val anchorRequester = remember(plan) {
-        val cells = cellRows.firstOrNull { it.second.isNotEmpty() }?.second.orEmpty()
-        val cell = cellAt(cells, anchor) ?: cells.lastOrNull()
-        cell?.requester ?: FocusRequester.Default
+    val axisEndMin = minutesBetween(axisStart, axisEnd)
+    val anchorRow = remember(plan) {
+        val edgeRow = edgeStart?.let { e -> cellRows.indexOfFirst { it.first.key == e.rowKey && it.second.isNotEmpty() } }
+        edgeRow?.takeIf { it >= 0 } ?: cellRows.indexOfFirst { it.second.isNotEmpty() }.coerceAtLeast(0)
+    }
+    val anchorCell = remember(plan) {
+        val cells = cellRows.getOrNull(anchorRow)?.second.orEmpty()
+        when {
+            edgeStart == null -> cellAt(cells, anchor) ?: cells.lastOrNull()
+            edgeStart.atEnd -> cells.lastOrNull()
+            else -> cells.firstOrNull()
+        }
+    }
+    // The time the grid opens at (scroll position, up/down cursor).
+    val opensAt = remember(plan) { if (edgeStart != null) anchorCell?.slot?.start ?: anchor else anchor }
+    val anchorRequester = anchorCell?.requester ?: FocusRequester.Default
+    // Only the cells in this window are composed (spec/apps.md "Performance"); it follows focus.
+    var window by remember(plan) {
+        val at = anchorCell?.fromMin ?: minutesBetween(axisStart, anchor)
+        mutableStateOf(GuideWindow.around(anchorRow, at, anchorCell?.toMin ?: at, rows.size))
     }
     // Plain memory, not state (nothing renders from it): the focused cell and the time cursor
     // that up/down keep, so a column of the guide can be walked without drifting.
     // "Live column first" (spec/apps.md): on today's guide up/down walk the programmes airing now
     // until the first left/right; a new plan (guide opened, today reloaded) starts it again.
-    val nav = remember(plan) { GridNav(cursor = anchor, live = Instant.now() in axisStart..axisEnd) }
+    val nav = remember(plan) {
+        // A day change ends "Live column first".
+        GridNav(cursor = opensAt, live = edgeStart == null && Instant.now() in axisStart..axisEnd)
+    }
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     var entered by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    /**
+     * Moves focus to [cell] of [rowIndex]. A cell outside the window is composed first (the window moves),
+     * then focused a frame later. Every move in the grid goes through here, so focus never lands on
+     * whatever composed cell is geometrically nearest in another row.
+     */
+    fun focusCell(rowIndex: Int, cell: Cell, vertical: Boolean): Boolean {
+        fun request(): Boolean {
+            nav.vertical = vertical
+            val moved = runCatching { cell.requester.requestFocus() }.isSuccess
+            nav.vertical = false
+            return moved
+        }
+        if (window.contains(rowIndex, cell.fromMin, cell.toMin) && request()) return true
+        window = GuideWindow.around(rowIndex, cell.fromMin, cell.toMin, rows.size)
+        scope.launch {
+            repeat(3) {
+                withFrameNanos { }
+                if (request()) return@launch
+            }
+        }
+        return true
+    }
+
     LaunchedEffect(plan) {
         snapshotFlow { scroll.maxValue }.first { it in 1 until Int.MAX_VALUE }
-        val x = with(density) { durationToDp(axisStart, anchor.minusSeconds(30 * 60)).toPx() }
+        val x = with(density) { durationToDp(axisStart, opensAt.minusSeconds(30 * 60)).toPx() }
         scroll.scrollTo(x.toInt().coerceAtLeast(0))
+        if (edgeStart != null) {
+            // The previous day's grid (and its focus) is gone: focus the edge cell of the new day.
+            entered = true
+            for (attempt in 1..5) {
+                withFrameNanos { }
+                if (runCatching { anchorRequester.requestFocus() }.isSuccess) break
+            }
+        }
     }
 
     CompositionLocalProvider(LocalBringIntoViewSpec provides EpgBringIntoView) {
@@ -405,13 +514,17 @@ private fun EpgGrid(
                 Column(Modifier.width(CHANNEL_COLUMN)) {
                     Spacer(Modifier.height(HEADER_HEIGHT))
                     rows.forEach { row ->
-                        Box(Modifier.height(rowHeight).fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                        Row(
+                            Modifier.height(rowHeight).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            SourceIcon(row.key.startsWith("dvb:"), size = 18.dp)
                             Text(
                                 row.name,
                                 style = MaterialTheme.typography.titleMedium,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
-                                color = if (row.key.startsWith("dvb:")) Palette.accent else Color.Unspecified,
                             )
                         }
                     }
@@ -427,17 +540,32 @@ private fun EpgGrid(
                                 scope.launch { runCatching { anchorRequester.requestFocus() } }
                             }
                         }
-                        .focusRestorer(anchorRequester)
+                        // Back into the grid: the cell focused last (always composed), else the anchor.
+                        .focusRestorer { nav.last?.requester ?: anchorRequester }
                         .focusGroup()
                         // Up/down keep the time position, like a classic EPG, instead of the
                         // geometric default that jumps to whatever cell is nearest on screen.
+                        // Left/right go to the neighbour in the same row (it may not be composed yet).
                         .onPreviewKeyEvent { event ->
+                            // The edge start is used up by the first key (until then a late Anténa
+                            // plan for the day, which rebuilds the grid, still opens at the edge).
+                            if (edgeStart != null && event.type == KeyEventType.KeyDown) onStarted()
                             val step = when (event.key) {
                                 Key.DirectionUp -> -1
                                 Key.DirectionDown -> 1
                                 Key.DirectionLeft, Key.DirectionRight -> {
-                                    if (event.type == KeyEventType.KeyDown) nav.live = false
-                                    return@onPreviewKeyEvent false
+                                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    nav.live = false
+                                    val cells = cellRows.getOrNull(nav.row)?.second ?: return@onPreviewKeyEvent false
+                                    val forward = event.key == Key.DirectionRight
+                                    val target = cells.getOrNull(nav.cell + if (forward) 1 else -1)
+                                    // Past either end of the row: the neighbouring day ("Across days"),
+                                    // never another row; at the range's ends nothing happens.
+                                    if (target == null) {
+                                        cellRows.getOrNull(nav.row)?.first?.key?.let { onEdge(it, forward) }
+                                        return@onPreviewKeyEvent true
+                                    }
+                                    return@onPreviewKeyEvent focusCell(nav.row, target, vertical = false)
                                 }
                                 else -> return@onPreviewKeyEvent false
                             }
@@ -452,17 +580,16 @@ private fun EpgGrid(
                             val moment = if (nav.live) Instant.now() else nav.cursor
                             val target = cellRows.getOrNull(next)?.second?.let { cellAt(it, moment) }
                                 ?: return@onPreviewKeyEvent false
-                            nav.vertical = true
-                            val moved = runCatching { target.requester.requestFocus() }.isSuccess
-                            nav.vertical = false
-                            moved
+                            focusCell(next, target, vertical = true)
                         },
                 ) {
                     Column(Modifier.width(totalWidth)) {
                         TimeHeader(axisStart, axisEnd, visibleStartPx = { scroll.value.toFloat() }, viewportPx = viewportPx)
+                        val shown = window
                         cellRows.forEachIndexed { rowIndex, (_, cells) ->
                             Box(Modifier.height(rowHeight).fillMaxWidth()) {
-                                cells.forEach { cell ->
+                                if (rowIndex in shown.rows) cells.forEachIndexed { cellIndex, cell ->
+                                    if (shown.overlaps(cell.fromMin, cell.toMin)) key(cell) {
                                     val p = cell.entry
                                     val x = cell.x
                                     val w = cell.width
@@ -483,6 +610,11 @@ private fun EpgGrid(
                                         modifier = modifier,
                                         onFocus = {
                                             nav.row = rowIndex
+                                            nav.cell = cellIndex
+                                            nav.last = cell
+                                            window = GuideWindow.follow(
+                                                window, rowIndex, cell.fromMin, cell.toMin, rows.size, axisEndMin,
+                                            )
                                             appButton.lastCell = cell.requester
                                             if (!nav.vertical) {
                                                 val visibleStart = axisStart.plusSeconds(
@@ -494,6 +626,7 @@ private fun EpgGrid(
                                         },
                                         onClick = { if (p != null) onSelect(p) },
                                     )
+                                    }
                                 }
                             }
                         }
@@ -662,6 +795,8 @@ private object EpgBringIntoView : BringIntoViewSpec {
 /** The cell airing at [moment], else the next one, else the last one before it. */
 private fun cellAt(cells: List<Cell>, moment: Instant): Cell? =
     GuideLayout.slotAt(cells.map { it.slot }, moment)?.let(cells::get)
+
+private fun minutesBetween(from: Instant, to: Instant): Double = Duration.between(from, to).seconds / 60.0
 
 private fun durationToDp(from: Instant, to: Instant): Dp =
     DP_PER_MINUTE * (Duration.between(from, to).seconds / 60f)

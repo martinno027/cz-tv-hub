@@ -114,6 +114,21 @@ public struct DVBStatus: Sendable, Equatable {
     public let retentionDays: Int
     public let tuners: [Tuner]
     public let tvheadendReachable: Bool
+    /// The household allows programme thumbnails (spec/dvb-gateway.md "Thumbnails"); missing = off.
+    public var thumbnails: Bool = false
+}
+
+/// "Anténa thumbnails" (spec/apps.md): which recording's still the guide detail may show.
+public enum AntennaThumbnails {
+    /// Recording id to load, or nil: only completed/recording entries, only when both the gateway
+    /// and this TV allow thumbnails.
+    public static func recordingID(for event: DVBEvent, gatewayAllows: Bool, tvAllows: Bool) -> String? {
+        guard gatewayAllows, tvAllows, let recording = event.recording else { return nil }
+        switch recording.state {
+        case .completed, .recording: return recording.id
+        case .scheduled, .failed, .unknown: return nil
+        }
+    }
 }
 
 extension Programme: TimedItem {}
@@ -182,7 +197,8 @@ public enum DVBParser {
             enabled: root["enabled"] as? Bool ?? false,
             retentionDays: (root["retentionDays"] as? NSNumber)?.intValue ?? 0,
             tuners: tuners,
-            tvheadendReachable: root["tvheadendReachable"] as? Bool ?? false
+            tvheadendReachable: root["tvheadendReachable"] as? Bool ?? false,
+            thumbnails: root["thumbnails"] as? Bool ?? false
         )
     }
 
@@ -255,6 +271,14 @@ public struct DVBClient: Sendable {
     public func adBreaks(recordingID: String) async throws -> [AdBreak] {
         let response = try await get("/dvb/recording/\(escape(recordingID))/breaks")
         return try AdBreaks.parse(status: response.status, body: response.body)
+    }
+
+    /// One still of a recording as JPEG, or nil when the gateway has none (404) or it is not an image.
+    /// Memory only: the caller passes a transport without a disk cache (spec/dvb-gateway.md "Thumbnails").
+    public func thumbnail(recordingID: String) async throws -> Data? {
+        let response = try await get("/dvb/recording/\(escape(recordingID))/thumb.jpg")
+        guard response.status == 200, response.body.starts(with: [0xFF, 0xD8]) else { return nil }
+        return response.body
     }
 
     public func liveURL(channelID: String) -> URL { config.url("/dvb/live/\(escape(channelID)).m3u8") }
