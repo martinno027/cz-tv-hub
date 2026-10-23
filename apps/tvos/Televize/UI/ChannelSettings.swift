@@ -98,6 +98,7 @@ struct ChannelSettingsSection: View {
 
     private func list(_ items: [Item], proxy: ScrollViewProxy) -> some View {
         let keys = items.map(\.id)
+        let visible = model.channelPrefs.prefs.arrange(keys).visible
         return VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 let hidden = model.channelPrefs.prefs.isHidden(item.id)
@@ -110,6 +111,11 @@ struct ChannelSettingsSection: View {
                             SourceIcon(source: item.source)
                                 .foregroundStyle(.secondary)
                                 .frame(width: 34)
+                            // channel number on this TV; a hidden row has none
+                            Text(ChannelNumbers.number(of: item.id, in: visible).map(String.init) ?? "")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 60, alignment: .trailing)
                             Text(item.name)
                         }
                         .frame(width: 560, alignment: .leading)

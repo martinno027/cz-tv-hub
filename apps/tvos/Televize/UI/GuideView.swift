@@ -583,12 +583,16 @@ private struct GuideGrid: View, Equatable {
                 VStack(alignment: .leading, spacing: GuideView.rowSpacing) {
                     Color.clear
                         .frame(width: GuideView.channelColumnWidth, height: GuideView.headerHeight)
-                    ForEach(rows) { row in
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         HStack(spacing: 8) {
                             SourceIcon(source: row.source)
                                 .font(.system(size: 18))
                                 .foregroundStyle(.secondary)
                                 .frame(width: 24)
+                            // channel number on this TV = row position (rows are the visible channels)
+                            Text("\(index + 1)")
+                                .font(.system(size: 20, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(.secondary)
                             Text(row.name)
                                 .font(.system(size: 28, weight: .bold))
                                 .lineLimit(1)

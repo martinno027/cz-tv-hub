@@ -20,7 +20,7 @@ final class PlayerController {
     let player = AVPlayer()
     var onFatalError: ((String) -> Void)?
 
-    private let resolve: @MainActor () async throws -> PlaybackSource
+    private var resolve: @MainActor () async throws -> PlaybackSource
     private var source: PlaybackSource
     private var hasRetried = false
     private var statusObservation: NSKeyValueObservation?
@@ -30,6 +30,7 @@ final class PlayerController {
     private var diagnosticObservers: [NSObjectProtocol] = []
     private var timeObserver: Any?
     private var started = false
+    private var stopped = false
 
     // "Přeskočit reklamu" (finished gateway recordings only).
     private let fetchAdBreaks: (@Sendable () async throws -> [AdBreak])?
@@ -54,7 +55,7 @@ final class PlayerController {
     private let resumeStore: ResumeStore?
     private var progressObserver: Any?
     private var title: PlayerTitle
-    private let liveTitle: (@MainActor () async -> PlayerTitle)?
+    private var liveTitle: (@MainActor () async -> PlayerTitle)?
     private var titleTask: Task<Void, Never>?
     private var backgroundObserver: NSObjectProtocol?
     /// False until the start position has been applied, so the pre-seek position is never saved.
@@ -99,8 +100,25 @@ final class PlayerController {
         #endif
     }
 
+    /// Zapping (live only): plays another channel's already resolved live stream in this player; `resolve` and
+    /// `liveTitle` belong to the new channel from now on (re-resolve after a failure, info bar title).
+    func switchLive(to source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
+                    liveTitle: @escaping @MainActor () async -> PlayerTitle) {
+        guard started, !stopped, self.source.mode == .live, source.mode == .live else { return }
+        titleTask?.cancel()
+        self.source = source
+        self.resolve = resolve
+        self.liveTitle = liveTitle
+        hasRetried = false
+        title = PlayerTitle(title: source.title)
+        applyAudioPreference(language: nil, describesVideo: false)
+        load(source, resume: nil)
+        startLiveTitle()
+    }
+
     /// Safe to call more than once (fatal error, then the screen disappearing).
     func stop() {
+        stopped = true
         saveProgress()
         if let progressObserver { player.removeTimeObserver(progressObserver) }
         progressObserver = nil

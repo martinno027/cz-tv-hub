@@ -99,15 +99,18 @@
       <object id="avplayer" type="application/avplayer"></object>
       <video id="html5player" playsinline></video>
       <div id="player-message"></div>
+      <div id="zap-box"><div id="zap-channel"></div><div id="zap-programme"></div></div>
       <div id="skip-ad">Přeskočit reklamu <span class="key">OK</span></div>
       <div id="osd">
         <div id="osd-title"></div>
         <div id="osd-subtitle"></div>
         <div id="osd-bar"><div id="osd-progress"></div></div>
         <div id="osd-times"><span id="osd-position"></span><span id="osd-state"></span><span id="osd-duration"></span></div>
-        <div id="osd-hint">OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · ▲ zvuk · Zpět konec</div>
+        <div id="osd-hint"></div>
       </div>
     </div>
+
+    <div id="number-entry"></div>
   </div>
 
   <script src="js/core/models.js"></script>
@@ -125,6 +128,7 @@
   <script src="js/core/thumbs.js"></script>
   <script src="js/core/ct-antenna.js"></script>
   <script src="js/core/player-title.js"></script>
+  <script src="js/core/channel-numbers.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
   <!-- Optional, written only into the build by build.py (version, build number, commit, build time). -->
@@ -132,6 +136,7 @@
   <script src="js/ui/keys.js"></script>
   <script src="js/ui/settings-store.js"></script>
   <script src="js/ui/demo.js"></script>
+  <script src="js/ui/zap.js"></script>
   <script src="js/ui/player.js"></script>
   <script src="js/ui/live.js"></script>
   <script src="js/ui/guide.js"></script>

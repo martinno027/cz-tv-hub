@@ -73,7 +73,7 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    labels such as "Čeština", "Angličtina (Dolby)", "Čeština (pro nevidomé)"). The player starts with the default
    rendition (Czech) and offers the others in its audio menu: AVPlayerViewController's own menu (tvOS), Media3's
    track selection in the player controls (Android TV, preferred language `cs`), an OSD choice on the Samsung
-   (AVPlay tracks, ▲ = next audio track, its label shown). A single-track playlist stays as before.
+   (AVPlay tracks, AUDIO/MTS or the green key = next audio track, its label shown). A single-track playlist stays as before.
    On playback error caused by URL expiry, re-resolve once and resume at the same position.
    Live (no start position) starts playing as soon as the player can, without waiting for a ready state first.
 4. **Errors**: show CT's `labels.textShort` (Czech) when present, else a generic Czech message.
@@ -206,6 +206,40 @@ not shown on this TV.
   "Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály."
 - Golden cases: `spec/fixtures/channel_prefs_cases.json` (`arrange` and `move` on mixed lists; the input list is
   already filtered by the sources that are on), tested in all three apps.
+
+## Channel numbers and zapping
+Every channel shown on this TV has a **number**: its 1-based position in `visible` of "Kanály" (hidden channels
+and the channels of a source that is off get no number; the others close up). Reordering or hiding renumbers.
+- **Shown**: in Nastavení → Kanály before the name of each visible row (`1  ČT1`; a hidden row shows no number),
+  on the Živě cards and in the guide's channel column (`1 ČT1`, small and dimmed before the name).
+- **Zapping (live only)**: while the player plays **live** (Živě, CT or Anténa, also when rewound in the
+  timeshift buffer), ▲/▼ switches to the **previous/next** channel in `visible` (▲ = number − 1, ▼ = number + 1),
+  wrapping around at both ends; the dedicated **CH+/CH−** keys do the same (CH+ = next = ▼). Start-over, archive
+  and recordings keep their keys as before (no zapping there).
+- **Number keys**: a remote with digits picks a channel by number, in the live player and on Živě and the guide
+  (there it starts that channel live). Digits collect in a buffer shown top right (`2_`); the buffer is used
+  **at once** when no further digit could give a valid number (`buffer × 10 > count`) or it has 3 digits, else
+  after **2 s** without a digit or on OK. A leading `0` is ignored. A number outside 1…count shows
+  "Kanál <n> není" and nothing changes. Number keys during start-over/archive/recordings are ignored.
+- **Quick presses**: every press moves the target at once and shows the overlay; the new stream is resolved only
+  after **0.6 s** without another zap press (▲▲▲ jumps three channels with one request). Number entry starts the
+  stream right when the buffer is used.
+- **Overlay**: on every zap or number switch a small box top left shows `<number>  <channel name>` and the
+  programme airing now (from the guide data the app already has), for ~3 s. The player's info bar title then follows
+  the new channel ("Title in the player's info bar").
+- The list used is `visible` at the moment the player opened (a settings change applies next time). **Back** after
+  zapping leaves the player as before; on Živě the focus goes to the card of the channel that was playing, if cheap.
+- **Keys per platform**: tvOS = Siri Remote clickpad up/down through press recognizers on the view hosting
+  AVPlayerViewController, only while the transport bar is hidden (with it shown AVKit keeps the arrows; AVKit's
+  `skipToNextChannel` delegate never fired in the simulator), digits from `UIPress.key` when the remote/keyboard
+  sends them (the Siri Remote has none). Android TV = `DPAD_UP`/`DPAD_DOWN`
+  while the player controls are hidden (with the controls shown they move focus in the controls as before),
+  `CHANNEL_UP`/`CHANNEL_DOWN` always, `0`–`9` and `NUMPAD_0`–`9`. Samsung = ▲/▼ and CH+/CH− (registered keys
+  `ChannelUp`/`ChannelDown`), digits `0`–`9` (registered), like the TV's own tuner; the **audio track** choice
+  goes to the remote's **AUDIO/MTS** key and the **green** key (registered `MTS`, `ColorF1Green`) everywhere;
+  outside live ▲ keeps switching it too.
+- Golden cases: `spec/fixtures/channel_numbers_cases.json` (`step` = zap neighbour, `type` = one digit into the
+  buffer, `resolve` = number to channel), tested in all three apps.
 
 ## Quality bar
 - Unit tests for API parsing (all fixtures) and decision rules (all golden cases); no network in tests.

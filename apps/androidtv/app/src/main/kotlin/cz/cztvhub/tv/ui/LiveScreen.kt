@@ -76,6 +76,7 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         channels.chunked(3).forEachIndexed { rowIndex, row ->
             CardRow {
                 row.forEachIndexed { index, channel ->
+                    val number = rowIndex * 3 + index + 1
                     // The very first card takes the initial focus.
                     val base = Modifier.weight(1f).fillMaxHeight()
                     val modifier = if (rowIndex == 0 && index == 0) base.focusRequester(firstCard) else base
@@ -85,6 +86,7 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                         val info = current[ct.id]
                         ChannelCard(
                             name = ct.name,
+                            number = number,
                             antenna = false,
                             current = info?.current?.let { CardItem(it.title, it) },
                             next = info?.next?.let { CardItem(it.title, it) },
@@ -97,6 +99,7 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                         val info = antenna?.onAir?.get(dvbChannel.id)
                         ChannelCard(
                             name = dvbChannel.name,
+                            number = number,
                             antenna = true,
                             current = info?.current?.let { CardItem(it.title, it) },
                             next = info?.next?.let { CardItem(it.title, it) },
@@ -128,6 +131,7 @@ private fun CardRow(content: @Composable RowScope.() -> Unit) {
 @Composable
 private fun ChannelCard(
     name: String,
+    number: Int,
     antenna: Boolean,
     current: CardItem?,
     next: CardItem?,
@@ -150,6 +154,7 @@ private fun ChannelCard(
     ) {
         Column(Modifier.fillMaxSize().padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ChannelNumber(number, style = MaterialTheme.typography.titleLarge)
                 SourceIcon(antenna, size = 26.dp)
                 Text(name, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

@@ -32,6 +32,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.ui.PlayerView
+import cz.cztvhub.core.ChannelNumbers
 import cz.cztvhub.core.Channels
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.InfoTitle
@@ -100,10 +101,23 @@ class PlayerActivity : ComponentActivity() {
     private var pendingFallbackMs: Long = 0
     private var lastReResolveAt = 0L
 
+    /** Zapping (live only): the visible channels in "Kanály" order (spec/apps.md "Channel numbers and zapping"). */
+    private var zapChannels: List<ZapChannel> = emptyList()
+    private var zapTarget: ZapChannel? = null
+    private var zapJob: Job? = null
+    private lateinit var zapOverlay: TextView
+    private var overlayJob: Job? = null
+    private lateinit var digitBox: TextView
+    private lateinit var digitEntry: DigitEntry
+
+    /** OK used the number buffer: its key-up must not reach the controller. */
+    private var swallowSelectUp = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         request = PlayRequests.from(intent) ?: return finish()
         spot = ResumeRules.spot(request)
+        zapChannels = PlayRequests.channels(intent)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         playerView = PlayerView(this).apply {
@@ -182,6 +196,33 @@ class PlayerActivity : ComponentActivity() {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.END,
         ).apply { setMargins(0, 0, dp(48), dp(120)) }
+        // Zapping: "<number>  <channel>" and the programme on air, top left; the number buffer top right.
+        zapOverlay = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
+            setBackgroundColor(Color.argb(200, 0, 0, 0))
+            setPadding(dp(28), dp(16), dp(28), dp(16))
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            visibility = View.GONE
+        }
+        digitBox = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 56f)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setBackgroundColor(Color.argb(200, 0, 0, 0))
+            setPadding(dp(28), dp(8), dp(28), dp(8))
+            visibility = View.GONE
+        }
+        digitEntry = DigitEntry(
+            lifecycleScope,
+            count = { zapChannels.size },
+            onBuffer = { buffer ->
+                digitBox.text = if (buffer.isEmpty()) "" else "${buffer}_"
+                digitBox.visibility = if (buffer.isEmpty()) View.GONE else View.VISIBLE
+            },
+            onNumber = ::pickNumber,
+        )
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(playerView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
@@ -192,6 +233,16 @@ class PlayerActivity : ComponentActivity() {
                 Gravity.BOTTOM or Gravity.START,
             ).apply { setMargins(dp(48), 0, dp(320), dp(120)) })
             addView(messageBox, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            addView(zapOverlay, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.START,
+            ).apply { setMargins(dp(48), dp(36), dp(320), 0) })
+            addView(digitBox, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.END,
+            ).apply { setMargins(0, dp(36), dp(48), 0) })
         }
         setContentView(root)
     }
@@ -229,6 +280,17 @@ class PlayerActivity : ComponentActivity() {
         progressJob = null
         // Release when hidden; a fresh URL is resolved when the viewer comes back.
         resumeOnStart = currentResume()
+        // A zap still waiting for its delay: come back on that channel.
+        zapJob?.cancel()
+        zapJob = null
+        zapTarget?.let { pending ->
+            pending.liveRequest()?.let { setRequest(it) }
+            resumeOnStart = Resume.Default
+        }
+        zapTarget = null
+        digitEntry.cancel()
+        overlayJob?.cancel()
+        zapOverlay.visibility = View.GONE
         loadJob?.cancel()
         titleJob?.cancel()
         titleJob = null
@@ -522,6 +584,7 @@ class PlayerActivity : ComponentActivity() {
     // Lint flags any dispatchKeyEvent override in a ComponentActivity (androidx.core restriction); false positive.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (handleZapKey(event)) return true
         if (event.keyCode == KeyEvent.KEYCODE_BACK && playerView.isControllerFullyVisible) {
             if (event.action == KeyEvent.ACTION_UP) playerView.hideController()
             return true
@@ -539,6 +602,128 @@ class PlayerActivity : ComponentActivity() {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * Live only: ▲/▼ with the controller hidden and CH+/CH− always zap (▼ and CH+ = next), number keys pick a
+     * channel, OK uses a typed number at once. Start-over, archive and recordings keep their keys.
+     */
+    private fun handleZapKey(event: KeyEvent): Boolean {
+        if (swallowSelectUp && isSelectKey(event.keyCode)) {
+            if (event.action == KeyEvent.ACTION_UP) swallowSelectUp = false
+            return true
+        }
+        if (!canZap()) return false
+        val down = event.action == KeyEvent.ACTION_DOWN
+        ZapChannel.digit(event.keyCode)?.let { digit ->
+            if (down && event.repeatCount == 0) digitEntry.type(digit)
+            return true
+        }
+        if (isSelectKey(event.keyCode) && digitEntry.isActive) {
+            if (down) {
+                swallowSelectUp = true
+                digitEntry.commit()
+            }
+            return true
+        }
+        val by = when (event.keyCode) {
+            KeyEvent.KEYCODE_CHANNEL_UP -> 1
+            KeyEvent.KEYCODE_CHANNEL_DOWN -> -1
+            KeyEvent.KEYCODE_DPAD_DOWN -> if (playerView.isControllerFullyVisible) return false else 1
+            KeyEvent.KEYCODE_DPAD_UP -> if (playerView.isControllerFullyVisible) return false else -1
+            else -> return false
+        }
+        if (down) zap(by)
+        return true
+    }
+
+    private fun canZap(): Boolean =
+        zapChannels.isNotEmpty() && ZapChannel.keyOf(request) != null && errorActions.visibility != View.VISIBLE
+
+    /** Moves the target at once; the stream is resolved after [ChannelNumbers.ZAP_DELAY_MS] without another press. */
+    private fun zap(by: Int) {
+        val from = zapTarget?.key ?: ZapChannel.keyOf(request)
+        val key = ChannelNumbers.step(zapChannels.map { it.key }, from, by) ?: return
+        val channel = zapChannels.first { it.key == key }
+        digitEntry.cancel()
+        zapTarget = channel
+        showZapOverlay(channel)
+        zapJob?.cancel()
+        zapJob = lifecycleScope.launch {
+            delay(ChannelNumbers.ZAP_DELAY_MS)
+            zapTarget = null
+            switchTo(channel)
+        }
+    }
+
+    private fun pickNumber(number: Int) {
+        val key = ChannelNumbers.resolve(zapChannels.map { it.key }, number)
+        val channel = zapChannels.firstOrNull { it.key == key }
+        if (channel == null) {
+            showOverlayText(getString(R.string.channel_missing, number))
+            return
+        }
+        zapJob?.cancel()
+        zapTarget = null
+        showZapOverlay(channel)
+        switchTo(channel)
+    }
+
+    /** Plays [channel] live in this player; the info bar follows it. */
+    private fun switchTo(channel: ZapChannel) {
+        val next = channel.liveRequest() ?: return
+        if (next == request || player == null) return
+        setRequest(next)
+        target = null
+        pendingWallClockMs = null
+        lastReResolveAt = 0L
+        resumeOnStart = Resume.Default
+        player?.stop()
+        load(forceRefresh = false, resume = Resume.Default)
+        startTitles()
+    }
+
+    /** Live requests only (no "Pokračovat"); the intent keeps the channel list. */
+    private fun setRequest(next: PlayRequest) {
+        request = next
+        spot = ResumeRules.spot(next)
+        intent = PlayRequests.withChannels(PlayRequests.intent(this, next), zapChannels)
+    }
+
+    /** "<number>  <channel>" and, once known, the programme airing now, for [ChannelNumbers.OVERLAY_MS]. */
+    private fun showZapOverlay(channel: ZapChannel) {
+        val number = ChannelNumbers.number(zapChannels.map { it.key }, channel.key)
+        val head = if (number != null) "$number  ${channel.name}" else channel.name
+        showOverlayText(head)
+        overlayJob?.cancel()
+        overlayJob = lifecycleScope.launch {
+            val programme = withContext(Dispatchers.IO) { onAirTitle(channel) }
+            if (programme != null && zapOverlay.visibility == View.VISIBLE && zapOverlay.text == head) {
+                zapOverlay.text = "$head\n$programme"
+            }
+            delay(ChannelNumbers.OVERLAY_MS)
+            zapOverlay.visibility = View.GONE
+        }
+    }
+
+    private fun showOverlayText(text: String) {
+        overlayJob?.cancel()
+        zapOverlay.text = text
+        zapOverlay.visibility = View.VISIBLE
+        overlayJob = lifecycleScope.launch {
+            delay(ChannelNumbers.OVERLAY_MS)
+            zapOverlay.visibility = View.GONE
+        }
+    }
+
+    /** The programme on air now from the cached guide data (null when unknown). */
+    private fun onAirTitle(channel: ZapChannel): String? {
+        val now = Instant.now()
+        return when (val live = channel.liveRequest()) {
+            is PlayRequest.Live -> runCatching { tvApp.schedules.onAir(now)[live.channelId]?.current?.title }.getOrNull()
+            is PlayRequest.DvbLive -> runCatching { tvApp.dvb()?.onAir(now)?.get(live.channelId)?.current?.title }.getOrNull()
+            else -> null
+        }
     }
 
     private fun isSelectKey(keyCode: Int): Boolean =

@@ -170,11 +170,13 @@
     var self = this;
     var keys = list.map(function (item) { return item.key; });
     var prefs = this.app.channelPrefs;
+    var number = 0; // visible rows are numbered 1, 2, …; hidden rows have no number
     list.forEach(function (item, i) {
       var hidden = CT.ChannelPrefs.isHidden(prefs, item.key);
       var row = el('div', 'ch-row' + (hidden ? ' off' : ''));
       var name = el('div', 'ch-name');
       name.appendChild(document.createTextNode(hidden ? '☐ ' : '☑ '));
+      name.appendChild(el('span', 'channel-number', hidden ? '' : String(++number)));
       name.appendChild(CT.sourceIcon(item.source));
       name.appendChild(document.createTextNode(item.channel.name));
       var up = el('div', 'ch-btn' + (i === 0 ? ' disabled' : ''), '▲');

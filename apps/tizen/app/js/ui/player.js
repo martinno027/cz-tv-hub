@@ -15,6 +15,17 @@
   var BREAKS_REFRESH_MS = 60 * 1000;
   var BREAKS_CHECK_MS = 500;
   var RESUME_SAVE_MS = 10 * 1000;
+  var ZAP_BOX_MS = 3000;
+  var HINT_LIVE = 'OK pauza · ▲ ▼ kanál · 0–9 číslo kanálu · AUDIO zvuk · Zpět konec';
+  var HINT_OTHER = 'OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · ▲ AUDIO zvuk · Zpět konec';
+
+  function isLive(request) {
+    return !!request && (request.kind === 'live' || request.kind === 'dvbLive');
+  }
+
+  function channelKey(request) {
+    return (request.kind === 'dvbLive' ? 'dvb:' : 'ct:') + request.channelId;
+  }
 
   function $(id) {
     return document.getElementById(id);
@@ -251,6 +262,10 @@
     this.breaks = [];
     this.breaksTimer = null;
     this.skipTo = null;
+    this.zapList = []; // live: the visible channels when the player opened ([{key, source, channel}])
+    this.zapTimer = null;
+    this.zapBoxTimer = null;
+    this.numberEntry = new CT.NumberEntry(function (n) { self.zapToNumber(n); });
     var cb = {
       onReady: function () {
         self.hideMessage();
@@ -281,9 +296,69 @@
   Player.prototype.open = function (request) {
     this.request = request;
     this.lastReResolveAt = 0;
+    // Zapping uses the list of the moment the player opened (a settings change applies next time).
+    this.zapList = isLive(request) ? this.app.channelList(this.app.dvbChannels) : [];
+    $('osd-hint').textContent = isLive(request) ? HINT_LIVE : HINT_OTHER;
     $('player').classList.remove('hidden');
     this.updateTitle();
     this.load(false, null);
+  };
+
+  /** ▲/▼, CH+/CH− while live: the neighbour channel; the stream is resolved after a short pause. */
+  Player.prototype.zap = function (by) {
+    var keys = this.zapList.map(function (item) { return item.key; });
+    var key = CT.ChannelNumbers.step(keys, channelKey(this.request), by);
+    if (key === null) return;
+    this.numberEntry.cancel();
+    this.switchTo(keys.indexOf(key), true);
+  };
+
+  Player.prototype.zapToNumber = function (number) {
+    if (!isLive(this.request)) return;
+    var keys = this.zapList.map(function (item) { return item.key; });
+    if (CT.ChannelNumbers.resolve(keys, number) === null) {
+      this.numberEntry.notFound(number);
+      return;
+    }
+    this.switchTo(number - 1, false);
+  };
+
+  /** Plays zapList[index] live; `delayed` = wait for more quick presses before resolving. */
+  Player.prototype.switchTo = function (index, delayed) {
+    var self = this;
+    var item = this.zapList[index];
+    this.request = this.app.liveRequest(item);
+    this.lastReResolveAt = 0;
+    this.updateTitle();
+    this.showZapBox(index);
+    clearTimeout(this.zapTimer);
+    if (!delayed) {
+      this.zapTimer = null;
+      this.load(false, null);
+      return;
+    }
+    var token = this.loadToken;
+    this.zapTimer = setTimeout(function () {
+      self.zapTimer = null;
+      if (token === self.loadToken && self.isOpen()) self.load(false, null);
+    }, CT.ChannelNumbers.ZAP_DELAY_MS);
+  };
+
+  /** "<number>  <channel>" and the programme airing now, top left for ~3 s. */
+  Player.prototype.showZapBox = function (index) {
+    var item = this.zapList[index];
+    var channel = $('zap-channel');
+    channel.innerHTML = '';
+    var number = document.createElement('span');
+    number.className = 'zap-number';
+    number.textContent = String(index + 1);
+    channel.appendChild(number);
+    channel.appendChild(document.createTextNode(item.channel.name));
+    var now = this.app.airingNow(item);
+    $('zap-programme').textContent = now ? now.title : '';
+    $('zap-box').classList.add('visible');
+    clearTimeout(this.zapBoxTimer);
+    this.zapBoxTimer = setTimeout(function () { $('zap-box').classList.remove('visible'); }, ZAP_BOX_MS);
   };
 
   /** Info bar text; live is re-evaluated every second against the guide data the app keeps fresh. */
@@ -368,14 +443,20 @@
   };
 
   Player.prototype.close = function () {
+    var request = this.request;
     this.saveProgress();
     this.loadToken++;
     this.stopBreaks();
     this.backend.close();
+    clearTimeout(this.zapTimer);
+    this.zapTimer = null;
+    this.numberEntry.cancel();
+    clearTimeout(this.zapBoxTimer);
+    $('zap-box').classList.remove('visible');
     this.request = null;
     this.target = null;
     $('player').classList.add('hidden');
-    this.app.onPlayerClosed();
+    this.app.onPlayerClosed(request);
   };
 
   /** The app went to the background: release the player, resolve afresh when it comes back. */
@@ -394,6 +475,18 @@
   };
 
   Player.prototype.onKey = function (key) {
+    var live = isLive(this.request);
+    var digit = CT.Keys.digit(key);
+    if (digit >= 0) {
+      // Number entry only while live (spec/apps.md "Channel numbers and zapping").
+      if (live) this.numberEntry.digit(digit, this.zapList.length);
+      return;
+    }
+    if (this.numberEntry.active() && (key === 'enter' || key === 'back')) {
+      if (key === 'enter') this.numberEntry.commit();
+      else this.numberEntry.cancel();
+      return;
+    }
     switch (key) {
       case 'back':
       case 'stop':
@@ -427,6 +520,19 @@
         this.seek(60 * 1000);
         break;
       case 'up':
+        if (live) this.zap(-1);
+        else this.nextAudio(); // start-over, archive and recordings keep ▲ as before
+        break;
+      case 'down':
+        if (live) this.zap(1);
+        break;
+      case 'chup': // CH+ = next = ▼
+        if (live) this.zap(1);
+        break;
+      case 'chdown':
+        if (live) this.zap(-1);
+        break;
+      case 'audio':
         this.nextAudio();
         break;
       default:
@@ -435,7 +541,7 @@
     this.showOsd();
   };
 
-  /** ▲: the next broadcast audio track (Anténa renditions, spec/apps.md "Audio choice for Anténa"). */
+  /** AUDIO/MTS or green (▲ outside live): the next broadcast audio track (Anténa renditions, spec/apps.md "Audio choice for Anténa"). */
   Player.prototype.nextAudio = function () {
     if (!this.target) return;
     var tracks = this.backend.audioTracks();

@@ -534,12 +534,14 @@ private fun EpgGrid(
             Row(Modifier.verticalScroll(rememberScrollState())) {
                 Column(Modifier.width(CHANNEL_COLUMN)) {
                     Spacer(Modifier.height(HEADER_HEIGHT))
-                    rows.forEach { row ->
+                    rows.forEachIndexed { index, row ->
                         Row(
                             Modifier.height(rowHeight).fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
+                            // Rows are the visible channels in order: the row index is the channel number.
+                            ChannelNumber(index + 1, style = MaterialTheme.typography.bodyMedium)
                             SourceIcon(row.key.startsWith("dvb:"), size = 18.dp)
                             Text(
                                 row.name,

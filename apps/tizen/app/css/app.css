@@ -863,3 +863,71 @@ main {
   border: 2px solid #000;
   border-radius: 8px;
 }
+
+/* Channel numbers (spec/apps.md "Channel numbers and zapping") */
+.channel-number {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-right: 0.25em;
+  font-size: 0.8em;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* Number entry: top right, above the player */
+#number-entry {
+  position: absolute;
+  top: 60px;
+  right: 96px;
+  padding: 14px 30px;
+  font-size: 56px;
+  font-weight: 700;
+  border-radius: 14px;
+  background: rgba(13, 17, 23, 0.9);
+  border: 3px solid var(--surface-hi);
+  display: none;
+  z-index: 60;
+}
+
+#number-entry.visible {
+  display: block;
+}
+
+/* Zap overlay: top left, number + channel and what airs now */
+#zap-box {
+  position: absolute;
+  top: 60px;
+  left: 96px;
+  max-width: 900px;
+  padding: 20px 32px;
+  border-radius: 14px;
+  background: rgba(13, 17, 23, 0.88);
+  display: none;
+  z-index: 3;
+}
+
+#zap-box.visible {
+  display: block;
+}
+
+#zap-channel {
+  font-size: 44px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#zap-channel .zap-number {
+  color: var(--accent);
+  margin-right: 0.4em;
+}
+
+#zap-programme {
+  font-size: 28px;
+  color: #ddd;
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

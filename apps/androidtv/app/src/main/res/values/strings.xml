@@ -40,6 +40,7 @@
     <string name="version_line">Verze %1$s (build %2$s · %3$s · %4$s)</string>
     <string name="channels_reset">Obnovit výchozí pořadí</string>
     <string name="channels_antenna_unavailable">Kanály antény se nepodařilo načíst: %1$s</string>
+    <string name="channel_missing">Kanál %1$d není</string>
     <string name="channels_all_hidden">Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály.</string>
     <string name="settings_title">Anténa (DVB-T2 brána)</string>
     <string name="settings_intro">Vlastní tuner doma: adresa brány cz-tv-hub (v domácí síti nebo jméno v Tailscale) a klíč.</string>

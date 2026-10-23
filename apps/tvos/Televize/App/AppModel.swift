@@ -9,6 +9,14 @@ let log = Logger(subsystem: "cz.cztvhub.tv", category: "app")
 struct PlayerSession: Identifiable {
     let id = UUID()
     let controller: PlayerController
+    /// Live only: ▲/▼ and digits switch channels (spec/apps.md "Channel numbers and zapping").
+    var zapper: ChannelZapper?
+}
+
+/// What playing a channel live needs: a fresh source (also after a failure) and the info bar title.
+struct LiveStart {
+    let resolve: @MainActor () async throws -> PlaybackSource
+    let liveTitle: @MainActor () async -> PlayerTitle
 }
 
 @MainActor
@@ -32,6 +40,10 @@ final class AppModel {
     private(set) var isResolving = false
     /// Set by the player screen; a session whose screen never appeared must not block later plays.
     var isPlayerOnScreen = false
+    /// The channels shown on this TV in its order (numbers = position + 1), refreshed by `refreshVisibleChannels`.
+    private(set) var visibleChannels: [MixedChannel] = []
+    /// Digits typed on Živě and the guide: start that channel live.
+    @ObservationIgnored private(set) var numberEntry: NumberEntry!
 
     /// "Anténa" (DVB-T2 gateway). Nil when not configured: the Anténa group is hidden.
     private(set) var gateway: GatewayConfig?
@@ -43,6 +55,65 @@ final class AppModel {
         resume = ResumeStore()
         channelPrefs = ChannelPrefsStore()
         setGateway(GatewayStore.load(), persist: false)
+        numberEntry = NumberEntry { [weak self] number in self?.playLive(number: number) }
+    }
+
+    // MARK: channel numbers
+
+    /// Re-reads the Anténa channel list (cached by the store) and applies Nastavení → Kanály.
+    func refreshVisibleChannels() async {
+        let antennaChannels = (try? await antenna?.channels()) ?? []
+        visibleChannels = channelPrefs.channels(antenna: antennaChannels).visible
+    }
+
+    /// Number of a channel on this TV, nil when it is not shown.
+    func number(of key: String) -> Int? {
+        ChannelNumbers.number(of: key, in: visibleChannels.map(\.key))
+    }
+
+    private func playLive(number: Int) {
+        guard let key = ChannelNumbers.resolve(visibleChannels.map(\.key), number: number),
+              let channel = visibleChannels.first(where: { $0.key == key }) else {
+            numberEntry.show(missing: number)
+            return
+        }
+        playLive(channel)
+    }
+
+    /// Title of the programme airing now on `channel`, from the cached guide data.
+    func airingTitle(_ channel: MixedChannel) async -> String? {
+        switch channel {
+        case .ct(let ct): return await schedules.onAir(at: Date())[ct.slug]?.title
+        case .antenna(let dvb): return await antenna?.onAir(at: Date())[dvb.id]?.title
+        }
+    }
+
+    /// How to play `channel` live; nil for an Anténa channel without a gateway.
+    func liveStart(_ channel: MixedChannel) -> LiveStart? {
+        switch channel {
+        case .ct(let ct):
+            let planner = planner
+            let schedules = schedules
+            return LiveStart(resolve: { try await planner.resolve(.live(ct), resumeAt: nil) }, liveTitle: {
+                let airing = await schedules.onAir(at: Date())[ct.slug]
+                return .live(channel: ct.name, airing: airing.map { ($0.title, $0.end) })
+            })
+        case .antenna(let dvb):
+            guard let antenna else { return nil }
+            let client = antenna.client
+            let url = client.liveURL(channelID: dvb.id)
+            return LiveStart(resolve: { try await Self.prepare(client, url: url, title: dvb.name, mode: .live) }, liveTitle: {
+                let airing = await antenna.onAir(at: Date())[dvb.id]
+                return .live(channel: dvb.name, airing: airing.map { ($0.title, $0.end) })
+            })
+        }
+    }
+
+    /// Live playback of any channel; the player can zap from it.
+    func playLive(_ channel: MixedChannel) {
+        guard let start = liveStart(channel) else { return }
+        log.info("play live \(channel.key, privacy: .public)")
+        open(liveTitle: start.liveTitle, zapFrom: channel, start.resolve)
     }
 
     /// Applies (and by default stores in the Keychain) a gateway configuration; nil removes it.
@@ -63,19 +134,15 @@ final class AppModel {
         let planner = planner
         var target: ResumeTarget?
         var title: PlayerTitle?
-        var liveTitle: (@MainActor () async -> PlayerTitle)?
         switch request {
         case .programme(let programme, let channel):
             target = .ct(programme)
             title = .programme(programme.title, channel: channel.name, episode: programme.episodeTitle)
         case .live(let channel):
-            let schedules = schedules
-            liveTitle = {
-                let airing = await schedules.onAir(at: Date())[channel.slug]
-                return .live(channel: channel.name, airing: airing.map { ($0.title, $0.end) })
-            }
+            playLive(.ct(channel))
+            return
         }
-        open(resumeTarget: target, title: title, liveTitle: liveTitle) {
+        open(resumeTarget: target, title: title) {
             try await planner.resolve(request, resumeAt: resumeAt)
         }
     }
@@ -94,14 +161,7 @@ final class AppModel {
 
     /// Live picture of an Anténa channel.
     func playAntennaLive(_ channel: DVBChannel) {
-        guard let client = antenna?.client else { return }
-        let url = client.liveURL(channelID: channel.id)
-        let antenna = antenna
-        let liveTitle: @MainActor () async -> PlayerTitle = {
-            let airing = await antenna?.onAir(at: Date())[channel.id]
-            return .live(channel: channel.name, airing: airing.map { ($0.title, $0.end) })
-        }
-        open(liveTitle: liveTitle) { try await Self.prepare(client, url: url, title: channel.name, mode: .live) }
+        playLive(.antenna(channel))
     }
 
     /// A recording from the gateway; while it is still recording (`finished: false`) this is the
@@ -128,7 +188,7 @@ final class AppModel {
 
     private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil, resumeTarget: ResumeTarget? = nil,
                       title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
-                      _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
+                      zapFrom channel: MixedChannel? = nil, _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
             log.info("play ignored: still resolving the previous selection")
             return
@@ -148,7 +208,20 @@ final class AppModel {
                                                   progress: resumeTarget.map { ($0, resume) },
                                                   title: title, liveTitle: liveTitle)
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
-                let session = PlayerSession(controller: controller)
+                var session = PlayerSession(controller: controller)
+                if let channel, source.mode == .live {
+                    // The list as it is now (kept current by the main screens); a settings change applies to
+                    // the next player. Only a first start without it waits for the list in the background.
+                    let zapper = ChannelZapper(model: self, controller: controller, playing: channel,
+                                               channels: visibleChannels)
+                    session.zapper = zapper
+                    if visibleChannels.isEmpty {
+                        Task {
+                            await refreshVisibleChannels()
+                            zapper.setChannels(visibleChannels)
+                        }
+                    }
+                }
                 self.session = session
                 watchPresentation(of: session)
             } catch {

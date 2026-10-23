@@ -35,14 +35,10 @@
 
     if (app.sourceOn('ct') && ct.error && !ct.onAir) this.root.appendChild(el('div', 'group-error', ct.error));
     if (dvbOn && dvb.error) this.root.appendChild(el('div', 'group-error', dvb.error));
-    this.group(list, function (item) {
+    this.group(list, function (item, i) {
       var ch = item.channel;
-      if (item.source === 'dvb') {
-        return self.card(item.key, 'dvb', ch.name, dvb.onAir ? dvb.onAir[ch.id] : null, now,
-          { kind: 'dvbLive', channelId: ch.id, title: ch.name });
-      }
-      return self.card(item.key, 'ct', ch.name, ct.onAir ? ct.onAir[ch.id] : null, now,
-        { kind: 'live', channelId: ch.id, title: ch.name });
+      var onAir = item.source === 'dvb' ? dvb.onAir : ct.onAir;
+      return self.card(item.key, item.source, i + 1, ch.name, onAir ? onAir[ch.id] : null, now, app.liveRequest(item));
     });
 
     // While the Anténa channels are still loading the list may be empty without anything being hidden.
@@ -59,14 +55,16 @@
   LiveScreen.prototype.group = function (channels, makeCard) {
     var grid = el('div', 'cards');
     var start = this.cards.length;
-    channels.forEach(function (ch) { grid.appendChild(makeCard(ch)); });
+    channels.forEach(function (ch, i) { grid.appendChild(makeCard(ch, i)); });
     if (this.cards.length > start) this.groups.push({ start: start, end: this.cards.length });
     this.root.appendChild(grid);
   };
 
-  LiveScreen.prototype.card = function (key, source, name, info, now, request) {
+  /** `number` = the channel's number on this TV (spec/apps.md "Channel numbers and zapping"). */
+  LiveScreen.prototype.card = function (key, source, number, name, info, now, request) {
     var card = el('div', 'card');
     var channel = el('div', 'card-channel');
+    channel.appendChild(el('span', 'channel-number', String(number)));
     channel.appendChild(CT.sourceIcon(source));
     channel.appendChild(el('span', 'card-channel-name', name));
     card.appendChild(channel);
@@ -86,6 +84,14 @@
     if (next) card.appendChild(el('div', 'card-next', 'Potom ' + CT.Days.time(next.start) + ' ' + next.title));
     this.cards.push({ key: key, el: card, request: request });
     return card;
+  };
+
+  /** Focus the card of `key` (the channel that was playing when the player closed), if it is listed. */
+  LiveScreen.prototype.focusKey = function (key) {
+    var i = this.cards.findIndex(function (c) { return c.key === key; });
+    if (i < 0) return;
+    this.focus = i;
+    this.applyFocus();
   };
 
   LiveScreen.prototype.applyFocus = function () {

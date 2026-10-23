@@ -150,14 +150,14 @@
    */
   GuideScreen.prototype.build = function (ct, dvb) {
     this.ctPlan = ct && ct.plan || null; // for the ČT images of Anténa ČT channels
-    var rows = this.app.channelList(dvb ? dvb.channels : []).map(function (item) {
+    var rows = this.app.channelList(dvb ? dvb.channels : []).map(function (item, i) {
       var ch = item.channel;
       if (item.source === 'dvb') {
         var events = dvb.plan[ch.id] || [];
-        return { name: ch.name, source: 'dvb', entries: events.map(function (e) { return CT.Entries.dvb(ch, e); }) };
+        return { name: ch.name, number: i + 1, source: 'dvb', entries: events.map(function (e) { return CT.Entries.dvb(ch, e); }) };
       }
       var list = ct.plan ? ct.plan[ch.id] || [] : [];
-      return { name: ch.name, source: 'ct', entries: list.map(function (p) { return CT.Entries.ct(ch, p); }) };
+      return { name: ch.name, number: i + 1, source: 'ct', entries: list.map(function (p) { return CT.Entries.ct(ch, p); }) };
     });
     var all = [];
     rows.forEach(function (r) { all = all.concat(r.entries); });
@@ -195,7 +195,7 @@
 
     // Only data here: cells get DOM when they come near the screen (see syncWindow).
     this.rows = rows.map(function (row) {
-      return { name: row.name, source: row.source, slots: CT.GuideLayout.row(row.entries, axisStart, axisEnd),
+      return { name: row.name, number: row.number, source: row.source, slots: CT.GuideLayout.row(row.entries, axisStart, axisEnd),
         line: null, nameEl: null, nameX: null, range: null };
     });
     var container = $('grid-rows');
@@ -271,6 +271,7 @@
       row.line = el('div', 'row');
       row.line.style.top = index * ROW_HEIGHT + 'px';
       row.nameEl = el('div', 'row-name');
+      row.nameEl.appendChild(el('span', 'channel-number', String(row.number)));
       row.nameEl.appendChild(CT.sourceIcon(row.source));
       row.nameEl.appendChild(el('span', 'row-name-text', row.name));
       row.line.appendChild(row.nameEl);

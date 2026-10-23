@@ -2,8 +2,39 @@ package cz.cztvhub.tv
 
 import android.content.Context
 import android.content.Intent
+import android.view.KeyEvent
+import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.PlayRequest
 import java.time.Instant
+
+/** A channel the live player can zap to: its "Kanály" key and name (spec/apps.md "Channel numbers and zapping"). */
+data class ZapChannel(val key: String, val name: String) {
+    /** Live playback of this channel; null for an unknown key kind. */
+    fun liveRequest(): PlayRequest? = when {
+        key.startsWith(CT_PREFIX) -> PlayRequest.Live(key.removePrefix(CT_PREFIX), name)
+        key.startsWith(DVB_PREFIX) -> PlayRequest.DvbLive(key.removePrefix(DVB_PREFIX), name)
+        else -> null
+    }
+
+    companion object {
+        private val CT_PREFIX = ChannelPrefs.ctKey("")
+        private val DVB_PREFIX = ChannelPrefs.dvbKey("")
+
+        /** The "Kanály" key of a live request; null for anything else. */
+        fun keyOf(request: PlayRequest): String? = when (request) {
+            is PlayRequest.Live -> ChannelPrefs.ctKey(request.channelId)
+            is PlayRequest.DvbLive -> ChannelPrefs.dvbKey(request.channelId)
+            else -> null
+        }
+
+        /** The digit of a number key (top row or numpad), else null. */
+        fun digit(keyCode: Int): Int? = when (keyCode) {
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> keyCode - KeyEvent.KEYCODE_0
+            in KeyEvent.KEYCODE_NUMPAD_0..KeyEvent.KEYCODE_NUMPAD_9 -> keyCode - KeyEvent.KEYCODE_NUMPAD_0
+            else -> null
+        }
+    }
+}
 
 /** Encodes a [PlayRequest] (never a stream URL or key) into Intent extras for [PlayerActivity], resume point included. */
 object PlayRequests {
@@ -18,6 +49,20 @@ object PlayRequests {
     private const val FROM_START = "fromStart"
     private const val RESUME = "resumeSeconds"
     private const val LENGTH = "lengthSeconds"
+    private const val ZAP_KEYS = "zapKeys"
+    private const val ZAP_NAMES = "zapNames"
+
+    /** Adds the visible channel list (in "Kanály" order) the live player zaps through. */
+    fun withChannels(intent: Intent, channels: List<ZapChannel>): Intent = intent
+        .putStringArrayListExtra(ZAP_KEYS, ArrayList(channels.map { it.key }))
+        .putStringArrayListExtra(ZAP_NAMES, ArrayList(channels.map { it.name }))
+
+    fun channels(intent: Intent): List<ZapChannel> {
+        val keys = intent.getStringArrayListExtra(ZAP_KEYS).orEmpty()
+        val names = intent.getStringArrayListExtra(ZAP_NAMES).orEmpty()
+        if (keys.size != names.size) return emptyList()
+        return keys.zip(names, ::ZapChannel)
+    }
 
     fun intent(context: Context, request: PlayRequest): Intent {
         val intent = Intent(context, PlayerActivity::class.java)

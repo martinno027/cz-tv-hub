@@ -1,0 +1,278 @@
+{
+ "step": [
+  {
+   "name": "next",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "current": "ct:CH_2",
+   "by": 1,
+   "key": "ct:CH_24"
+  },
+  {
+   "name": "previous",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "current": "ct:CH_24",
+   "by": -1,
+   "key": "ct:CH_2"
+  },
+  {
+   "name": "next wraps to the first",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "current": "dvb:b",
+   "by": 1,
+   "key": "ct:CH_1"
+  },
+  {
+   "name": "previous wraps to the last",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "current": "ct:CH_1",
+   "by": -1,
+   "key": "dvb:b"
+  },
+  {
+   "name": "mixed list: CT to Anténa",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "current": "ct:CH_24",
+   "by": 1,
+   "key": "dvb:a"
+  },
+  {
+   "name": "current not in the list: next = first",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "current": "ct:CH_5",
+   "by": 1,
+   "key": "ct:CH_1"
+  },
+  {
+   "name": "current not in the list: previous = last",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "current": "ct:CH_5",
+   "by": -1,
+   "key": "dvb:b"
+  },
+  {
+   "name": "single channel stays",
+   "visible": [
+    "ct:CH_1"
+   ],
+   "current": "ct:CH_1",
+   "by": 1,
+   "key": "ct:CH_1"
+  },
+  {
+   "name": "empty list",
+   "visible": [],
+   "current": "ct:CH_1",
+   "by": 1,
+   "key": null
+  }
+ ],
+ "type": [
+  {
+   "name": "6 channels: one digit is final",
+   "count": 6,
+   "buffer": "",
+   "digit": 2,
+   "bufferAfter": "2",
+   "commit": true
+  },
+  {
+   "name": "leading zero ignored",
+   "count": 6,
+   "buffer": "",
+   "digit": 0,
+   "bufferAfter": "",
+   "commit": false
+  },
+  {
+   "name": "12 channels: 1 waits for a second digit",
+   "count": 12,
+   "buffer": "",
+   "digit": 1,
+   "bufferAfter": "1",
+   "commit": false
+  },
+  {
+   "name": "12 channels: 2 is final (20 > 12)",
+   "count": 12,
+   "buffer": "",
+   "digit": 2,
+   "bufferAfter": "2",
+   "commit": true
+  },
+  {
+   "name": "12 channels: 1 then 2 -> 12, final",
+   "count": 12,
+   "buffer": "1",
+   "digit": 2,
+   "bufferAfter": "12",
+   "commit": true
+  },
+  {
+   "name": "12 channels: 1 then 9 -> 19, final (shown as not existing)",
+   "count": 12,
+   "buffer": "1",
+   "digit": 9,
+   "bufferAfter": "19",
+   "commit": true
+  },
+  {
+   "name": "60 channels: 5 waits",
+   "count": 60,
+   "buffer": "",
+   "digit": 5,
+   "bufferAfter": "5",
+   "commit": false
+  },
+  {
+   "name": "60 channels: 7 is final",
+   "count": 60,
+   "buffer": "",
+   "digit": 7,
+   "bufferAfter": "7",
+   "commit": true
+  },
+  {
+   "name": "10 channels: 1 waits (10 is valid)",
+   "count": 10,
+   "buffer": "",
+   "digit": 1,
+   "bufferAfter": "1",
+   "commit": false
+  },
+  {
+   "name": "10 channels: 1 then 0 -> 10",
+   "count": 10,
+   "buffer": "1",
+   "digit": 0,
+   "bufferAfter": "10",
+   "commit": true
+  },
+  {
+   "name": "120 channels: 1 waits",
+   "count": 120,
+   "buffer": "",
+   "digit": 1,
+   "bufferAfter": "1",
+   "commit": false
+  },
+  {
+   "name": "120 channels: 1 then 0 waits",
+   "count": 120,
+   "buffer": "1",
+   "digit": 0,
+   "bufferAfter": "10",
+   "commit": false
+  },
+  {
+   "name": "three digits are always final",
+   "count": 500,
+   "buffer": "10",
+   "digit": 4,
+   "bufferAfter": "104",
+   "commit": true
+  }
+ ],
+ "resolve": [
+  {
+   "name": "first",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "number": 1,
+   "key": "ct:CH_1"
+  },
+  {
+   "name": "last",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "number": 6,
+   "key": "dvb:b"
+  },
+  {
+   "name": "too high",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "number": 7,
+   "key": null
+  },
+  {
+   "name": "zero",
+   "visible": [
+    "ct:CH_1",
+    "ct:CH_2",
+    "ct:CH_24",
+    "dvb:a",
+    "ct:CH_4",
+    "dvb:b"
+   ],
+   "number": 0,
+   "key": null
+  }
+ ]
+}

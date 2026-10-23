@@ -86,6 +86,7 @@
       this.resumeStore = new CT.ResumeStore(localBackend('cztvhub.resume'));
       this.channelPrefs = CT.ChannelPrefsStore.load();
       this.player = new CT.Player(this);
+      this.numberEntry = new CT.NumberEntry(function (n) { self.playNumber(n); });
       this.setDvbConfig(CT.Demo.enabled ? CT.Demo.dvbConfig() : CT.SettingsStore.config(), true);
 
       CT.Keys.register();
@@ -234,6 +235,30 @@
       return (all ? arranged.all : arranged.visible).map(function (k) { return byKey[k]; });
     },
 
+    /** Live request for a channelList item (Živě card, number entry, zapping). */
+    liveRequest: function (item) {
+      var ch = item.channel;
+      return { kind: item.source === 'dvb' ? 'dvbLive' : 'live', channelId: ch.id, title: ch.name };
+    },
+
+    /** The programme airing now on a channelList item, or null (from the guide data kept fresh by refresh). */
+    airingNow: function (item) {
+      var state = item.source === 'dvb' ? this.dvbState : this.ctState;
+      var info = state && state.onAir ? state.onAir[item.channel.id] : null;
+      return info ? info.current : null;
+    },
+
+    /** Number entry on Živě and the guide: that channel live, or "Kanál <n> není". */
+    playNumber: function (number) {
+      var list = this.channelList(this.dvbChannels);
+      var key = CT.ChannelNumbers.resolve(list.map(function (item) { return item.key; }), number);
+      if (!key) {
+        this.numberEntry.notFound(number);
+        return;
+      }
+      this.play(this.liveRequest(list[number - 1]));
+    },
+
     /** Stores new "Kanály" prefs and redraws Živě and the guide. */
     setChannelPrefs: function (prefs) {
       this.channelPrefs = prefs;
@@ -278,6 +303,7 @@
         return;
       }
       if (!key) return;
+      if (this.onNumberKey(key, event)) return;
       if (this.zone === 'content') {
         var screen = this.screens[this.tab];
         if (key === 'back' && !(screen.editing && screen.editing())) {
@@ -318,6 +344,23 @@
       }
     },
 
+    /** Digits (and OK/Return while typing) on Živě and the guide; true = handled. Other screens ignore digits. */
+    onNumberKey: function (key, event) {
+      var digit = CT.Keys.digit(key);
+      var screen = this.screens[this.tab];
+      if (digit < 0) {
+        if (!this.numberEntry.active() || (key !== 'enter' && key !== 'back')) return false;
+        event.preventDefault();
+        if (key === 'enter') this.numberEntry.commit();
+        else this.numberEntry.cancel();
+        return true;
+      }
+      if (screen.editing && screen.editing()) return false; // typing into a field
+      event.preventDefault();
+      if (this.tab === 'live' || this.tab === 'guide') this.numberEntry.digit(digit, this.channelList(this.dvbChannels).length);
+      return true;
+    },
+
     /** What selecting a guide cell does (CT or Anténa). */
     select: function (entry) {
       var s = CT.Entries.select(entry, Date.now(), this.resumeStore);
@@ -332,10 +375,15 @@
     },
 
     play: function (request) {
+      this.numberEntry.cancel();
       this.player.open(request);
     },
 
-    onPlayerClosed: function () {
+    /** `request` = what was playing last (after zapping: the channel switched to). */
+    onPlayerClosed: function (request) {
+      if (request && (request.kind === 'live' || request.kind === 'dvbLive')) {
+        this.screens.live.focusKey((request.kind === 'dvbLive' ? 'dvb:' : 'ct:') + request.channelId);
+      }
       this.refresh();
     },
 

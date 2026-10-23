@@ -7,6 +7,11 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var tab: Tab = .live
 
+    private struct VisibleKey: Equatable {
+        let prefs: ChannelPrefs
+        let gateway: GatewayConfig?
+    }
+
     var body: some View {
         @Bindable var model = model
         TabView(selection: $tab) {
@@ -19,6 +24,22 @@ struct RootView: View {
             SettingsView()
                 .tabItem { Text("Nastavení") }
                 .tag(Tab.settings)
+        }
+        // Digits on Živě and the guide start that channel live (spec/apps.md "Number keys").
+        .onKeyPress(characters: .decimalDigits, phases: .down) { press in
+            guard tab != .settings, model.session == nil, let digit = Int(press.characters) else { return .ignored }
+            model.numberEntry.type(digit, count: model.visibleChannels.count)
+            return .handled
+        }
+        .overlay(alignment: .topTrailing) {
+            if tab != .settings { NumberEntryBadge(entry: model.numberEntry) }
+        }
+        .task(id: VisibleKey(prefs: model.channelPrefs.prefs, gateway: model.gateway)) {
+            // Channel numbers: kept current for the screens, the zapping list and number entry.
+            while !Task.isCancelled {
+                await model.refreshVisibleChannels()
+                try? await Task.sleep(for: .seconds(600))
+            }
         }
         .overlay {
             if model.isResolving {

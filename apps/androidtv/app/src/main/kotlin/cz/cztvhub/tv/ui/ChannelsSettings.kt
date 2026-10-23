@@ -29,8 +29,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
+import androidx.tv.material3.LocalTextStyle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import cz.cztvhub.core.ChannelNumbers
 import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.tv.R
 import kotlinx.coroutines.launch
@@ -72,7 +74,7 @@ fun ChannelsSection(viewModel: MainViewModel) {
         if (keys.isEmpty()) {
             Text(stringResource(R.string.channels_none_listed), color = Palette.textDim)
         } else {
-            OrderList(prefs, keys, ChannelOrder.all(prefs, dvbChannels), viewModel)
+            OrderList(prefs, keys, ChannelOrder.all(prefs, dvbChannels), prefs.arrange(keys).visible, viewModel)
         }
 
         Button(onClick = { viewModel.resetChannelPrefs() }) { Text(stringResource(R.string.channels_reset)) }
@@ -97,7 +99,13 @@ private fun SourceSwitch(prefs: ChannelPrefs, source: String, label: Int, viewMo
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun OrderList(prefs: ChannelPrefs, keys: List<String>, all: List<ListedChannel>, viewModel: MainViewModel) {
+private fun OrderList(
+    prefs: ChannelPrefs,
+    keys: List<String>,
+    all: List<ListedChannel>,
+    visible: List<String>,
+    viewModel: MainViewModel,
+) {
     // One requester per button and channel, so focus can follow a moved row when its button turns disabled.
     val ups = remember { mutableMapOf<String, FocusRequester>() }
     val downs = remember { mutableMapOf<String, FocusRequester>() }
@@ -156,6 +164,9 @@ private fun OrderList(prefs: ChannelPrefs, keys: List<String>, all: List<ListedC
                     ) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(if (hidden) "☐" else "☑")
+                            // Visible rows show their channel number; a hidden row has none.
+                            val number = ChannelNumbers.number(visible, item.key)
+                            if (number != null) ChannelNumber(number, style = LocalTextStyle.current)
                             SourceIcon(item.isAntenna)
                             Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }

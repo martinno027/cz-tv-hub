@@ -32,8 +32,8 @@ struct LiveView: View {
                         Text(antennaError).font(.callout).foregroundStyle(.secondary)
                     }
                     LazyVGrid(columns: columns, spacing: 56) {
-                        ForEach(channels) { channel in
-                            card(channel, now: context.date)
+                        ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
+                            card(channel, number: index + 1, now: context.date)
                                 .id(channel.key)
                         }
                     }
@@ -62,21 +62,18 @@ struct LiveView: View {
         }
     }
 
-    private func card(_ channel: MixedChannel, now: Date) -> some View {
+    private func card(_ channel: MixedChannel, number: Int, now: Date) -> some View {
         Button {
-            switch channel {
-            case .ct(let ct): model.play(.live(ct))
-            case .antenna(let dvb): model.playAntennaLive(dvb)
-            }
+            model.playLive(channel)
         } label: {
             switch channel {
             case .ct(let ct):
                 let programme = onAir[ct.slug]
-                ChannelCard(name: ct.name, source: .ct, title: programme?.title,
+                ChannelCard(number: number, name: ct.name, source: .ct, title: programme?.title,
                             start: programme?.start, end: programme?.end, now: now)
             case .antenna(let dvb):
                 let event = antennaOnAir[dvb.id]
-                ChannelCard(name: dvb.name, source: .dvb, title: event?.title,
+                ChannelCard(number: number, name: dvb.name, source: .dvb, title: event?.title,
                             start: event?.start, end: event?.end, now: now)
             }
         }
@@ -100,6 +97,8 @@ struct LiveView: View {
 }
 
 private struct ChannelCard: View {
+    /// Channel number on this TV (spec/apps.md "Channel numbers and zapping").
+    let number: Int
     let name: String
     let source: ChannelPrefs.Source
     let title: String?
@@ -110,6 +109,9 @@ private struct ChannelCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
+                Text("\(number)")
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
                 Text(name)
                     .font(.title2.weight(.bold))
                     .lineLimit(1)
