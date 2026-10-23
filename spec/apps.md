@@ -28,6 +28,18 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    anténních pořadů" (Nastavení → Server, default on) is on, else the antenna placeholder. Load it with the key
    (header; Samsung: fetch with the header into a blob URL), memory cache only, never a disk cache; request it only
    for the focused programme (after the focus rests ~0.3 s), never for every cell.
+   **ČT images for Anténa ČT channels**: an Anténa channel that broadcasts a ČT programme gets the official ČT image
+   (and nothing else) from the CT schedule the app already loads, so no recording is needed. Rules (golden cases
+   `spec/fixtures/ct_antenna_match.json`, all three apps):
+   - **Channel → CT slugs**: normalise the name (casefold, drop diacritics, drop the tokens `hd sd uhd 4k t2 hevc`
+     and the regional tokens `pha praha jm sm brno ostrava`, remove spaces): `ct1`→`ct1`, `ct2`→`ct2`,
+     `ct24`→`ct24`, `ctsport`→`sport`, `ct:d`/`ctd`→`decko`, `ctart`→`art`, `ct:d/art`/`ctd/art`→`decko`+`art`;
+     anything else → none (commercial channels never get CT images).
+   - **Programme**: among the CT programmes of those slugs that overlap the Anténa event, take the one whose
+     normalised title (casefold, no diacritics, only letters and digits) equals the event's; else the one with the
+     largest overlap if it covers at least half of the Anténa event; else none.
+   - **Detail image priority**: ČT image (if matched) → gateway thumbnail (own recording) → antenna placeholder. The
+     image is fetched like the CT internet images (no key, CT's CDN), memory cache only.
    **Across days**: the guide scrolls on past a day's edge. Right on the last cell of a row (the one reaching the
    broadcast day's end, 05:00) opens the next day (if it is in the range) with focus on that row's cell at the new
    day's start; left on the first cell opens the previous day with focus on that row's cell at its end. The day strip

@@ -1,0 +1,159 @@
+{
+ "channels": [
+  {
+   "name": "CT 1 PHA HD T2",
+   "slugs": [
+    "ct1"
+   ]
+  },
+  {
+   "name": "ČT1",
+   "slugs": [
+    "ct1"
+   ]
+  },
+  {
+   "name": "CT 1 JM HD T2",
+   "slugs": [
+    "ct1"
+   ]
+  },
+  {
+   "name": "ČT2 HD",
+   "slugs": [
+    "ct2"
+   ]
+  },
+  {
+   "name": "CT 24 HD T2",
+   "slugs": [
+    "ct24"
+   ]
+  },
+  {
+   "name": "ČT sport",
+   "slugs": [
+    "sport"
+   ]
+  },
+  {
+   "name": "CT sport HD T2",
+   "slugs": [
+    "sport"
+   ]
+  },
+  {
+   "name": "CT :D/art HD T2",
+   "slugs": [
+    "decko",
+    "art"
+   ]
+  },
+  {
+   "name": "ČT :D",
+   "slugs": [
+    "decko"
+   ]
+  },
+  {
+   "name": "ČT art",
+   "slugs": [
+    "art"
+   ]
+  },
+  {
+   "name": "Nova HD",
+   "slugs": []
+  },
+  {
+   "name": "CNN Prima News",
+   "slugs": []
+  },
+  {
+   "name": "CS Mystery",
+   "slugs": []
+  },
+  {
+   "name": "ČT3",
+   "slugs": []
+  }
+ ],
+ "programmes": {
+  "schedule": [
+   {
+    "slug": "decko",
+    "idec": "D1",
+    "title": "Tatínek",
+    "start": "2026-10-23T17:47:00Z",
+    "end": "2026-10-23T18:00:00Z",
+    "imageUrl": "https://img.example/d1.jpg"
+   },
+   {
+    "slug": "art",
+    "idec": "A1",
+    "title": "ORF Radio-Symphonieorchester Wien",
+    "start": "2026-10-23T18:00:00Z",
+    "end": "2026-10-23T19:30:00Z",
+    "imageUrl": "https://img.example/a1.jpg"
+   },
+   {
+    "slug": "ct1",
+    "idec": "C1",
+    "title": "Události",
+    "start": "2026-10-23T17:00:00Z",
+    "end": "2026-10-23T17:45:00Z",
+    "imageUrl": "https://img.example/c1.jpg"
+   },
+   {
+    "slug": "ct1",
+    "idec": "C2",
+    "title": "Počasí",
+    "start": "2026-10-23T17:45:00Z",
+    "end": "2026-10-23T17:50:00Z",
+    "imageUrl": "https://img.example/c2.jpg"
+   }
+  ],
+  "cases": [
+   {
+    "name": "same title on the shared channel",
+    "channel": "CT :D/art HD T2",
+    "title": "ORF Radio-Symphonieorchester Wien",
+    "start": "2026-10-23T18:01:00Z",
+    "end": "2026-10-23T19:28:00Z",
+    "idec": "A1"
+   },
+   {
+    "name": "title differs, big overlap",
+    "channel": "CT :D/art HD T2",
+    "title": "Tatínek (12)",
+    "start": "2026-10-23T17:46:00Z",
+    "end": "2026-10-23T18:00:00Z",
+    "idec": "D1"
+   },
+   {
+    "name": "same title, diacritics and case differ",
+    "channel": "CT 1 PHA HD T2",
+    "title": "UDALOSTI",
+    "start": "2026-10-23T17:00:00Z",
+    "end": "2026-10-23T17:46:00Z",
+    "idec": "C1"
+   },
+   {
+    "name": "small overlap only",
+    "channel": "CT 1 PHA HD T2",
+    "title": "Něco jiného",
+    "start": "2026-10-23T17:40:00Z",
+    "end": "2026-10-23T18:40:00Z",
+    "idec": null
+   },
+   {
+    "name": "commercial channel",
+    "channel": "Nova HD",
+    "title": "Události",
+    "start": "2026-10-23T17:00:00Z",
+    "end": "2026-10-23T17:45:00Z",
+    "idec": null
+   }
+  ]
+ }
+}

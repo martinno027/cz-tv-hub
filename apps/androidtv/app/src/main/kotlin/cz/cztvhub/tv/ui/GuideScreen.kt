@@ -69,6 +69,9 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import cz.cztvhub.core.Action
 import cz.cztvhub.core.ChannelPrefs
+import cz.cztvhub.core.Channels
+import cz.cztvhub.core.CtAntennaMatch
+import cz.cztvhub.core.Programme
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.GuideLayout
 import cz.cztvhub.core.GuideWindow
@@ -185,7 +188,12 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         DayPicker(viewModel.today, day, onSelect = { edge = null; selection.focused = null; viewModel.selectDay(it) })
         Spacer(Modifier.height(8.dp))
-        DetailPanel(selection, now, appButton, onOpenApp, thumbnailOf)
+        // "ČT images for Anténa ČT channels": the day's CT schedule by slug, for the focused Anténa programme only.
+        val ctBySlug = remember(plans[day]) {
+            val ready = plans[day] as? Load.Ready
+            ready?.value?.let { plan -> Channels.all.associate { it.slug to plan[it.id].orEmpty() } }.orEmpty()
+        }
+        DetailPanel(selection, now, appButton, onOpenApp, thumbnailOf, ctBySlug)
         Spacer(Modifier.height(8.dp))
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
@@ -294,6 +302,7 @@ private fun DetailPanel(
     appButton: AppButtonLink,
     onOpenApp: () -> Unit,
     thumbnailOf: (DvbEvent) -> Pair<String, Map<String, String>>?,
+    ctBySlug: Map<String, List<Programme>>,
 ) {
     val focused = selection.focused
     val notice = selection.notice
@@ -307,7 +316,18 @@ private fun DetailPanel(
             .background(Palette.surfaceDim, RoundedCornerShape(8.dp))
         when (p) {
             is CtEntry -> RemoteImage(p.imageUrl, imageModifier)
-            is DvbEntry -> AntennaImage(remember(p.event.id, thumbnailOf) { thumbnailOf(p.event) }, imageModifier)
+            is DvbEntry -> {
+                // Priority: CT's official image (ČT channels) → gateway thumbnail → antenna placeholder.
+                val ctImage = remember(p.event.id, p.channel.name, ctBySlug) {
+                    CtAntennaMatch.programme(p.channel.name, p.event.title, p.event.start, p.event.end, ctBySlug)
+                        ?.imageUrl?.takeIf { it.startsWith("https://") }
+                }
+                if (ctImage != null) {
+                    RemoteImage(ctImage, imageModifier)
+                } else {
+                    AntennaImage(remember(p.event.id, thumbnailOf) { thumbnailOf(p.event) }, imageModifier)
+                }
+            }
         }
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {

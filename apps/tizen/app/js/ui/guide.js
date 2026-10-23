@@ -93,6 +93,7 @@
     $('grid-ticks').innerHTML = '';
     // The old rows' DOM is gone: nothing may point at it while the new day loads.
     this.rows = [];
+    this.ctPlan = null;
     this.win = null;
     this.focusEl = null;
     this.nowLine = null;
@@ -148,6 +149,7 @@
    * switched-off sources ("Kanály" in Nastavení); empty rows show as "Mimo vysílání".
    */
   GuideScreen.prototype.build = function (ct, dvb) {
+    this.ctPlan = ct && ct.plan || null; // for the ČT images of Anténa ČT channels
     var rows = this.app.channelList(dvb ? dvb.channels : []).map(function (item) {
       var ch = item.channel;
       if (item.source === 'dvb') {
@@ -423,6 +425,16 @@
     image.style.visibility = url || placeholder ? 'visible' : 'hidden';
   }
 
+  /** CT's image for an Anténa entry of a ČT channel, from the day's CT schedule; '' if none matches. */
+  GuideScreen.prototype.ctImage = function (entry) {
+    var plan = this.ctPlan;
+    if (!plan) return '';
+    var bySlug = {};
+    CT.Channels.all.forEach(function (ch) { bySlug[ch.slug] = plan[ch.id] || []; });
+    var match = CT.CtAntenna.programme(entry.channel.name, entry.title, entry.start, entry.end, bySlug);
+    return match && /^https:\/\//.test(match.imageUrl) ? match.imageUrl : '';
+  };
+
   /** Again for the same entry (e.g. the gateway's thumbnail switch changed). */
   GuideScreen.prototype.refreshDetail = function () {
     if (this.detailEntry !== undefined) this.showDetail(this.detailEntry);
@@ -449,6 +461,12 @@
     $('detail-meta').textContent = meta.join('  ·  ');
     $('detail-description').textContent = entry.description;
     if (entry.source === 'dvb') {
+      // ČT channels on the antenna: CT's official image (spec/apps.md "ČT images for Anténa ČT channels").
+      var ctImage = this.ctImage(entry);
+      if (ctImage) {
+        setDetailImage(ctImage, true);
+        return;
+      }
       // Anténa: placeholder, then the gateway thumbnail once focus rests (spec/apps.md "Anténa thumbnails").
       setDetailImage('', true);
       var recordingId = CT.Thumbs.wanted(this.app.dvbThumbs, CT.ThumbsSwitch.on(), entry);

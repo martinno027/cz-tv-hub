@@ -196,7 +196,7 @@ struct GuideView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             VStack(alignment: .leading, spacing: 20) {
-                EntryDetail(entry: focusedEntry, today: today, now: context.date) {
+                EntryDetail(entry: focusedEntry, today: today, now: context.date, ctSchedule: schedule) {
                     OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
                 }
                     .frame(height: 203)
@@ -828,6 +828,9 @@ private struct EntryDetail: View {
     let entry: GuideEntry?
     let today: BroadcastDay
     let now: Date
+    /// The day's CT schedule, for the ČT image of an Anténa ČT programme (spec/apps.md "ČT images for
+    /// Anténa ČT channels"); matched only for the focused entry.
+    let ctSchedule: ScheduleStore.Schedule
     let openOfficialApp: () -> Void
 
     var body: some View {
@@ -885,7 +888,18 @@ private struct EntryDetail: View {
                 }
             }
         case .antenna(let event, let channel):
-            AntennaArtwork(event: event, channel: channel)
+            // ČT image (official, matched to the CT schedule) → gateway thumbnail → placeholder
+            if let url = AntennaCTMatch.programme(for: event, channel: channel, schedule: ctSchedule)?.imageURL {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        AntennaArtwork(event: event, channel: channel)
+                    }
+                }
+            } else {
+                AntennaArtwork(event: event, channel: channel)
+            }
         }
     }
 
