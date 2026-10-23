@@ -1,7 +1,8 @@
 import Foundation
 
 /// In-memory cache of daily schedules (programme metadata only, no stream URLs).
-/// Today's schedule is refetched after `todayMaxAge`; other days are kept for the app's lifetime.
+/// Today's schedule (and before 05:00 the previous day's, still on screen) is refetched after `todayMaxAge`;
+/// other days are kept for the app's lifetime.
 public actor ScheduleStore {
     public typealias Schedule = [String: [Programme]]
 
@@ -28,7 +29,8 @@ public actor ScheduleStore {
     public func schedule(for day: BroadcastDay) async throws -> Schedule {
         let now = clock()
         if let hit = cache[day] {
-            let isToday = day == BroadcastDay(containing: now)
+            // after midnight the guide still shows the previous broadcast day (GuideDays.openDay)
+            let isToday = day == BroadcastDay(containing: now) || day == GuideDays.openDay(now: now)
             if !isToday || now.timeIntervalSince(hit.fetchedAt) < todayMaxAge {
                 return hit.schedule
             }

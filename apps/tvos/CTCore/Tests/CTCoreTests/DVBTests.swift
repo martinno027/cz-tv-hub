@@ -148,6 +148,23 @@ final class DVBTests: XCTestCase {
         }
     }
 
+    func testThumbnailTellsMissingFromFailed() async throws {
+        let transport = FakeTransport()
+        transport.on("/recording/ok/thumb.jpg", HTTPResponse(status: 200, body: Data([0xFF, 0xD8, 0xFF, 0xE0])))
+        transport.on("/recording/gone/thumb.jpg", HTTPResponse(status: 404, body: Data(#"{"error": "x"}"#.utf8)))
+        transport.on("/recording/busy/thumb.jpg", HTTPResponse(status: 503, body: Data()))
+        transport.on("/recording/html/thumb.jpg", HTTPResponse(status: 200, body: Data("<html>".utf8)))
+        let client = DVBClient(config: GatewayConfig(address: "pi", key: "k")!, transport: transport)
+        let ok = try await client.thumbnail(recordingID: "ok")
+        let gone = try await client.thumbnail(recordingID: "gone")
+        let busy = try await client.thumbnail(recordingID: "busy")
+        let html = try await client.thumbnail(recordingID: "html")
+        XCTAssertEqual(ok, .image(Data([0xFF, 0xD8, 0xFF, 0xE0])))
+        XCTAssertEqual(gone, .missing)
+        XCTAssertEqual(busy, .failed, "only a 404 is remembered as missing")
+        XCTAssertEqual(html, .failed)
+    }
+
     func testNetworkFailureIsCzech() async {
         let transport = FakeTransport()
         transport.fail("", URLError(.cannotConnectToHost))
@@ -180,6 +197,25 @@ final class DVBTests: XCTestCase {
         _ = try await store.epg(for: BroadcastDay(containing: clock.now))
         XCTAssertEqual(transport.requests.filter { $0.url!.path.hasSuffix("/epg") }.count, epgRequests + 1, "today refreshed")
         XCTAssertEqual(transport.requests.filter { $0.url!.path.hasSuffix("/channels") }.count, 1)
+    }
+
+    func testStoreRefreshesTheShownBroadcastDayAfterMidnight() async throws {
+        let transport = FakeTransport()
+        try transport.on("/dvb/epg", fixture: "dvb/dvb_tvos_epg_today")
+        let clock = MutableClock(utc("2026-10-18T22:30:00Z"))  // 0:30 on the 19th: the guide shows the 18th
+        let store = AntennaStore(client: DVBClient(config: GatewayConfig(address: "pi", key: "k")!, transport: transport),
+                                 clock: { clock.now })
+        let shown = BroadcastDay(year: 2026, month: 10, day: 18)
+        func epgRequests() -> Int { transport.requests.filter { $0.url!.path.hasSuffix("/epg") }.count }
+        _ = try await store.epg(for: shown)
+        clock.now = clock.now.addingTimeInterval(121)
+        _ = try await store.epg(for: shown)
+        XCTAssertEqual(epgRequests(), 2, "recording states of the shown day still change")
+        clock.now = utc("2026-10-19T03:10:00Z")  // 05:10: a past day now
+        _ = try await store.epg(for: shown)
+        clock.now = clock.now.addingTimeInterval(3600)
+        _ = try await store.epg(for: shown)
+        XCTAssertEqual(epgRequests(), 2, "past days stay cached")
     }
 }
 

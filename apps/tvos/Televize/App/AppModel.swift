@@ -26,8 +26,8 @@ final class AppModel {
     let planner: PlaybackPlanner
     /// "Pokračovat" positions, on this device only.
     let resume: ResumeStore
-    /// Anténa programme stills for the guide detail, memory only.
-    let thumbnails = AntennaThumbnailStore()
+    /// ČT images and Anténa programme stills for the guide detail, memory only.
+    let images = GuideImageStore()
     /// Channels hidden / reordered in Nastavení → Kanály, on this device only.
     let channelPrefs: ChannelPrefsStore
 
@@ -123,7 +123,7 @@ final class AppModel {
         }
         gateway = config
         antenna = config.map { AntennaStore(client: DVBClient(config: $0)) }
-        thumbnails.setGateway(config)
+        images.setGateway(config)
     }
 
     /// Resolves the stream on the device right now, then opens the player. Every outcome is
