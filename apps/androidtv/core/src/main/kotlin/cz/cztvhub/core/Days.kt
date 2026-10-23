@@ -18,7 +18,37 @@ object Days {
     private val WEEKDAYS = listOf("po", "út", "st", "čt", "pá", "so", "ne")
     private val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZONE)
 
+    /** The calendar day (Prague) of [now]: "Dnes" for labels and the day strip. */
     fun today(now: Instant): LocalDate = now.atZone(ZONE).toLocalDate()
+
+    /** The broadcast day (05:00–05:00 Prague) containing [now]: the grid every open of the guide shows. */
+    fun openDay(now: Instant): LocalDate {
+        val local = now.atZone(ZONE).toLocalDateTime()
+        return if (local.toLocalTime() < DAY_START) local.toLocalDate().minusDays(1) else local.toLocalDate()
+    }
+
+    /** The day strip's chip of a programme starting at [time]: its calendar day (0:10 is the next day's). */
+    fun chipDay(time: Instant): LocalDate = today(time)
+
+    /**
+     * The chip highlighted for a focused programme starting at [start] on the grid of [gridDay]: its [chipDay], or
+     * the grid's day when that has no chip (after midnight on the strip's last day).
+     */
+    fun highlightedChip(start: Instant, gridDay: LocalDate, today: LocalDate): LocalDate =
+        chipDay(start).takeIf { it in guideDays(today) } ?: gridDay
+
+    /** Grid day and focus of a picked chip: [anchor] null = now (the grid containing it), else that moment. */
+    data class Target(val day: LocalDate, val anchor: Instant?)
+
+    /** Picking [chip] on the day strip: "Dnes" shows now as on open, any other day that broadcast day at 20:00. */
+    fun select(chip: LocalDate, now: Instant): Target =
+        if (chip == today(now)) {
+            Target(openDay(now), null)
+        } else {
+            Target(chip, chip.atTime(EVENING).atZone(ZONE).toInstant())
+        }
+
+    private val EVENING: LocalTime = LocalTime.of(20, 0)
 
     /** Days offered in the guide's day picker, oldest first. */
     fun guideDays(today: LocalDate): List<LocalDate> =
