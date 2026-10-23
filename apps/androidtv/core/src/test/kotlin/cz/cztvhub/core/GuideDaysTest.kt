@@ -41,6 +41,17 @@ class GuideDaysTest {
     }
 
     @Test
+    fun highlightedChipFallsBackToTheGridDay() {
+        val today = LocalDate.of(2026, 10, 23)
+        val last = LocalDate.of(2026, 10, 25) // Zítra + 1, the strip's last chip
+        // 22:15 and 0:10 inside the 23rd's grid: "Dnes", then "Zítra".
+        assertEquals(today, Days.highlightedChip(Instant.parse("2026-10-23T20:15:00Z"), today, today))
+        assertEquals(today.plusDays(1), Days.highlightedChip(Instant.parse("2026-10-23T22:10:00Z"), today, today))
+        // 0:10 on the 26th has no chip: the grid's day.
+        assertEquals(last, Days.highlightedChip(Instant.parse("2026-10-25T23:10:00Z"), last, today))
+    }
+
+    @Test
     fun todayFollowsTheClock() {
         // An airing 0:10 programme is "Dnes" once midnight has passed, never "Zítra".
         val now = Instant.parse("2026-10-23T22:20:00Z")

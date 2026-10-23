@@ -192,6 +192,8 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     var anchorAt by remember { mutableStateOf<Instant?>(null) }
     // Picking a chip rebuilds the grid even when the day stays (e.g. "Dnes" from the grid containing now).
     var generation by remember { mutableIntStateOf(0) }
+    // After picking a chip, focus moves into the new grid onto its target cell (once).
+    var focusPicked by remember { mutableStateOf(false) }
     val onEdge: (String, Boolean) -> Unit = { rowKey, forward ->
         Days.adjacentGuideDay(day, today, forward)?.let { next ->
             edge = DayEdge(rowKey, atEnd = !forward)
@@ -207,6 +209,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         edge = null
         anchorAt = target.anchor
         generation++
+        focusPicked = true
         selection.focused = null
         selection.focusedStart = null
         selection.chip = chip
@@ -242,7 +245,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val images = remember { GuideImages(context.tvApp.images, scope) }
 
     Column(Modifier.fillMaxSize()) {
-        DayPicker(today, selection, appButton, onSelect = onChip)
+        DayPicker(today, day, selection, appButton, onSelect = onChip)
         Spacer(Modifier.height(8.dp))
         DetailPanel(selection, now, appButton, onOpenApp, images, imageOf)
         Spacer(Modifier.height(8.dp))
@@ -283,7 +286,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                         EpgGrid(
                             rows = rows, day = day, now = now, appButton = appButton, onFocus = onFocus, onSelect = onSelect,
                             anchorAt = anchorAt, startAt = edge, onStarted = { edge = null }, onEdge = onEdge,
-                            onFocusAt = onFocusAt,
+                            onFocusAt = onFocusAt, focusOnOpen = focusPicked, onFocusedOnOpen = { focusPicked = false },
                         )
                     }
                 }
@@ -325,11 +328,15 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
  * keeps the grid out of it), and entering it from below lands on that chip.
  */
 @Composable
-private fun DayPicker(today: LocalDate, selection: GuideSelection, appButton: AppButtonLink, onSelect: (LocalDate) -> Unit) {
+private fun DayPicker(
+    today: LocalDate,
+    gridDay: LocalDate,
+    selection: GuideSelection,
+    appButton: AppButtonLink,
+    onSelect: (LocalDate) -> Unit,
+) {
     val days = Days.guideDays(today)
-    // A programme after midnight on the last day starts on a day past the strip: its last chip.
-    val selected = (selection.focusedStart?.let(Days::chipDay) ?: selection.chip ?: today)
-        .coerceIn(days.first(), days.last())
+    val selected = selection.focusedStart?.let { Days.highlightedChip(it, gridDay, today) } ?: selection.chip ?: today
     val selectedRequester = appButton.chip
     var inside by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -521,6 +528,8 @@ private fun EpgGrid(
     onStarted: () -> Unit = {},
     onEdge: (rowKey: String, forward: Boolean) -> Unit = { _, _ -> },
     onFocusAt: (row: Int, time: Instant) -> Unit = { _, _ -> },
+    focusOnOpen: Boolean = false,
+    onFocusedOnOpen: () -> Unit = {},
 ) {
     val focusAt by rememberUpdatedState(onFocusAt)
     val plan = rows // remember() key
@@ -621,12 +630,15 @@ private fun EpgGrid(
         snapshotFlow { scroll.maxValue }.first { it in 1 until Int.MAX_VALUE }
         val x = with(density) { durationToDp(axisStart, opensAt.minusSeconds(30 * 60)).toPx() }
         scroll.scrollTo(x.toInt().coerceAtLeast(0))
-        if (edgeStart != null) {
-            // The previous day's grid (and its focus) is gone: focus the edge cell of the new day.
+        if (edgeStart != null || focusOnOpen) {
+            // The previous day's grid (and its focus) is gone, or a chip was picked: focus the target cell.
             entered = true
             for (attempt in 1..5) {
                 withFrameNanos { }
-                if (runCatching { anchorRequester.requestFocus() }.isSuccess) break
+                if (runCatching { anchorRequester.requestFocus() }.isSuccess) {
+                    if (focusOnOpen) onFocusedOnOpen()
+                    break
+                }
             }
         }
     }

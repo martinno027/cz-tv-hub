@@ -30,6 +30,13 @@ object Days {
     /** The day strip's chip of a programme starting at [time]: its calendar day (0:10 is the next day's). */
     fun chipDay(time: Instant): LocalDate = today(time)
 
+    /**
+     * The chip highlighted for a focused programme starting at [start] on the grid of [gridDay]: its [chipDay], or
+     * the grid's day when that has no chip (after midnight on the strip's last day).
+     */
+    fun highlightedChip(start: Instant, gridDay: LocalDate, today: LocalDate): LocalDate =
+        chipDay(start).takeIf { it in guideDays(today) } ?: gridDay
+
     /** Grid day and focus of a picked chip: [anchor] null = now (the grid containing it), else that moment. */
     data class Target(val day: LocalDate, val anchor: Instant?)
 
