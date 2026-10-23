@@ -14,88 +14,97 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import cz.cztvhub.core.CtApi
-import cz.cztvhub.tv.tvApp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URI
 
 /**
- * Small in-memory cache of programme images (no disk cache, no image library). Anténa thumbnails go through it too:
- * by the approval of 2026-10-23 they must never be stored on disk.
+ * In-memory cache of programme images (no disk cache, no image library). Anténa thumbnails go through it too:
+ * by the approval of 2026-10-23 they must never be stored on disk. The guide prefetches around the focus
+ * (spec/apps.md "Image prefetch", about 300 images), so it keeps the downloaded bytes (a few dozen kB each) and
+ * decodes only the few images the detail actually shows.
  */
 class ImageCache {
-    private val cache = LruCache<String, ImageBitmap>(48)
+    enum class Fetched { OK, MISSING, FAILED }
 
-    suspend fun load(url: String, headers: Map<String, String> = emptyMap()): ImageBitmap? {
-        cache.get(url)?.let { return it }
-        return withContext(Dispatchers.IO) {
+    /** A share of the heap, at most 48 MB; every entry counts at least budget/300, so about 300 images at most. */
+    private val budget = minOf(Runtime.getRuntime().maxMemory() / 8, 48L shl 20).toInt()
+    private val bytes = object : LruCache<String, ByteArray>(budget) {
+        override fun sizeOf(key: String, value: ByteArray): Int = maxOf(value.size, budget / MAX_IMAGES)
+    }
+    private val bitmaps = LruCache<String, ImageBitmap>(DECODED)
+
+    fun has(url: String): Boolean = bytes.get(url) != null
+
+    /** The decoded image if it is at hand, without waiting. */
+    fun decoded(url: String): ImageBitmap? = bitmaps.get(url)
+
+    /** Downloads [url] into the cache ([headers] = the gateway key for Anténa thumbnails). */
+    suspend fun fetch(url: String, headers: Map<String, String>): Fetched = withContext(Dispatchers.IO) {
+        try {
+            val connection = URI(url).toURL().openConnection() as HttpURLConnection
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.useCaches = false
+            connection.setRequestProperty("User-Agent", CtApi.USER_AGENT)
+            headers.forEach { (k, v) -> connection.setRequestProperty(k, v) }
             try {
-                val connection = URI(url).toURL().openConnection() as HttpURLConnection
-                connection.connectTimeout = 8000
-                connection.readTimeout = 8000
-                connection.useCaches = false
-                connection.setRequestProperty("User-Agent", CtApi.USER_AGENT)
-                headers.forEach { (k, v) -> connection.setRequestProperty(k, v) }
-                val bytes = try {
-                    if (connection.responseCode != 200) return@withContext null
-                    connection.inputStream.use { it.readBytes() }
-                } finally {
-                    connection.disconnect()
+                when (connection.responseCode) {
+                    200 -> {
+                        bytes.put(url, connection.inputStream.use { it.readBytes() })
+                        Fetched.OK
+                    }
+                    404 -> Fetched.MISSING
+                    else -> Fetched.FAILED
                 }
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                var sample = 1
-                while (bounds.outWidth / (sample * 2) >= 480) sample *= 2
-                val options = BitmapFactory.Options().apply { inSampleSize = sample }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
-                    ?.also { cache.put(url, it) }
-            } catch (_: Exception) {
-                null
+            } finally {
+                connection.disconnect()
             }
+        } catch (_: Exception) {
+            Fetched.FAILED
         }
     }
-}
 
-@Composable
-fun RemoteImage(url: String, modifier: Modifier = Modifier) {
-    val images = LocalContext.current.tvApp.images
-    val bitmap by produceState<ImageBitmap?>(null, url) {
-        value = if (url.startsWith("https://")) images.load(url) else null
+    /** The cached image decoded (about 480 px wide), or null when it is not cached or not an image. */
+    suspend fun bitmap(url: String): ImageBitmap? {
+        bitmaps.get(url)?.let { return it }
+        val data = bytes.get(url) ?: return null
+        return withContext(Dispatchers.Default) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= 480) sample *= 2
+            val options = BitmapFactory.Options().apply { inSampleSize = sample }
+            BitmapFactory.decodeByteArray(data, 0, data.size, options)?.asImageBitmap()?.also { bitmaps.put(url, it) }
+        }
     }
-    val image = bitmap
-    if (image != null) {
-        Image(image, contentDescription = null, modifier = modifier, contentScale = ContentScale.Crop)
-    } else {
-        Box(modifier.background(Palette.surfaceDim))
+
+    private companion object {
+        const val MAX_IMAGES = 300
+        const val DECODED = 12
     }
 }
 
 /**
- * An Anténa programme's gateway thumbnail ([source] = URL + key headers, or null): loaded only once the focus has
- * rested on the programme for a moment, memory only; the antenna placeholder otherwise or until it arrives.
+ * The guide detail's image ([request] null = none): a CT image, or an Anténa programme's gateway thumbnail with
+ * the antenna placeholder ([antenna]) until it arrives or when there is none. Memory only.
  */
 @Composable
-fun AntennaImage(source: Pair<String, Map<String, String>>?, modifier: Modifier = Modifier) {
-    val images = LocalContext.current.tvApp.images
-    val bitmap by produceState<ImageBitmap?>(null, source) {
-        value = null
-        if (source == null) return@produceState
-        delay(THUMBNAIL_FOCUS_DELAY_MS)
-        value = images.load(source.first, source.second)
+fun GuideImage(images: GuideImages, request: ImageRequest?, antenna: Boolean, modifier: Modifier = Modifier) {
+    val bitmap by produceState<ImageBitmap?>(null, request) {
+        // Never the previous programme's image while this one loads.
+        value = request?.let(images::decoded)
+        if (request != null && value == null) value = images.image(request)
     }
     val image = bitmap
     if (image != null) {
         Image(image, contentDescription = null, modifier = modifier, contentScale = ContentScale.Crop)
     } else {
         Box(modifier.background(Palette.surfaceDim), contentAlignment = Alignment.Center) {
-            SourceIcon(antenna = true, size = 44.dp, modifier = Modifier.alpha(0.6f))
+            if (antenna) SourceIcon(antenna = true, size = 44.dp, modifier = Modifier.alpha(0.6f))
         }
     }
 }
-
-private const val THUMBNAIL_FOCUS_DELAY_MS = 300L
