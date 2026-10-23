@@ -64,7 +64,7 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    day's start; left on the first cell opens the previous day with focus on that row's cell at its end. **The day strip
    highlights the calendar day of the focused programme's start** (`chipDay`; Hercule Poirot at 22:15 → "Dnes", the
    next cell at 0:10 → "Zítra", inside the same grid), and up from the first row lands on that highlighted chip (never on the "Otevřít v iVysílání" button first;
-   the button is reached from the strip). Coming back from the player is not a new open: the guide stays where it was.
+   up from the strip reaches the button, down from the strip goes to the grid, down from the button to the strip). Coming back from the player is not a new open: the guide stays where it was.
    **Selecting a chip** (`select`): "Dnes" = the grid containing now with focus on now (as on open); any other day =
    that broadcast day, scrolled to 20:00. The "Live column first" mode ends on a day change. At the range's ends nothing happens. tvOS has no event for a
    left/right press without a target, so its rows end with a focusable "Zítra ›" cell and start with "‹ Včera" /
