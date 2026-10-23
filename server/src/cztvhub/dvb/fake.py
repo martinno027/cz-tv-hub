@@ -238,7 +238,9 @@ class FakeTvheadend:
         if path == "serverinfo":
             return {"sw_version": "fake", "api_version": 19, "name": "Tvheadend (cztvhub fake)"}
         if path == "channel/grid":
-            rows = [{k: v for k, v in c.items() if not k.startswith("_")} for c in self.channels]
+            # like TVHeadend: disabled channels only with all=1
+            rows = [{k: v for k, v in c.items() if not k.startswith("_")} for c in self.channels
+                    if c["enabled"] or args.get("all") in ("1", "true")]
             return {"entries": rows, "total": len(rows)}
         if path == "epg/events/grid":
             return self._epg(args, now)

@@ -2,7 +2,8 @@
 
 Endpoints used (field names checked against TVHeadend's src/api/*.c and the
 web UI's requests; the API is not formally versioned, so parsing is defensive):
-- POST /api/channel/grid            channels: uuid, name, number, enabled, icon_public_url, services[]
+- POST /api/channel/grid            channels: uuid, name, number, enabled, icon_public_url, services[];
+                                    disabled channels only with all=1 and an admin user (api_channel.c)
 - POST /api/mpegts/service/grid     services: uuid, enabled, svcname, multiplex, multiplex_uuid (admin)
 - POST /api/mpegts/mux/grid         multiplexes: uuid, name, enabled (int: -1 ignore, 0 disable, 1 enable; admin)
                                     both with hidemode=none: by default (api_mpegts.c) the service grid leaves
@@ -297,7 +298,10 @@ class TvheadendClient:
 
     # -- read ------------------------------------------------------------------------------
     def channels(self, include_disabled: bool = False) -> list[Channel]:
-        return parse_channels(self.api("channel/grid", {"start": "0", "limit": str(GRID_LIMIT)}), include_disabled)
+        args = {"start": "0", "limit": str(GRID_LIMIT)}
+        if include_disabled:
+            args["all"] = "1"  # else TVHeadend leaves disabled channels out
+        return parse_channels(self.api("channel/grid", args), include_disabled)
 
     def services(self) -> list[Service]:
         return parse_services(self.api("mpegts/service/grid",
