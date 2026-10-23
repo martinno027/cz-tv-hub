@@ -24,7 +24,7 @@ from .hls import (Codecs, EmptySource, HlsManager, HlsSession, StreamFailed, bui
                   rewrite_playlist)
 from .retention import RetentionLoop
 from .sources import GrowingRecording
-from .tvheadend import Channel, TunerBusy, TvheadendClient, TvhError, TvhNotFound
+from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
 UUID = r"[A-Za-z0-9_-]{1,64}"
 LIVE_RE = re.compile(rf"^/dvb/live/({UUID})\.m3u8$")
@@ -176,6 +176,13 @@ class DvbGateway:
                 self._channels_at = time.monotonic()
             return self._channels
 
+    def channels_changed(self, hidden: str | None = None) -> None:
+        """After the admin page changed TVHeadend's channels: reload them, end a hidden channel's live stream."""
+        with self._channels_lock:
+            self._channels_at = float("-inf")
+        if hidden:
+            self.hls.stop_key(f"live:{hidden}")
+
     def status(self) -> Response:
         try:
             tuners = [{"name": t.name, "inUse": t.in_use} for t in self.client.tuners()]
@@ -209,8 +216,10 @@ class DvbGateway:
         if not first <= day <= last:
             raise HttpError(400, f"Program je k dispozici jen od {first.isoformat()} do {last.isoformat()}")
         start, end = epg.day_bounds(day)
-        events = self.client.epg_events(start, end)
-        entries = self.client.dvr_entries("grid")
+        # Channels hidden in the admin page (disabled in TVHeadend) are not offered, nor their recordings.
+        offered = {c.uuid for c in self._channel_list()}
+        events = [e for e in self.client.epg_events(start, end) if e.channel in offered]
+        entries = [e for e in self.client.dvr_entries("grid") if e.channel in offered]
         built = epg.build_epg(events, entries, start, end)
         if self.ads.enabled:
             stored = self.breaks.ids()
@@ -282,12 +291,19 @@ class DvbGateway:
         return bool(tuners) and all(t.in_use for t in tuners)
 
     def recording(self, dvr_uuid: str, on_session: Callable[[HlsSession], None] | None = None) -> Response:
+        def entry() -> DvrEntry | None:
+            return next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
+
         def state() -> str:
-            entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
-            return epg.recording_state(entry.sched_status) if entry else ""
+            found = entry()
+            return epg.recording_state(found.sched_status) if found else ""
 
         def open_source():
-            current = state()
+            found = entry()
+            # recordings of channels hidden in the admin page are not offered
+            if found is None or found.channel not in {c.uuid for c in self._channel_list()}:
+                raise HttpError(404, "Nahrávka není k dispozici")
+            current = epg.recording_state(found.sched_status)
             if current == "recording":
                 return GrowingRecording(self.client, dvr_uuid, lambda: state() == "recording")
             if current == "completed":

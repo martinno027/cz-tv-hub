@@ -369,6 +369,14 @@ class HlsManager:
             self._remove(session)
         return len(victims)
 
+    def stop_key(self, key: str) -> bool:
+        """Stop the session of ``key`` now (e.g. the live stream of a channel just hidden)."""
+        with self._lock:
+            session = self._by_key.get(key)
+        if session is not None:
+            self._remove(session)
+        return session is not None
+
     def reap(self) -> None:
         for session in self.sessions():
             if session.idle_for() > self.idle_seconds:

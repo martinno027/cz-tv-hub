@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MIN_KEY_LENGTH = 32
+MIN_ADMIN_PASSWORD_LENGTH = 12
 RETENTION_MIN, RETENTION_MAX, RETENTION_DEFAULT = 1, 14, 3
 
 
@@ -43,11 +44,22 @@ class AdsConfig:
 
 
 @dataclass
+class AdminConfig:
+    """Web administration at ``/admin`` (HTTP Basic, user ``admin``); off while the password is empty."""
+    password: str = ""
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.password)
+
+
+@dataclass
 class Config:
     host: str = "0.0.0.0"
     port: int = 8098
     dvb: DvbConfig = field(default_factory=DvbConfig)
     ads: AdsConfig = field(default_factory=AdsConfig)
+    admin: AdminConfig = field(default_factory=AdminConfig)
     tvheadend: TvheadendConfig = field(default_factory=TvheadendConfig)
 
 
@@ -116,6 +128,9 @@ def parse_config(text: str) -> Config:
         ads.worker_hosts = [h.strip() for h in section.get("worker_hosts", "").split(",") if h.strip()]
         ads.breaks_dir = Path(section.get("breaks_dir", str(ads.breaks_dir)).strip())
 
+    if parser.has_section("admin"):
+        cfg.admin.password = parser["admin"].get("password", "").strip()
+
     if cfg.dvb.enabled and len(cfg.dvb.key) < MIN_KEY_LENGTH:
         raise ConfigError(f"[dvb] key must be at least {MIN_KEY_LENGTH} characters when DVB is enabled")
     if cfg.ads.enabled:
@@ -125,6 +140,13 @@ def parse_config(text: str) -> Config:
             raise ConfigError(f"[ads] worker_key must be at least {MIN_KEY_LENGTH} characters when enabled")
         if cfg.ads.worker_key == cfg.dvb.key:
             raise ConfigError("[ads] worker_key must differ from [dvb] key")
+    if cfg.admin.enabled:
+        if not cfg.dvb.enabled:
+            raise ConfigError("[admin] needs [dvb] enabled = true")
+        if len(cfg.admin.password) < MIN_ADMIN_PASSWORD_LENGTH:
+            raise ConfigError(f"[admin] password must be at least {MIN_ADMIN_PASSWORD_LENGTH} characters")
+        if cfg.admin.password in (cfg.dvb.key, cfg.ads.worker_key):
+            raise ConfigError("[admin] password must differ from the app and worker keys")
     return cfg
 
 

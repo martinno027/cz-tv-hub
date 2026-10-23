@@ -20,6 +20,11 @@ worker_key =            ; random 32+ chars, different from [dvb] key
 worker_hosts =          ; optional: source IPs allowed to use worker_key
 breaks_dir = /var/lib/cztvhub/breaks
 
+[admin]
+; Web administration http://<raspberry>:8098/admin (user "admin"): which antenna channels the apps offer,
+; record and receive. Empty = off. Needs [dvb] enabled; 12+ chars.
+password = @ADMIN_PASSWORD@
+
 [tvheadend]
 url = http://127.0.0.1:9981
 user = cztvhub

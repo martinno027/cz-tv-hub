@@ -71,6 +71,17 @@ password = se;cret
         with self.assertRaises(ConfigError):
             parse_config("not ini")
 
+    def test_admin(self):
+        self.assertFalse(parse_config("[admin]\npassword =\n").admin.enabled)
+        dvb = f"[dvb]\nenabled = true\nkey = {KEY}\n"
+        cfg = parse_config(dvb + "[admin]\npassword = long-enough-pw  ; comment\n")
+        self.assertEqual((cfg.admin.enabled, cfg.admin.password), (True, "long-enough-pw"))
+        for text in ("[admin]\npassword = long-enough-pw\n",  # needs DVB
+                     dvb + "[admin]\npassword = short\n",
+                     dvb + f"[admin]\npassword = {KEY}\n"):
+            with self.assertRaises(ConfigError, msg=text):
+                parse_config(text)
+
     def test_load_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "c.conf"

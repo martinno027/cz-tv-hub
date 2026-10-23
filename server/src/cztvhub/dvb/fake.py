@@ -5,6 +5,7 @@ live streams (``ffmpeg -f lavfi testsrc``), and a small DVR:
 - channel 1 is "autorecorded": past slots are completed recordings (two short test clips,
   one entry failed), the current slot is recording in real time, the next ones are scheduled;
 - channel 2 has completed recordings of past slots only; channels 3 and 4 have none.
+Each channel has one service; channels 1 + 2 share a multiplex, 3 and 4 have their own (for /admin).
 Like the real TVHeadend, EPG events disappear once they end (past programmes = DVR entries).
 """
 from __future__ import annotations
@@ -22,12 +23,12 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
-# name, number, slot minutes, recording mode ("auto" | "past" | ""), test pattern, tone Hz
+# name, number, slot minutes, recording mode ("auto" | "past" | ""), test pattern, tone Hz, multiplex
 CHANNELS = [
-    ("ČT1 HD", 1, 30, "auto", "testsrc2", 440),
-    ("ČT2 HD", 2, 45, "past", "testsrc", 550),
-    ("Nova HD", 3, 60, "", "smptehdbars", 660),
-    ("Prima HD", 4, 60, "", "rgbtestsrc", 770),
+    ("ČT1 HD", 1, 30, "auto", "testsrc2", 440, "626MHz"),
+    ("ČT2 HD", 2, 45, "past", "testsrc", 550, "626MHz"),
+    ("Nova HD", 3, 60, "", "smptehdbars", 660, "538MHz"),
+    ("Prima HD", 4, 60, "", "rgbtestsrc", 770, "690MHz"),
 ]
 PROGRAMMES = [
     ("Zprávy", 0x20), ("Film: Testovací obrazec", 0x10), ("Sportovní přenos", 0x40), ("Pohádka", 0x50),
@@ -64,10 +65,18 @@ class FakeTvheadend:
         self.lock = threading.Lock()
         self.channels = [
             {"uuid": stable_uuid("channel", name), "name": name, "number": number, "enabled": True,
-             "icon_public_url": f"imagecache/{number}" if number == 1 else "", "_slot": slot * 60,
+             "icon_public_url": f"imagecache/{number}" if number == 1 else "",
+             "services": [stable_uuid("service", name)], "_slot": slot * 60,
              "_mode": mode, "_pattern": pattern, "_tone": tone, "_index": i}
-            for i, (name, number, slot, mode, pattern, tone) in enumerate(CHANNELS)
+            for i, (name, number, slot, mode, pattern, tone, _mux) in enumerate(CHANNELS)
         ]
+        self.muxes = {stable_uuid("mux", mux): {"uuid": stable_uuid("mux", mux), "name": mux, "enabled": 1}
+                      for *_, mux in CHANNELS}
+        self.services = {
+            stable_uuid("service", name): {"uuid": stable_uuid("service", name), "svcname": name, "enabled": True,
+                                           "multiplex": mux, "multiplex_uuid": stable_uuid("mux", mux)}
+            for name, *_, mux in CHANNELS
+        }
         self.entries: dict[str, dict] = {}
         self.recorders: dict[str, subprocess.Popen] = {}
         self.active_streams: dict[int, str] = {}  # tuner index -> channel name
@@ -92,9 +101,16 @@ class FakeTvheadend:
             "genre": [genre],
         }
 
+    def received(self, channel: dict) -> bool:
+        return channel["enabled"] and any(
+            self.services[s]["enabled"] and self.muxes[self.services[s]["multiplex_uuid"]]["enabled"] == 1
+            for s in channel["services"])
+
     def events_between(self, start: int, stop: int) -> list[dict]:
         out = []
         for ch in self.channels:
+            if not self.received(ch):
+                continue
             slot = ch["_slot"]
             for k in range(start // slot, stop // slot + 1):
                 ev = self.event_for(ch, k)
@@ -148,7 +164,7 @@ class FakeTvheadend:
                     entry["sched_status"] = "completed"
                     entry["broadcast"] = 0
             for ch in self.channels:
-                if ch["_mode"] != "auto":
+                if ch["_mode"] != "auto" or not ch["enabled"]:
                     continue
                 current = int(now) // ch["_slot"]
                 for k in range(current, current + 1 + UPCOMING_SCHEDULED):
@@ -235,10 +251,27 @@ class FakeTvheadend:
         if path == "dvr/entry/remove":
             with self.lock:
                 for uuid in _list_arg(args.get("uuid", "")):
-                    entry = self.entries.pop(uuid, None)
-                    if entry and entry["filename"].startswith(str(self.data_dir / "rec")):
+                    entry = self.entries.get(uuid)
+                    if entry is None or entry["sched_status"] in ("scheduled", "recording"):
+                        continue  # like TVHeadend: remove is for finished entries
+                    del self.entries[uuid]
+                    if entry["filename"].startswith(str(self.data_dir / "rec")):
                         Path(entry["filename"]).unlink(missing_ok=True)
             return {}
+        if path == "dvr/entry/cancel":
+            with self.lock:
+                for uuid in _list_arg(args.get("uuid", "")):
+                    entry = self.entries.get(uuid)
+                    if entry and entry["sched_status"] == "scheduled":
+                        del self.entries[uuid]
+                    elif entry and entry["sched_status"] == "recording":
+                        self._stop_recorder(uuid)
+                        entry.update(sched_status="completedError", broadcast=0)
+            return {}
+        if path == "mpegts/service/grid":
+            return {"entries": list(self.services.values()), "total": len(self.services)}
+        if path == "mpegts/mux/grid":
+            return {"entries": list(self.muxes.values()), "total": len(self.muxes)}
         if path == "status/inputs":
             with self.lock:
                 busy = dict(self.active_streams)
@@ -257,9 +290,11 @@ class FakeTvheadend:
             return {"uuid": uuid}
         if path == "idnode/save":
             nodes = json.loads(args.get("node") or "{}")
+            channels = {c["uuid"]: c for c in self.channels}
             for node in nodes if isinstance(nodes, list) else [nodes]:
-                target = self.dvr_config if node.get("uuid") == self.dvr_config["uuid"] \
-                    else self.autorecs.get(node.get("uuid"))
+                uuid = node.get("uuid")
+                target = self.dvr_config if uuid == self.dvr_config["uuid"] else (
+                    self.autorecs.get(uuid) or channels.get(uuid) or self.services.get(uuid) or self.muxes.get(uuid))
                 if target is not None:
                     target.update(node)
             return {}
@@ -393,7 +428,7 @@ def _make_handler(fake: FakeTvheadend):
 
         def _live(self, uuid: str) -> None:
             channel = next((c for c in fake.channels if c["uuid"] == uuid), None)
-            if channel is None:
+            if channel is None or not fake.received(channel):
                 return self._send(404, b"", "text/plain")
             tuner = fake.tuner_acquire(channel["name"])
             if tuner is None:

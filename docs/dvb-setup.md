@@ -122,7 +122,7 @@ síť a multiplexy podruhé):
    `"tuners": []` a `"tvheadendReachable": false`.
 2. Configuration → General → Base: *HTTP authentication* nastavte na „Both plain and digest“.
 3. Configuration → Channel / EPG → Channels: zkontrolujte kanály, duplicitní (např. Nova a Nova Cinema jsou ve
-   dvou multiplexech) vypněte (*Enabled*), případně jim dejte čísla – aplikace řadí podle čísla, pak abecedy.
+   dvou multiplexech) vypněte (*Enabled*, nebo pohodlněji ve správě kanálů, kapitola 4a), případně jim dejte čísla – aplikace řadí podle čísla, pak abecedy.
 4. Nic s CA/CI/descramblery nenastavujte. Kanály šifrovaných multiplexů můžete vypnout.
 
 **Kontrola brány** na Raspberry (klíč se načte z konfigurace a nevypíše):
@@ -159,6 +159,28 @@ sudo -u cztvhub env PYTHONPATH=/opt/cztvhub/src python3 -m cztvhub dvb-setup --c
 Příkaz je bezpečné spouštět opakovaně. Nastaví v TVHeadendu dobu uchování nahrávek a pro každý vybraný kanál
 jedno pravidlo automatického nahrávání (komentář „cztvhub“), které nahrává všechny pořady. Volba `--dry-run`
 jen vypíše, co by změnil. Služba cz-tv-hub navíc každou hodinu maže nahrávky starší než `retention_days`.
+
+## 4a. Správa kanálů (webová administrace)
+
+Na adrese `http://cztvhub.local:8098/admin` (z domácí sítě, mimo domov přes Tailscale) je stránka, kde vypínáte
+kanály, které nechcete. Přihlášení: jméno **admin**, heslo `password` ze sekce `[admin]` v
+`/etc/cztvhub/cztvhub.conf` (instalace ho vygeneruje a vypíše). Starší instalace sekci nemají – doplňte ji ručně
+(heslo aspoň 12 znaků) a restartujte službu:
+
+```bash
+printf '\n[admin]\npassword = %s\n' "$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')" \
+  | sudo tee -a /etc/cztvhub/cztvhub.conf && sudo systemctl restart cztvhub
+sudo grep -A1 '^\[admin\]' /etc/cztvhub/cztvhub.conf     # heslo
+```
+
+Vypnutý kanál:
+- aplikace „Televize“ ho nenabízejí (ani v programu, ani jeho nahrávky),
+- nenahrává se: plánované nahrávky se zruší a dosavadní nahrávky kanálu se smažou,
+- tuner ho neladí: v TVHeadendu se vypne kanál i jeho služba, a když v multiplexu nezbude žádný zapnutý kanál,
+  vypne se celý multiplex (tuner na něj vůbec neladí, nestahuje ani jeho program).
+
+Opětovné zapnutí vše vrátí; nahrává se od dalšího pořadu a program se doplní, až tuner multiplex znovu naladí.
+Stejně se chová kanál vypnutý ručně v TVHeadendu (*Enabled*).
 
 ## 5. Vzdálený přístup: jen vaše domácnost přes Tailscale
 

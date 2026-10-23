@@ -1,6 +1,7 @@
 """Tiny HTTP server: playlist + per-channel redirect to a fresh signed stream URL.
 
-With DVB enabled in the config it also serves the ``/dvb/*`` gateway (spec/dvb-gateway.md).
+With DVB enabled in the config it also serves the ``/dvb/*`` gateway (spec/dvb-gateway.md),
+and with ``[admin] password`` the channel administration at ``/admin``.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from .channels import BY_ID
 from .m3u import build_playlist
 
 if TYPE_CHECKING:
+    from .dvb.admin import AdminSite
     from .dvb.gateway import DvbGateway
 
 STREAM_RE = re.compile(r"^/ct/(CH_\d+)\.m3u8$")
@@ -22,7 +24,7 @@ MAX_PUT_BODY = 64 * 1024  # ad-break uploads (spec/ad-breaks.md)
 DVB_DISABLED = '{"error": "DVB není zapnuté"}'.encode("utf-8")
 
 
-def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None):
+def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, admin: AdminSite | None = None):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -43,6 +45,8 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None):
             path, _, query = self.path.partition("?")
             if path.startswith("/dvb/"):
                 return self._dvb(path, query)
+            if path == "/admin" or path.startswith("/admin/"):
+                return self._admin(path)
             if path == "/health":
                 return self._send(200, b"ok\n")
             if path in ("/playlist.m3u", "/ct.m3u"):
@@ -69,6 +73,23 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None):
                 return self._send(400, b"bad request\n")
             self._dvb(path, query, "PUT", self.rfile.read(length))
 
+        def do_POST(self):
+            path = self.path.partition("?")[0]
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if not path.startswith("/admin/") or not 0 <= length <= MAX_PUT_BODY:
+                self.close_connection = True
+                return self._send(400, b"bad request\n")
+            self._admin(path, "POST", self.rfile.read(length))
+
+        def _admin(self, path, method="GET", body=b""):
+            if admin is None:
+                return self._send(404, b"admin is off ([admin] password in the config)\n")
+            resp = admin.handle(method, path, self.headers, body)
+            self._send(resp.status, resp.body, resp.content_type, resp.headers)
+
         def _dvb(self, path, query, method="GET", body=b""):
             if gateway is None:
                 return self._send(404, DVB_DISABLED, "application/json; charset=utf-8")
@@ -87,11 +108,13 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
-def serve(host: str, port: int, resolver: StreamResolver | None = None, gateway: DvbGateway | None = None):
-    server = Server((host, port), make_handler(resolver or StreamResolver(), gateway))
+def serve(host: str, port: int, resolver: StreamResolver | None = None, gateway: DvbGateway | None = None,
+          admin: AdminSite | None = None):
+    server = Server((host, port), make_handler(resolver or StreamResolver(), gateway, admin))
     if gateway is not None:
         gateway.start()
     dvb = ", DVB gateway: /dvb/" if gateway is not None else ""
+    dvb += ", admin: /admin" if admin is not None else ""
     print(f"cz-tv-hub listening on {host}:{port}  (playlist: /playlist.m3u{dvb})", flush=True)
     try:
         server.serve_forever()

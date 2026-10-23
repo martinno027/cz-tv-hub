@@ -49,13 +49,16 @@ if ! sudo test -f /etc/cztvhub/cztvhub.conf; then
   sudo install -d -m 0750 -o cztvhub -g cztvhub /etc/cztvhub
   key=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
   tvh_password=$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')
-  sed -e "s|@KEY@|$key|" -e "s|@DVB_ENABLED@|true|" -e "s|@TVH_PASSWORD@|$tvh_password|" deploy/cztvhub.conf.example \
+  admin_password=$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')
+  sed -e "s|@KEY@|$key|" -e "s|@DVB_ENABLED@|true|" -e "s|@TVH_PASSWORD@|$tvh_password|" \
+    -e "s|@ADMIN_PASSWORD@|$admin_password|" deploy/cztvhub.conf.example \
     | sudo install -m 0600 -o cztvhub -g cztvhub /dev/stdin /etc/cztvhub/cztvhub.conf
   echo
   echo "Created /etc/cztvhub/cztvhub.conf (DVB enabled)."
   echo "  App key:            $key"
   echo "  TVHeadend user:     cztvhub"
   echo "  TVHeadend password: $tvh_password   (create this user in the TVHeadend web UI)"
+  echo "  Admin page:         http://$(hostname).local:8098/admin  user admin, password $admin_password"
   echo
 else
   echo "/etc/cztvhub/cztvhub.conf exists; set [dvb] enabled = true and the [tvheadend] password there."

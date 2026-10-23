@@ -2,12 +2,15 @@
 
 Endpoints used (field names checked against TVHeadend's src/api/*.c and the
 web UI's requests; the API is not formally versioned, so parsing is defensive):
-- POST /api/channel/grid            channels: uuid, name, number, enabled, icon_public_url
+- POST /api/channel/grid            channels: uuid, name, number, enabled, icon_public_url, services[]
+- POST /api/mpegts/service/grid     services: uuid, enabled, svcname, multiplex, multiplex_uuid (admin)
+- POST /api/mpegts/mux/grid         multiplexes: uuid, name, enabled (int: -1 ignore, 0 disable, 1 enable; admin)
 - POST /api/epg/events/grid         EPG: eventId, channelUuid, start, stop, title, subtitle,
                                     summary, description, genre[], dvrUuid, dvrState
 - POST /api/dvr/entry/grid          DVR entries: uuid, channel, start, stop, disp_title, disp_subtitle,
                                     disp_summary, disp_description, broadcast, sched_status, genre[]
 - POST /api/dvr/entry/remove        uuid=[...]  delete finished recordings incl. files
+- POST /api/dvr/entry/cancel        uuid=[...]  drop scheduled entries, abort running recordings
 - POST /api/status/inputs           tuners: input, subs, stream (needs an admin TVHeadend user)
 - POST /api/dvr/config/grid, /api/dvr/autorec/grid, /api/dvr/autorec/create (conf={...}),
   /api/idnode/save (node={...}), /api/idnode/delete (uuid=[...])   used by ``dvb-setup``
@@ -51,6 +54,8 @@ class Channel:
     name: str
     number: int
     icon: str = ""  # TVHeadend-relative ("imagecache/3") or absolute URL, "" = none
+    enabled: bool = True
+    services: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,6 +98,26 @@ class Autorec:
     channel: str
     comment: str
     raw: dict[str, Any] = field(default_factory=dict)
+    enabled: bool = True
+
+
+@dataclass
+class Service:
+    uuid: str
+    name: str
+    enabled: bool
+    mux: str  # multiplex uuid, "" if unknown
+    mux_name: str = ""
+
+
+MUX_IGNORE, MUX_DISABLE, MUX_ENABLE = -1, 0, 1
+
+
+@dataclass
+class Mux:
+    uuid: str
+    name: str
+    enabled: int  # MUX_IGNORE / MUX_DISABLE / MUX_ENABLE (older TVHeadend: a boolean)
 
 
 def _text(value: Any) -> str:
@@ -133,14 +158,19 @@ def _entries(data: Any) -> list[dict]:
     return [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
 
 
-def parse_channels(data: Any) -> list[Channel]:
+def _ids(value: Any) -> list[str]:
+    return [str(v) for v in value if v] if isinstance(value, list) else []
+
+
+def parse_channels(data: Any, include_disabled: bool = False) -> list[Channel]:
     channels = []
     for entry in _entries(data):
-        if not entry.get("uuid") or entry.get("enabled") is False:
+        enabled = entry.get("enabled") is not False
+        if not entry.get("uuid") or not (enabled or include_disabled):
             continue
         icon = entry.get("icon_public_url") or ""
         channels.append(Channel(str(entry["uuid"]), _text(entry.get("name")) or "?", _int(entry.get("number")),
-                                icon if isinstance(icon, str) else ""))
+                                icon if isinstance(icon, str) else "", enabled, _ids(entry.get("services"))))
     channels.sort(key=lambda c: (c.number <= 0, c.number, c.name.lower()))
     return channels
 
@@ -192,8 +222,25 @@ def parse_inputs(data: Any) -> list[Tuner]:
 
 
 def parse_autorecs(data: Any) -> list[Autorec]:
-    return [Autorec(str(e["uuid"]), _id(e.get("channel")), _text(e.get("comment")), e)
+    return [Autorec(str(e["uuid"]), _id(e.get("channel")), _text(e.get("comment")), e, e.get("enabled") is not False)
             for e in _entries(data) if e.get("uuid")]
+
+
+def parse_services(data: Any) -> list[Service]:
+    return [Service(str(e["uuid"]), _text(e.get("svcname")) or _text(e.get("name")), e.get("enabled") is not False,
+                    _id(e.get("multiplex_uuid")), _text(e.get("multiplex")))
+            for e in _entries(data) if e.get("uuid")]
+
+
+def parse_muxes(data: Any) -> list[Mux]:
+    muxes = []
+    for e in _entries(data):
+        if not e.get("uuid"):
+            continue
+        value = e.get("enabled")
+        enabled = (MUX_ENABLE if value else MUX_DISABLE) if isinstance(value, bool) else _int(value, MUX_ENABLE)
+        muxes.append(Mux(str(e["uuid"]), _text(e.get("name")), enabled))
+    return muxes
 
 
 Opener = Callable[..., Any]
@@ -247,8 +294,14 @@ class TvheadendClient:
             raise TvhError(f"/api/{path}: invalid JSON") from exc
 
     # -- read ------------------------------------------------------------------------------
-    def channels(self) -> list[Channel]:
-        return parse_channels(self.api("channel/grid", {"start": "0", "limit": str(GRID_LIMIT)}))
+    def channels(self, include_disabled: bool = False) -> list[Channel]:
+        return parse_channels(self.api("channel/grid", {"start": "0", "limit": str(GRID_LIMIT)}), include_disabled)
+
+    def services(self) -> list[Service]:
+        return parse_services(self.api("mpegts/service/grid", {"start": "0", "limit": str(GRID_LIMIT)}))
+
+    def muxes(self) -> list[Mux]:
+        return parse_muxes(self.api("mpegts/mux/grid", {"start": "0", "limit": str(GRID_LIMIT)}))
 
     def epg_events(self, start: int, stop: int) -> list[EpgEvent]:
         """Events overlapping [start, stop) (epoch seconds). TVHeadend drops events once they end."""
@@ -277,7 +330,11 @@ class TvheadendClient:
         if uuids:
             self.api("dvr/entry/remove", {"uuid": uuids})
 
-    def save_node(self, node: dict[str, Any]) -> None:
+    def cancel_dvr_entries(self, uuids: list[str]) -> None:
+        if uuids:
+            self.api("dvr/entry/cancel", {"uuid": uuids})
+
+    def save_node(self, node: dict[str, Any] | list[dict[str, Any]]) -> None:
         self.api("idnode/save", {"node": node})
 
     def delete_nodes(self, uuids: list[str]) -> None:

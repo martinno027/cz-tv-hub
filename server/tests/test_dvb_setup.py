@@ -15,8 +15,8 @@ class SetupClient:
     def dvr_configs(self):
         return self.configs
 
-    def channels(self):
-        return tvh.parse_channels(load("channel_grid.json"))
+    def channels(self, include_disabled=False):
+        return tvh.parse_channels(load("channel_grid.json"), include_disabled)
 
     def autorecs(self):
         return self.rules
@@ -80,3 +80,24 @@ class SetupTest(unittest.TestCase):
     def test_no_dvr_profile(self):
         with self.assertRaises(RuntimeError):
             plan_setup(SetupClient(configs=[]), DvbConfig())
+
+    def test_hidden_channel_keeps_a_disabled_rule(self):
+        hidden = "1234567890abcdef1234567890abcdef"  # "Disabled" in the fixture
+        rules = {"entries": [{"uuid": "r1", "channel": CT1, "comment": "cztvhub", "enabled": False},
+                             {"uuid": "r2", "channel": hidden, "comment": "cztvhub", "enabled": True}]}
+        client = SetupClient(configs=[{"uuid": "c", "name": "", "retention-days": 3, "removal-days": 3}],
+                             autorecs=rules)
+        run_setup(client, DvbConfig(record_channels=["ČT1 HD", "Disabled"]), out=lambda m: None)
+        # CT1 is enabled again, the hidden channel's rule is disabled, nothing deleted or created
+        self.assertEqual(client.saved, [[{"uuid": "r1", "enabled": True}, {"uuid": "r2", "enabled": False}]])
+        self.assertEqual((client.created, client.deleted), ([], []))
+
+    def test_no_new_rule_for_a_hidden_channel(self):
+        plan = plan_setup(SetupClient(autorecs={"entries": []}), DvbConfig(record_channels=["Disabled"]))
+        self.assertEqual((plan.create, plan.unknown_channels), ([], []))
+
+    def test_enabled_duplicate_wins_by_name(self):
+        from cztvhub.dvb.setup import select_channels
+        channels = [tvh.Channel("a", "Nova", 3), tvh.Channel("b", "Nova", 0, enabled=False)]
+        self.assertEqual(select_channels(channels, ["nova"])[0][0].uuid, "a")
+        self.assertEqual(select_channels(list(reversed(channels)), ["nova"])[0][0].uuid, "a")

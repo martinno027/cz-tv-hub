@@ -41,6 +41,9 @@ record_channels = all          ; or comma-separated TVHeadend channel names
 hls_dir = /var/lib/cztvhub/hls  ; on the recordings disk, cleaned on start
 idle_seconds = 30
 
+[admin]
+password =                     ; web admin /admin (user "admin"), empty = off; 12+ chars, needs DVB
+
 [tvheadend]
 url = http://127.0.0.1:9981
 user = cztvhub
@@ -56,7 +59,8 @@ Checked against TVHeadend's source (master, `src/api/api_epg.c`, `api_dvr.c`, `a
 `dvr_autorec.c`, `dvr_config.c`, `webui/webui.c`); not yet against a real TVHeadend:
 - `api/channel/grid`, `api/epg/events/grid` (numeric `filter` on `start`/`stop`), `api/dvr/entry/grid*`,
   `api/dvr/entry/remove`, `api/status/inputs` (admin only), `api/dvr/config/grid`, `api/dvr/autorec/grid|create`,
-  `api/idnode/save|delete`, `/stream/channel/<uuid>?profile=pass`, `/dvrfile/<uuid>` (Range), `/imagecache/<n>`.
+  `api/idnode/save|delete`, `api/mpegts/service/grid`, `api/mpegts/mux/grid`, `api/dvr/entry/cancel` (admin page),
+  `/stream/channel/<uuid>?profile=pass`, `/dvrfile/<uuid>` (Range), `/imagecache/<n>`.
 - A live subscription without a free tuner does not reliably answer `503`: TVHeadend may end the stream without
   data. The gateway then asks `api/status/inputs`; all tuners busy → `503 Tuner je obsazený`, else `502`.
 - `/dvrfile` answers a Range start at the end of a growing file without data (not `416`); the gateway polls.
@@ -106,6 +110,24 @@ Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cz
   `503 {"error": "Tuner je obsazený"}` when TVHeadend has no free tuner, `502` TVHeadend unreachable or the stream
   could not be started, Czech `error` text in JSON bodies. When a live start finds no free tuner, the gateway
   first stops live sessions nobody has polled for 8 s (zapping) and retries once.
+
+## Channel administration (`/admin`, `src/cztvhub/dvb/admin.py`)
+A web page for the household (LAN / tailnet only, like the rest) to choose which antenna channels are offered.
+On when `[admin] password` is set; HTTP Basic, user `admin` (separate from the app key, which stays read-only).
+TVHeadend is the only state, so hiding a channel there by hand has the same effect on the apps.
+- **Hide** a channel: TVHeadend channel `enabled = false` (gone from `/dvb/channels`, EPG, live `404`, its recordings
+  `404`); its services disabled (unless shared with an offered channel); each of its multiplexes set to *Disable*
+  once no offered channel uses it, so the tuner never tunes to it (no reception, no EPG scan); its `cztvhub`
+  autorec rule disabled; scheduled entries cancelled (`dvr/entry/cancel`, also aborts a running recording) and its
+  finished/failed recordings removed. A running live session of the channel is stopped.
+- **Show**: the reverse (channel, services, disabled multiplexes, rule back on). No rule is created before
+  `dvb-setup` has run (recording stays a deliberate step). EPG returns once TVHeadend rescans the multiplex.
+- `dvb-setup` keeps rules of disabled channels, disabled, instead of deleting them.
+- `GET /admin` page, `GET /admin/api/channels` → `{"channels": [{"id", "number", "name", "offered", "received",
+  "multiplexes": [names], "recordingRule": null | bool, "recordings": n}], "status": <as /dvb/status>,
+  "recordingSetUp": bool, "retentionDays": n}`; `POST /admin/api/channels/<id>` `{"offered": bool}` →
+  `{"changes": ["…Czech…"]}`. POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
+  (CSRF; the server never answers CORS preflights). Errors: `401`, `403`, `400`, `404` unknown channel, `502`.
 
 ## App behaviour for "Anténa" programmes
 Channels appear as a second group "Anténa" in Živě and in the TV guide (rows after the CT internet channels).

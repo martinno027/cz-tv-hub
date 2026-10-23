@@ -9,6 +9,26 @@ from dvb_fixtures import CT1, NOVA, REC_COMPLETED, REC_RECORDING, load
 
 
 class ParseTest(unittest.TestCase):
+    def test_disabled_channels_on_request(self):
+        data = load("channel_grid.json")
+        everything = tvh.parse_channels(data, include_disabled=True)
+        self.assertEqual(len(everything), 4)
+        disabled = next(c for c in everything if c.name == "Disabled")
+        self.assertFalse(disabled.enabled)
+        self.assertEqual(next(c for c in everything if c.name == "Nova HD").services,
+                         ["5d8c1f0e2b4a6c8e0a2c4e6f8a0b2c4d"])
+
+    def test_services_and_muxes(self):
+        services = tvh.parse_services({"entries": [
+            {"uuid": "s1", "svcname": "ČT1 HD", "enabled": True, "multiplex": "626MHz", "multiplex_uuid": "m1"},
+            {"uuid": "s2", "enabled": False}, {"svcname": "no uuid"}]})
+        self.assertEqual([(s.uuid, s.name, s.enabled, s.mux, s.mux_name) for s in services],
+                         [("s1", "ČT1 HD", True, "m1", "626MHz"), ("s2", "", False, "", "")])
+        muxes = tvh.parse_muxes({"entries": [{"uuid": "m1", "name": "626MHz", "enabled": 1},
+                                             {"uuid": "m2", "enabled": 0}, {"uuid": "m3", "enabled": -1},
+                                             {"uuid": "m4", "enabled": False}, {"uuid": "m5", "enabled": True}]})
+        self.assertEqual([m.enabled for m in muxes], [1, 0, -1, 0, 1])
+
     def test_channels_sorted_enabled_only(self):
         channels = tvh.parse_channels(load("channel_grid.json"))
         self.assertEqual([c.name for c in channels], ["ČT1 HD", "Nova HD", "Prima HD"])

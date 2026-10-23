@@ -33,13 +33,17 @@ def _sigterm_as_interrupt():
 
 def cmd_serve(args):
     cfg = _config(args)
-    gateway = None
+    gateway = admin = None
     if cfg.dvb.enabled:
         from .dvb.gateway import DvbGateway
 
         gateway = DvbGateway(cfg)
+        if cfg.admin.enabled:
+            from .dvb.admin import AdminSite
+
+            admin = AdminSite(cfg, gateway)
     _sigterm_as_interrupt()
-    serve(args.host or cfg.host, args.port or cfg.port, gateway=gateway)
+    serve(args.host or cfg.host, args.port or cfg.port, gateway=gateway, admin=admin)
     return 0
 
 

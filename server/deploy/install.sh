@@ -11,7 +11,7 @@ sudo cp -r src /opt/cztvhub/
 if ! sudo test -f /etc/cztvhub/cztvhub.conf; then
   sudo install -d -m 0750 -o cztvhub -g cztvhub /etc/cztvhub
   key=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
-  sed -e "s|@KEY@|$key|" -e "s|@DVB_ENABLED@|false|" -e "s|@TVH_PASSWORD@||" deploy/cztvhub.conf.example \
+  sed -e "s|@KEY@|$key|" -e "s|@DVB_ENABLED@|false|" -e "s|@TVH_PASSWORD@||" -e "s|@ADMIN_PASSWORD@||" deploy/cztvhub.conf.example \
     | sudo install -m 0600 -o cztvhub -g cztvhub /dev/stdin /etc/cztvhub/cztvhub.conf
 fi
 
