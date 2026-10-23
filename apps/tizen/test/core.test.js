@@ -248,6 +248,18 @@ test('schedule repository: caching, onAir from yesterday, failed day not cached'
   assert.equal(onAir.CH_1.current.idec, '226411010101016');
   assert.equal(onAir.CH_1.next.idec, '224381492050002');
 
+  // After midnight the broadcast day on air (the previous calendar day) is still current, the one before is not.
+  const r3 = new CT.ScheduleRepository(api, () => now);
+  now = t('2026-10-16T20:00:00Z');
+  await r3.day('2026-10-16');
+  await r3.day('2026-10-15');
+  calls = 0;
+  now = t('2026-10-16T23:30:00Z') + 2 * 3600 * 1000; // 03:30 Prague on the 17th
+  await r3.day('2026-10-16');
+  assert.equal(calls, 1, 'the broadcast day on air is refetched after an hour');
+  await r3.day('2026-10-15');
+  assert.equal(calls, 1, 'older days are kept');
+
   fail = true;
   await assert.rejects(repo.day('2026-10-20'));
   fail = false;

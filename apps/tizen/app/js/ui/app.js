@@ -55,6 +55,7 @@
 
   var App = {
     now: Date.now(),
+    minute: -1, // last minute tick() handled
     tab: 'live',
     zone: 'tabs', // 'tabs' | 'content'
     dvbConfig: null,
@@ -65,13 +66,16 @@
     dialog: null,
     channelPrefs: null,
     dvbThumbs: false, // the gateway has thumbnails on (from /dvb/status)
-    thumbCache: null,
+    images: null, // guide images (CT and gateway thumbnails), memory only
 
     start: function () {
       var self = this;
       this.transport = CT.Demo.enabled ? CT.Demo.transport : CT.xhrTransport(20000);
       this.blobTransport = CT.Demo.enabled ? CT.Demo.blobTransport : CT.xhrBlobTransport(10000);
-      this.thumbCache = new CT.ThumbCache(CT.Thumbs.MAX_ENTRIES, function (url) { root.URL.revokeObjectURL(url); });
+      this.images = new CT.ImageLoader({
+        fetch: function (request) { return self.fetchImage(request); },
+        revoke: function (url) { root.URL.revokeObjectURL(url); }
+      });
       this.api = new CT.CtApi(this.transport);
       this.schedules = new CT.ScheduleRepository(this.api);
       this.live = new CT.LiveResolver(this.api);
@@ -92,8 +96,16 @@
       CT.Keys.register();
       document.addEventListener('keydown', function (e) { self.onKeyDown(e); });
       document.addEventListener('visibilitychange', function () {
-        if (document.hidden) self.player.suspend();
-        else self.player.resume();
+        if (document.hidden) {
+          self.player.suspend();
+          return;
+        }
+        self.player.resume();
+        // Back from the background (e.g. the next morning): the guide opens at now again.
+        if (self.tab === 'guide' && !self.player.isOpen()) {
+          self.now = Date.now();
+          self.screens.guide.show();
+        }
       });
       this.fitStage();
       root.addEventListener('resize', function () { self.fitStage(); });
@@ -112,8 +124,15 @@
       $('stage').style.transform = root.tizen || Math.abs(scale - 1) < 0.01 ? '' : 'scale(' + scale + ')';
     },
 
+    /** Every second: the clock; every minute also `now`, so "Dnes" follows midnight in the guide. */
     tick: function () {
-      $('clock').textContent = CT.Days.time(Date.now());
+      var now = Date.now();
+      $('clock').textContent = CT.Days.time(now);
+      var minute = Math.floor(now / 60000);
+      if (minute === this.minute) return;
+      this.minute = minute;
+      this.now = now;
+      this.screens.guide.onMinute();
     },
 
     inContent: function () {
@@ -126,7 +145,7 @@
       this.dvbChannels = [];
       this.dvbState = config ? { channels: [], onAir: {}, error: null } : null;
       this.dvbThumbs = false;
-      this.thumbCache.clear();
+      this.images.clear('gw');
       this.checkThumbs();
       if (initial) return;
       this.refresh();
@@ -149,7 +168,7 @@
     setDvbThumbs: function (on) {
       if (this.dvbThumbs === on) return;
       this.dvbThumbs = on;
-      if (!on) this.thumbCache.clear();
+      if (!on) this.images.clear('gw');
       this.screens.guide.refreshDetail();
       if (this.tab === 'settings') this.screens.settings.renderThumbs();
     },
@@ -159,21 +178,21 @@
       return this.dvbThumbs && CT.ThumbsSwitch.on();
     },
 
-    /** Object URL of a recording's thumbnail (memory only), or null. `final` = the recording has finished. */
-    loadThumb: function (recordingId, final) {
-      var self = this;
+    /**
+     * One guide image as an object URL (ImageLoader's fetch): a CT image from CT's CDN (no key), or a recording's
+     * gateway thumbnail with the key header. Resolves {status, url, size, retryAfter}; url null unless an image came back.
+     */
+    fetchImage: function (request) {
+      var gateway = request.kind === 'gw';
       var config = this.dvbConfig;
-      var cache = this.thumbCache;
-      var cached = cache.get(recordingId, Date.now());
-      if (cached) return Promise.resolve(cached);
-      if (!config) return Promise.resolve(null);
-      return this.blobTransport({ url: config.url(CT.Thumbs.path(recordingId)), headers: config.authHeaders() })
-        .then(function (r) {
-          if (self.dvbConfig !== config || r.status !== 200 || !r.blob || !/^image\/jpeg/.test(r.type)) return null;
-          var url = root.URL.createObjectURL(r.blob);
-          cache.put(recordingId, url, Date.now(), final);
-          return url;
-        }, function () { return null; });
+      if (gateway && !config) return Promise.resolve({ status: 0, url: null });
+      var call = gateway ? { url: config.url(CT.Thumbs.path(request.recordingId)), headers: config.authHeaders() } : { url: request.url };
+      return this.blobTransport(call).then(function (r) {
+        // Retry-After in seconds (the gateway sends 5 with a 503 when busy); a date or nothing = the default.
+        if (r.status !== 200) return { status: r.status, url: null, retryAfter: /^\d+$/.test(r.retryAfter || '') ? Number(r.retryAfter) : 0 };
+        if (!r.blob || !(gateway ? /^image\/jpeg/ : /^image\//).test(r.type)) return { status: 415, url: null };
+        return { status: 200, url: root.URL.createObjectURL(r.blob), size: r.blob.size };
+      });
     },
 
     /** Every 30 s: now, what is on air (CT and Anténa), guide colours. */

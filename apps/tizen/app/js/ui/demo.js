@@ -104,11 +104,13 @@
     return Promise.resolve({ status: 200, body: '#EXTM3U' });
   }
 
-  /** Demo thumbnails: a generated test card per recording id (never a real broadcast still). */
+  /**
+   * Demo images: a generated test card per recording id or fixture image URL (never a real broadcast still or
+   * a request to CT's CDN; the fixtures' image hosts do not exist).
+   */
   function blobTransport(request) {
     var m = /\/dvb\/recording\/([^/]+)\/thumb\.jpg$/.exec(request.url);
-    if (!m) return Promise.resolve({ status: 404, blob: null, type: '' });
-    var id = decodeURIComponent(m[1]);
+    var id = m ? decodeURIComponent(m[1]) : request.url;
     var canvas = document.createElement('canvas');
     canvas.width = 480;
     canvas.height = 270;
@@ -124,7 +126,7 @@
     g.fillRect(0, 200, 480, 70);
     g.fillStyle = '#fff';
     g.font = 'bold 28px sans-serif';
-    g.fillText('Ukázkový náhled', 20, 245);
+    g.fillText(m ? 'Ukázkový náhled' : 'Ukázkový obrázek ČT', 20, 245);
     return new Promise(function (resolve) {
       setTimeout(function () {
         canvas.toBlob(function (blob) { resolve({ status: 200, blob: blob, type: 'image/jpeg' }); }, 'image/jpeg', 0.8);
