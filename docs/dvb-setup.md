@@ -175,6 +175,10 @@ pro nevidomé); v aplikacích je výběr zvuku v přehrávači. Titulky se zatí
   vejde.
 - Vypnutím „Nahrávat“ nebo skrytím kanálu se jeho záznam **hned smaže**. Kódované kanály nahrávat nejde.
 - Dva tunery = kanály nejvýš ze dvou multiplexů najednou (všechny kanály jednoho multiplexu nahraje jeden tuner).
+- **Kolik kanálů najednou**: zvuk ve vysílání DVB-T2 (HE-AAC v LATM) se musí pro přehrávače převést, což stojí výkon
+  procesoru u každé zvukové stopy. Raspberry Pi 4 zvládne zhruba 3 kanály (deset kanálů ho zahltilo natolik, že
+  přestal odpovídat i TVHeadend). Administrace víc nedovolí; limit je `max_recordings` v sekci `[dvb]` (Pi 5 víc).
+- Nahrávání nejde zapnout, dokud `buffer_dir` leží na systémové SD kartě – nejdřív disk podle kapitoly 2.4.
 
 Nahrávání je soukromá kopie jen pro vaši domácnost: záznam zůstává na disku Raspberry, maže se automaticky a nedá
 se stáhnout ani sdílet (viz [legal-notes.md](legal-notes.md)).

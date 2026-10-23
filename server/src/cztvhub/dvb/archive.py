@@ -19,6 +19,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from . import fmp4, space
@@ -102,13 +103,16 @@ class Archive:
     def __init__(self, store: BufferStore, recorders: RecorderManager, settings: Settings, thumbs: Thumbnails,
                  default_days: int, now: Callable[[], float] = time.time, log: Callable[[str], None] = print,
                  offered: Callable[[], set[str] | None] | None = None,
-                 is_programme: Callable[[str, int, int], bool] | None = None):
+                 is_programme: Callable[[str, int, int], bool] | None = None, max_recordings: int = 3,
+                 allow_system_disk: bool = False):
         self.store, self.recorders, self.settings, self.thumbs = store, recorders, settings, thumbs
         self.default_days, self.now, self.log = default_days, now, log
         # offered channels (None = TVHeadend not reachable: then nothing is deleted or stopped)
         self.offered = offered or (lambda: None)
         # only real EPG programmes get a playlist (no arbitrary ranges, legal-guard 2026-10-23)
         self.is_programme = is_programme or (lambda channel, start, end: True)
+        self.max_recordings = max_recordings
+        self.allow_system_disk = allow_system_disk
         self._views: dict[str, View] = {}
         self._view_keys: dict[str, str] = {}
         self._runs: OrderedDict[tuple[str, str], RunInfo] = OrderedDict()
@@ -138,6 +142,23 @@ class Archive:
         if freed:
             done.append(f"smazáno {freed / 1000 ** 3:.1f} GB záznamu")
         return done
+
+    def on_system_disk(self) -> bool:
+        """The recording directory is on the same filesystem as / (the SD card): not for recordings."""
+        path = self.store.root
+        while not path.exists() and path != path.parent:
+            path = path.parent
+        try:
+            return path.stat().st_dev == Path("/").stat().st_dev
+        except OSError:
+            return True
+
+    def can_record(self) -> str | None:
+        """Czech reason why recording cannot be switched on, or None."""
+        if self.on_system_disk() and not self.allow_system_disk:
+            return ("Nejdřív připojte disk na nahrávky a nastavte na něj buffer_dir (docs/dvb-setup.md, kapitola 2.4); "
+                    "na systémovou SD kartu se nenahrává.")
+        return None
 
     def forget_channel(self, channel: str) -> int:
         """Delete a channel's whole recording (recording switched off or channel hidden)."""
@@ -452,7 +473,12 @@ class Archive:
     # -- retention / recorders ----------------------------------------------------------------
     def _wanted(self) -> set[str] | None:
         offered = self.offered()
-        return None if offered is None else self.record_channels() & offered
+        if offered is None:
+            return None
+        if self.can_record() is not None:
+            return set()  # never onto the SD card, whatever the settings say
+        # never more than the Pi manages, whatever the settings say (the admin page refuses more anyway)
+        return set(sorted(self.record_channels() & offered)[:self.max_recordings])
 
     def sync(self) -> None:
         wanted = self._wanted()

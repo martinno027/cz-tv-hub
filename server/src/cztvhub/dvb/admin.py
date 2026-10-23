@@ -276,6 +276,7 @@ class AdminSite:
             rec = archive.recorders.recorder(row["id"])
             row["recorderState"] = rec.state if rec is not None else None
         return json_response(200, {"channels": rows, "status": status,
+                                   "recording": {"max": archive.max_recordings, "blocked": archive.can_record()},
                                    "settings": {"thumbnails": self.gateway.thumbs.enabled,
                                                 "maxDays": archive.max_days()},
                                    "recordingSetUp": recording_set_up(self.gateway.client),
@@ -297,6 +298,14 @@ class AdminSite:
             blocked = [rows[i]["name"] for i in ids if not rows[i]["offered"] or rows[i]["scrambled"]]
             if blocked:
                 return error(400, "Nahrávat lze jen zapnuté nekódované kanály: " + ", ".join(blocked))
+            reason = self.gateway.archive.can_record()
+            if reason:
+                return error(400, reason)
+            limit = self.gateway.archive.max_recordings
+            total = len(self.gateway.archive.record_channels() | set(ids))
+            if total > limit:
+                return error(400, f"Raspberry zvládne nahrávat nejvýš {limit} kanály najednou (každý stojí výkon "
+                                  f"na převod zvuku); vybráno by bylo {total}. Limit je [dvb] max_recordings.")
         done = self.gateway.archive.set_record(ids, on)
         self.gateway.log(f"admin: recording {'on' if on else 'off'}: {', '.join(rows[i]['name'] for i in ids)}")
         return json_response(200, {"changes": done})
@@ -616,8 +625,9 @@ function renderStatus(data) {
   if (s.disk && s.disk.totalBytes) item("Disk:", gb(s.disk.freeBytes) + " volno z " + gb(s.disk.totalBytes));
   var d = data.retentionDays;
   var rec = rows.filter(function (c) { return c.record; }).length;
-  item("Nahrávání:", (rec ? channels(rec) : "žádný kanál") + ", nejvýše " + d + plural(d, " den", " dny", " dní") +
-    (data.recordingPaused ? " – POZASTAVENO, plný disk" : ""));
+  item("Nahrávání:", (rec ? channels(rec) : "žádný kanál") + (data.recording ? " z " + data.recording.max : "") +
+    ", nejvýše " + d + plural(d, " den", " dny", " dní") + (data.recordingPaused ? " – POZASTAVENO, plný disk" : ""));
+  if (data.recording && data.recording.blocked) item("Nahrávání nejde zapnout:", data.recording.blocked);
 }
 
 function picked() { return rows.filter(function (c) { return selected[c.id]; }); }

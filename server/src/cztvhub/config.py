@@ -30,6 +30,8 @@ class DvbConfig:
     hls_dir: Path = Path("/var/lib/cztvhub/hls")
     state_dir: Path = Path("/var/lib/cztvhub")  # settings.json of the /admin page (service StateDirectory)
     buffer_dir: Path = Path("/var/lib/cztvhub/buffer")  # continuous recording; put it on the recordings disk
+    max_recordings: int = 3  # channels recorded at once (each needs CPU for its audio); a Pi 4 manages about 3
+    buffer_on_system_disk: bool = False  # allow recording onto the system disk (SD card); development only
     idle_seconds: int = 30
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
@@ -109,6 +111,11 @@ def parse_config(text: str) -> Config:
         dvb.hls_dir = Path(section.get("hls_dir", str(dvb.hls_dir)).strip())
         dvb.state_dir = Path(section.get("state_dir", str(dvb.state_dir)).strip())
         dvb.buffer_dir = Path(section.get("buffer_dir", str(dvb.buffer_dir)).strip())
+        dvb.max_recordings = max(1, min(50, _int(section, "max_recordings", dvb.max_recordings)))
+        try:
+            dvb.buffer_on_system_disk = section.getboolean("buffer_on_system_disk", False)
+        except ValueError as exc:
+            raise ConfigError("[dvb] buffer_on_system_disk: expected true/false") from exc
         dvb.idle_seconds = max(1, _int(section, "idle_seconds", dvb.idle_seconds))
         dvb.ffmpeg = section.get("ffmpeg", dvb.ffmpeg).strip()
         dvb.ffprobe = section.get("ffprobe", dvb.ffprobe).strip()

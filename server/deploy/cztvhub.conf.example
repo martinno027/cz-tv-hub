@@ -11,6 +11,7 @@ record_channels = all   ; only for TVHeadend's own DVR (dvb-setup); the continuo
 hls_dir = /var/lib/cztvhub/hls
 ; continuous recording of the channels with "Nahrávat" on /admin; on the recordings disk, e.g. /srv/tv/buffer
 buffer_dir = /var/lib/cztvhub/buffer
+max_recordings = 3      ; channels recorded at once; each costs CPU (audio is re-encoded), a Pi 4 manages ~3
 idle_seconds = 30
 
 [ads]

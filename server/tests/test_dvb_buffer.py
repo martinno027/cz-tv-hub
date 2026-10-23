@@ -166,6 +166,54 @@ class RecorderHelpersTest(unittest.TestCase):
         self.assertIsNone(segment_number("init.mp4"))
 
 
+class GuardTest(unittest.TestCase):
+    """Never onto the SD card, never more channels than the Pi manages (Pi 4 overload, 2026-10-23)."""
+
+    def archive(self, root, allow, limit=3):
+        from cztvhub.dvb.archive import Archive
+        from cztvhub.dvb.recorder import RecorderManager
+        from cztvhub.dvb.thumbs import Settings, Thumbnails
+        store = BufferStore(Path(root) / "buffer")
+        settings = Settings(Path(root) / "state")
+        started = []
+
+        class Rec:
+            def __init__(self, ch):
+                self.ch, self.run, self.state = ch, None, "x"
+
+            def start(self):
+                started.append(self.ch)
+
+            def stop(self, wait=0):
+                pass
+
+        manager = RecorderManager(store, lambda ch: None, factory=Rec, log=lambda m: None)
+        channels = {f"c{i}" for i in range(6)}
+        archive = Archive(store, manager, settings, Thumbnails(None, settings), 3, log=lambda m: None,
+                          offered=lambda: channels, max_recordings=limit, allow_system_disk=allow)
+        return archive, started
+
+    def test_system_disk_refused_and_limit_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:  # a temp dir is on the system disk here
+            archive, started = self.archive(tmp, allow=False)
+            self.assertTrue(archive.on_system_disk())
+            self.assertIn("buffer_dir", archive.can_record())
+            archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
+            archive.sync()
+            self.assertEqual(started, [])
+            archive, started = self.archive(tmp, allow=True, limit=3)
+            self.assertIsNone(archive.can_record())
+            archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
+            archive.sync()
+            self.assertEqual(sorted(started), ["c0", "c1", "c2"])
+
+    def test_cheap_audio_conversion(self):
+        cmd = " ".join(build_command(Path("/w"), [{"type": "video", "codec": "hevc"},
+                                                 {"type": "audio", "codec": "aac_latm"}]))
+        self.assertIn("-threads 1", cmd)
+        self.assertIn("-c:a:0 aac -b:a:0 128k -aac_coder:a:0 fast", cmd)
+
+
 class RecordingIdTest(unittest.TestCase):
     def test_round_trip_and_limits(self):
         rid = recording_id(CH, T0, T0 + 3600)

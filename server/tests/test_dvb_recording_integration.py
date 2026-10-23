@@ -72,7 +72,7 @@ class RecordingEndToEndTest(unittest.TestCase):
         clock = {"now": None}
         archive = Archive(self.store, manager, settings, thumbs, 3,
                           now=lambda: clock["now"] if clock["now"] is not None else time.time(),
-                          log=self.logs.append, offered=lambda: {CH})
+                          log=self.logs.append, offered=lambda: {CH}, allow_system_disk=True)
         archive.sync()
         self.addCleanup(manager.stop_all)
         deadline = time.time() + 40

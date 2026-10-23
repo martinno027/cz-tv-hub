@@ -55,7 +55,8 @@ class ArchiveGatewayTest(unittest.TestCase):
         self.gw = None
         archive = Archive(self.store, self.recorders, self.settings, Thumbnails(self.client, self.settings), 3,
                           now=now, log=lambda m: None, offered=lambda: self.gw._offered_ids(),
-                          is_programme=lambda c, s, e: self.gw._is_programme(c, s, e))
+                          is_programme=lambda c, s, e: self.gw._is_programme(c, s, e),
+                          allow_system_disk=True)
         self.gw = DvbGateway(cfg, client=self.client, now=now, log=lambda m: None, archive=archive)
         self.store.save_run(NOVA, RUN, b"not an mp4", {"audio": [{"label": "Čeština", "language": "ces"}]})
         work = root / "work"

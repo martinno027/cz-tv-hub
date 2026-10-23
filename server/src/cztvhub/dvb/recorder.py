@@ -79,7 +79,8 @@ def build_command(work: Path, streams: list[dict], ffmpeg: str = "ffmpeg") -> li
     """TS on stdin → fMP4 HLS in ``work``: first video copied, every audio track (copy or AAC)."""
     video = next((s for s in streams if s["type"] == "video"), None)
     audio = [s for s in streams if s["type"] == "audio"]
-    cmd = [ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error",
+    # one thread per recorder: several run side by side on a 4-core Pi, so they must not each grab every core
+    cmd = [ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error", "-threads", "1",
            "-fflags", "+genpts+discardcorrupt", "-f", "mpegts", "-i", "pipe:0", "-map", "0:v:0"]
     for i in range(len(audio)):
         cmd += ["-map", f"0:a:{i}"]
@@ -91,7 +92,8 @@ def build_command(work: Path, streams: list[dict], ffmpeg: str = "ffmpeg") -> li
         if stream["codec"] in COPY_AUDIO:
             cmd += [f"-c:a:{i}", "copy"]
         else:
-            cmd += [f"-c:a:{i}", "aac", f"-b:a:{i}", "192k"]
+            # DVB-T2 sends HE-AAC in LATM (aac_latm), which MP4 cannot carry: decode and re-encode, cheaply
+            cmd += [f"-c:a:{i}", "aac", f"-b:a:{i}", "128k", f"-aac_coder:a:{i}", "fast"]
     cmd += ["-f", "hls", "-hls_time", str(SEGMENT_SECONDS), "-hls_segment_type", "fmp4",
             "-hls_fmp4_init_filename", "init.mp4", "-hls_segment_filename", str(work / "seg_%06d.m4s"),
             "-hls_list_size", str(LIST_SIZE), "-hls_flags", "program_date_time+temp_file",

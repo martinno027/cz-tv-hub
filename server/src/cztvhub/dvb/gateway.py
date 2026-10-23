@@ -106,7 +106,9 @@ class DvbGateway:
             store = BufferStore(self.dvb.buffer_dir)
             recorders = RecorderManager(store, self._recording_source, self.dvb.ffmpeg, self.dvb.ffprobe, log=log)
             archive = Archive(store, recorders, self.settings, self.thumbs, self.dvb.retention_days, now=now,
-                              log=log, offered=self._offered_ids, is_programme=self._is_programme)
+                              log=log, offered=self._offered_ids, is_programme=self._is_programme,
+                              max_recordings=self.dvb.max_recordings,
+                              allow_system_disk=self.dvb.buffer_on_system_disk)
         self.archive = archive
         self._worker_rid: str | None = None
         self._worker_at = float("-inf")

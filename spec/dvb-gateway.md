@@ -128,7 +128,11 @@ Approved by the user on 2026-10-23 (CLAUDE.md hard rules, `docs/legal-notes.md`;
   "Čeština (pro nevidomé)") are kept per run. A mover takes each finished segment from ffmpeg's rolling playlist with
   its `#EXT-X-PROGRAM-DATE-TIME` and files it in a **10-minute block** (`<buffer_dir>/<channel>/blocks/<UTC
   YYYYMMDDTHHMM>/`, `index.jsonl`); segments are numbered per channel. When the source or ffmpeg ends, a new run
-  starts after 10 s (60 s while no tuner is free). Subtitles are not recorded yet (teletext → WebVTT needs a check of
+  starts after 10 s (60 s while no tuner is free). DVB-T2 audio is HE-AAC in LATM (`aac_latm`, seen 2026-10-23 on
+  Nova: two Czech tracks, HE-AAC and HE-AACv2), which MP4 cannot carry, so it is re-encoded (`-aac_coder fast`,
+  128 kbit/s, one ffmpeg thread per recorder). Ten recorded channels overloaded a Pi 4 (load 29, TVHeadend stopped
+  answering), so at most `[dvb] max_recordings` channels (default 3) record at once; `/admin` refuses more, and
+  recording is refused while `buffer_dir` is on the system disk (SD card) unless `buffer_on_system_disk = true` (dev). Subtitles are not recorded yet (teletext → WebVTT needs a check of
   real broadcasts and the Pi's ffmpeg first).
 - **Config**: `[dvb] buffer_dir` (default `/var/lib/cztvhub/buffer`; on the Pi the recordings disk, e.g.
   `/srv/tv/buffer`, the unit allows writing below `/srv/tv`). Selection and the day limit live in
