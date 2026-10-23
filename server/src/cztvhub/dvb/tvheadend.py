@@ -11,7 +11,7 @@ web UI's requests; the API is not formally versioned, so parsing is defensive):
 - POST /api/epg/events/grid         EPG: eventId, channelUuid, start, stop, title, subtitle,
                                     summary, description, genre[], dvrUuid, dvrState
 - POST /api/dvr/entry/grid          DVR entries: uuid, channel, start, stop, disp_title, disp_subtitle,
-                                    disp_summary, disp_description, broadcast, sched_status, genre[]
+                                    disp_summary, disp_description, broadcast, sched_status, genre[], filesize
 - POST /api/dvr/entry/remove        uuid=[...]  delete finished recordings incl. files
 - POST /api/dvr/entry/cancel        uuid=[...]  drop scheduled entries, abort running recordings
 - POST /api/status/inputs           tuners: input, subs, stream (needs an admin TVHeadend user)
@@ -87,6 +87,7 @@ class DvrEntry:
     stop: int
     sched_status: str
     broadcast: str = ""  # EPG event id, "" once TVHeadend expired the event
+    filesize: int = 0
 
 
 @dataclass
@@ -216,6 +217,7 @@ def parse_dvr_entries(data: Any) -> list[DvrEntry]:
             stop=_int(e.get("stop")),
             sched_status=_text(e.get("sched_status")),
             broadcast=_id(e.get("broadcast")),
+            filesize=_int(e.get("filesize")),
         ))
     return entries
 

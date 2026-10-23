@@ -29,6 +29,11 @@ cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed
   reads finished recordings through the gateway's authenticated HLS, analyses them in memory and stores only break
   timestamps and per-channel logo masks. Skipping is a manual seek by the viewer; the recording is never cut or
   altered. Break data and masks stay in the household and are never published.
+- Optional programme thumbnails (approved by the user on 2026-10-23, `spec/dvb-gateway.md` "Thumbnails"): the
+  gateway makes one small still (at most 480 px wide) per recording from the household's own recording, on request,
+  in memory only (ffmpeg pipes, never written to disk on the Pi or cached on disk by the apps). It disappears with
+  the recording, needs the same key, is never made from ČT internet streams, never uses a tuner and can be switched
+  off for the household (`/admin`) and per TV. Thumbnails are never published, committed or shown in screenshots.
 
 ## Publishing and use
 - The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,

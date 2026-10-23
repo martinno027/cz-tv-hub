@@ -65,7 +65,7 @@ def cmd_dvb_fake(args):
     from .dvb.fake import FakeTvheadend
 
     fake = FakeTvheadend(Path(args.data_dir), args.host, args.port, tuners=args.tuners, user=args.user,
-                         password=args.password, clip_seconds=args.clip_seconds)
+                         password=args.password, clip_seconds=args.clip_seconds, channels=args.channels)
     _sigterm_as_interrupt()
     fake.start()
     print(f"fake TVHeadend on {fake.url} ({args.tuners} tuners, data in {args.data_dir})", flush=True)
@@ -155,6 +155,7 @@ def main(argv=None):
     p_fake.add_argument("--host", default="127.0.0.1")
     p_fake.add_argument("--port", type=int, default=9981)
     p_fake.add_argument("--tuners", type=int, default=2)
+    p_fake.add_argument("--channels", type=int, default=4, help="number of channels (more than 4: generated ones)")
     p_fake.add_argument("--user", default="cztvhub")
     p_fake.add_argument("--password", default="fake")
     p_fake.add_argument("--clip-seconds", type=int, default=60, help="length of the fake finished recordings")

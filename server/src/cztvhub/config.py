@@ -28,6 +28,7 @@ class DvbConfig:
     retention_days: int = RETENTION_DEFAULT
     record_channels: list[str] | None = None  # None = all channels
     hls_dir: Path = Path("/var/lib/cztvhub/hls")
+    state_dir: Path = Path("/var/lib/cztvhub")  # settings.json of the /admin page (service StateDirectory)
     idle_seconds: int = 30
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
@@ -105,6 +106,7 @@ def parse_config(text: str) -> Config:
         dvb.retention_days = clamp_retention(_int(section, "retention_days", RETENTION_DEFAULT))
         dvb.record_channels = parse_record_channels(section.get("record_channels", "all"))
         dvb.hls_dir = Path(section.get("hls_dir", str(dvb.hls_dir)).strip())
+        dvb.state_dir = Path(section.get("state_dir", str(dvb.state_dir)).strip())
         dvb.idle_seconds = max(1, _int(section, "idle_seconds", dvb.idle_seconds))
         dvb.ffmpeg = section.get("ffmpeg", dvb.ffmpeg).strip()
         dvb.ffprobe = section.get("ffprobe", dvb.ffprobe).strip()

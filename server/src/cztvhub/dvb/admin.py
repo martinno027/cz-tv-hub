@@ -223,6 +223,10 @@ class AdminSite:
                 return Response(200, PAGE.encode("utf-8"), HTML, PAGE_HEADERS)
             if method == "GET" and path == "/admin/api/channels":
                 return self._overview()
+            if method == "POST" and path == "/admin/api/settings":
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._settings(body)
             if method == "POST" and (path == "/admin/api/channels" or CHANNEL_RE.match(path)):
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
@@ -258,6 +262,7 @@ class AdminSite:
     def _overview(self) -> Response:
         status = json.loads(self.gateway.status().body)
         return json_response(200, {"channels": self.admin.overview(), "status": status,
+                                   "settings": {"thumbnails": self.gateway.thumbs.enabled},
                                    "recordingSetUp": recording_set_up(self.gateway.client),
                                    "retentionDays": self.gateway.dvb.retention_days})
 
@@ -285,6 +290,18 @@ class AdminSite:
         finally:
             self.gateway.channels_changed(hidden=None if offered else ids)
         return json_response(200, {"changes": done})
+
+    def _settings(self, body: bytes) -> Response:
+        """Household switches; for now "Náhledy pořadů" (spec/dvb-gateway.md "Thumbnails")."""
+        try:
+            payload: Any = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            payload = None
+        if not isinstance(payload, dict) or not isinstance(payload.get("thumbnails"), bool):
+            return error(400, 'Očekávám {"thumbnails": true|false}')
+        self.gateway.thumbs.set_enabled(payload["thumbnails"])
+        self.gateway.log(f"admin: thumbnails {'on' if payload['thumbnails'] else 'off'}")
+        return json_response(200, {"settings": {"thumbnails": self.gateway.thumbs.enabled}})
 
     def _rename(self, channel_id: str | None, payload: dict) -> Response:
         raw = {channel_id: payload.get("name")} if channel_id else payload.get("names")
@@ -361,6 +378,8 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
   font-size: 14px; }
 .msg.err { border-color: var(--warn); color: var(--warn); }
 .help { color: var(--muted); font-size: 13px; margin-top: 20px; }
+.setting { display: flex; gap: 8px; align-items: center; margin: 0 0 16px; font-size: 14px; }
+.setting input { width: 18px; height: 18px; accent-color: var(--accent); }
 .name button.link { border: 0; background: none; color: var(--accent); padding: 0 0 0 8px; font-size: 13px;
   font-weight: 400; }
 .edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -374,6 +393,7 @@ button.danger { background: var(--warn); border-color: var(--warn); color: #fff;
 <h1>Anténa – kanály</h1>
 <p class="sub">Vypnutý kanál aplikace nenabízejí, nenahrává se a tuner ho neladí.</p>
 <div class="status" id="status"></div>
+<label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
 <div id="msg" role="status" aria-live="polite"></div>
 <div class="list">
   <div class="bar" id="bar"></div>
@@ -415,7 +435,21 @@ function api(method, path, body) {
   });
 }
 
+var thumbs = document.getElementById("thumbs");
+thumbs.addEventListener("change", function () {
+  var on = thumbs.checked;
+  thumbs.disabled = true;
+  api("POST", "/admin/api/settings", {thumbnails: on}).then(function (data) {
+    thumbs.checked = data.settings.thumbnails;
+    say("Náhledy pořadů " + (data.settings.thumbnails ? "zapnuty." : "vypnuty."));
+  }, function (e) {
+    thumbs.checked = !on;
+    say("Nastavení se nepodařilo uložit: " + e.message, true);
+  }).then(function () { thumbs.disabled = false; });
+});
+
 function renderStatus(data) {
+  if (data.settings) thumbs.checked = !!data.settings.thumbnails;
   var s = data.status || {}, box = document.getElementById("status");
   box.textContent = "";
   function item(label, value) { var p = el("span", null, label + " "); p.appendChild(el("b", null, value)); box.appendChild(p); }

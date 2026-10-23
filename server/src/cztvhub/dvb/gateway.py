@@ -24,12 +24,14 @@ from .hls import (Codecs, EmptySource, HlsManager, HlsSession, StreamFailed, bui
                   rewrite_playlist)
 from .retention import RetentionLoop
 from .sources import GrowingRecording
+from .thumbs import Settings, Thumbnails
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
 UUID = r"[A-Za-z0-9_-]{1,64}"
 LIVE_RE = re.compile(rf"^/dvb/live/({UUID})\.m3u8$")
 RECORDING_RE = re.compile(rf"^/dvb/recording/({UUID})\.m3u8$")
 BREAKS_RE = re.compile(rf"^/dvb/recording/({UUID})/breaks$")
+THUMB_RE = re.compile(rf"^/dvb/recording/({UUID})/thumb\.jpg$")
 JOBS_PATH = "/dvb/ads/jobs"
 COOKIE_NAME = "cztvhub_key"
 MAX_BODY = 64 * 1024
@@ -86,8 +88,9 @@ class DvbGateway:
         self.log = log
         self.ads = cfg.ads
         self.breaks = ads.BreakStore(self.ads.breaks_dir)
-        self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log,
-                                       after=self._prune_breaks if self.ads.enabled else None)
+        self.settings = Settings(self.dvb.state_dir)
+        self.thumbs = Thumbnails(self.client, self.settings, self.dvb.ffmpeg, now=now, log=log)
+        self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log, after=self._after_retention)
         self._worker_sid: str | None = None  # the worker's one recording session (spec/ad-breaks.md)
         self._worker_lock = threading.Lock()
         self._channels: list[Channel] = []
@@ -164,6 +167,8 @@ class DvbGateway:
             return self.recording(m.group(1))
         if m := BREAKS_RE.match(path):
             return self.get_breaks(m.group(1))
+        if m := THUMB_RE.match(path):
+            return self.thumbnail(m.group(1))
         if m := ICON_RE.match(path):
             return self.icon(m.group(1))
         return error(404, "Nenalezeno")
@@ -195,7 +200,8 @@ class DvbGateway:
         except OSError:
             disk = {"freeBytes": 0, "totalBytes": 0}
         return json_response(200, {"enabled": True, "retentionDays": self.dvb.retention_days, "tuners": tuners,
-                                   "disk": disk, "tvheadendReachable": reachable})
+                                   "disk": disk, "tvheadendReachable": reachable,
+                                   "thumbnails": self.thumbs.enabled})
 
     def channels(self) -> Response:
         return json_response(200, {"channels": [
@@ -315,6 +321,21 @@ class DvbGateway:
             on_session(session)
         return self._playlist(session)
 
+    def thumbnail(self, dvr_uuid: str) -> Response:
+        """One still of a recording (spec/dvb-gateway.md "Thumbnails"); checked against TVHeadend every time."""
+        if not self.thumbs.enabled:
+            raise HttpError(404, "Náhledy jsou vypnuté")
+        entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == dvr_uuid), None)
+        state = epg.recording_state(entry.sched_status) if entry else ""
+        if entry is None or state not in ("completed", "recording") \
+                or entry.channel not in {c.uuid for c in self._channel_list()}:
+            self.thumbs.forget(dvr_uuid)
+            raise HttpError(404, "Náhled není k dispozici")
+        data = self.thumbs.get(entry, recording=state == "recording")
+        if data is None:
+            raise HttpError(404, "Náhled není k dispozici")
+        return Response(200, data, "image/jpeg", {"Cache-Control": "private, no-store"})
+
     def media(self, sid: str, name: str, range_header: str | None) -> Response:
         session = self.hls.get(sid)
         path = session.media_path(name) if session else None
@@ -412,9 +433,15 @@ class DvbGateway:
         self.breaks.put(dvr_uuid, analyzer, items)
         return Response(204, b"", JSON, {"Cache-Control": "no-store"})
 
-    def _prune_breaks(self) -> None:
+    def _after_retention(self) -> None:
+        """Derived data never outlives its recording: ad breaks, in-memory thumbnails."""
         entries = self.client.dvr_entries("grid") + self.client.dvr_entries("grid_finished") + \
             self.client.dvr_entries("grid_failed")
+        self.thumbs.prune(e.uuid for e in entries)
+        if self.ads.enabled:
+            self._prune_breaks(entries)
+
+    def _prune_breaks(self, entries) -> None:
         removed = self.breaks.prune(e.uuid for e in entries)
         if removed:
             self.log(f"dvb: removed ad breaks of {len(removed)} deleted recording(s)")

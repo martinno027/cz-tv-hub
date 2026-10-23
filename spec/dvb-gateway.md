@@ -139,6 +139,26 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   `record_channels` / `[ads] channels` are reported in `changes` (those settings match by name). POSTs need header `X-Cztvhub-Admin: 1` and a same-origin `Origin` if one is sent
   (CSRF; the server never answers CORS preflights). Errors: `401`, `403`, `400`, `404` unknown channel, `502`.
 
+## Thumbnails (approved by the user on 2026-10-23; see `docs/legal-notes.md`)
+One still per recording so the viewer sees what a programme is ("it does not have to be current, just show what is
+on"). Implemented in `src/cztvhub/dvb/thumbs.py`.
+- `GET /dvb/recording/<dvr entry uuid>/thumb.jpg` (same key as all `/dvb/*`) → `200 image/jpeg`,
+  `Cache-Control: private, no-store`. `404` when thumbnails are off, the entry is unknown, not `completed`/`recording`,
+  its channel is not offered, or no frame could be made yet.
+- Source: the recording only (`/dvrfile` byte range, at most 2 MB), never a live tuner subscription, never ČT internet
+  streams. Frame position: `t = min(300 s, 20 % of the recorded duration)` after the start, as a byte offset from
+  the file size per recorded second. ffmpeg reads stdin and writes one JPEG to stdout (`-frames:v 1`, width ≤ 480,
+  fixed quality); no file outputs. No client parameters (no seek, no series).
+- Cache: memory only, at most 200 entries; an entry is kept for the life of the recording once `t` reached 300 s or
+  the recording finished, else refreshed after 60 s. Every request checks the DVR entry first (cache hit included);
+  a gone entry drops its cache entry. Switching thumbnails off clears the cache. At most 2 ffmpeg at a time,
+  10 s timeout.
+- Household switch: on the `/admin` page ("Náhledy pořadů", default on), stored in `<state dir>/settings.json`
+  (`/var/lib/cztvhub`, the service's StateDirectory). `GET /dvb/status` adds `"thumbnails": true|false`.
+- Apps: the guide detail of an Anténa programme with `recording.state` `completed`/`recording` shows the thumbnail
+  when the gateway reports `thumbnails: true` and the TV's own switch (Nastavení → Server, "Náhledy anténních
+  pořadů", default on) is on; otherwise the antenna placeholder. Images are kept in memory only (no disk cache).
+
 ## App behaviour for "Anténa" programmes
 Channels appear as a second group "Anténa" in Živě and in the TV guide (rows after the CT internet channels).
 1. future → not playable ("Pořad ještě nezačal").

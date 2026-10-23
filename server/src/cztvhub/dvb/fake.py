@@ -34,6 +34,19 @@ PROGRAMMES = [
     ("Zprávy", 0x20), ("Film: Testovací obrazec", 0x10), ("Sportovní přenos", 0x40), ("Pohádka", 0x50),
     ("Dokument o anténách", 0x90), ("Hudební klip", 0x60), ("Soutěž", 0x30), ("Kulturní magazín", 0x70),
 ]
+EXTRA_SLOTS = (15, 20, 25, 30, 45, 60, 90)
+EXTRA_PATTERNS = ("testsrc", "testsrc2", "smptebars", "rgbtestsrc")
+
+
+def channel_table(count: int) -> list[tuple]:
+    """The four standard channels, plus generated ones up to ``count`` (for testing big guides)."""
+    table = list(CHANNELS)
+    for n in range(len(CHANNELS), count):
+        table.append((f"Test {n + 1}", n + 1, EXTRA_SLOTS[n % len(EXTRA_SLOTS)], "", EXTRA_PATTERNS[n % 4],
+                      300 + 10 * n, f"{474 + 8 * (n // 5)}MHz"))
+    return table
+
+
 FAILED_SLOT_AGO = 5  # the 5th past slot of channel 1 is a failed recording
 UPCOMING_SCHEDULED = 3
 ICON_PNG = base64.b64decode(
@@ -56,26 +69,27 @@ def encode_args(pattern: str, tone: int, ffmpeg: str = "ffmpeg") -> list[str]:
 class FakeTvheadend:
     def __init__(self, data_dir: Path, host: str = "127.0.0.1", port: int = 9981, tuners: int = 2,
                  user: str = "", password: str = "", clip_seconds: int = 60, retention_days: int = 3,
-                 ffmpeg: str = "ffmpeg", log: Callable[[str], None] = print):
+                 ffmpeg: str = "ffmpeg", log: Callable[[str], None] = print, channels: int = len(CHANNELS)):
         self.data_dir = Path(data_dir)
         self.host, self.port, self.tuners = host, port, tuners
         self.user, self.password = user, password
         self.clip_seconds, self.retention_days = clip_seconds, retention_days
         self.ffmpeg, self.log = ffmpeg, log
         self.lock = threading.Lock()
+        table = channel_table(channels)
         self.channels = [
             {"uuid": stable_uuid("channel", name), "name": name, "number": number, "enabled": True,
              "icon_public_url": f"imagecache/{number}" if number == 1 else "",
              "services": [stable_uuid("service", name)], "_slot": slot * 60,
              "_mode": mode, "_pattern": pattern, "_tone": tone, "_index": i}
-            for i, (name, number, slot, mode, pattern, tone, _mux) in enumerate(CHANNELS)
+            for i, (name, number, slot, mode, pattern, tone, _mux) in enumerate(table)
         ]
         self.muxes = {stable_uuid("mux", mux): {"uuid": stable_uuid("mux", mux), "name": mux, "enabled": 1}
-                      for *_, mux in CHANNELS}
+                      for *_, mux in table}
         self.services = {
             stable_uuid("service", name): {"uuid": stable_uuid("service", name), "svcname": name, "enabled": True,
                                            "multiplex": mux, "multiplex_uuid": stable_uuid("mux", mux)}
-            for name, *_, mux in CHANNELS
+            for name, *_, mux in table
         }
         self.entries: dict[str, dict] = {}
         self.recorders: dict[str, subprocess.Popen] = {}
