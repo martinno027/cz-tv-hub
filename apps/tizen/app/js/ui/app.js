@@ -1,12 +1,14 @@
 /*
  * App shell: tabs, key routing, periodic refresh and the shared services (CT API, schedule cache,
- * planner, optional "Anténa" gateway). Back from a screen goes to the tabs, back on the tabs exits.
+ * planner, optional "Anténa" gateway, "Poslanecká sněmovna" live check). Back from a screen goes to the tabs, back on
+ * the tabs exits.
  */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
   var TABS = ['live', 'guide', 'settings'];
   var REFRESH_MS = 30 * 1000;
+  var PSP_TICK_MS = 1000;
 
   function $(id) {
     return document.getElementById(id);
@@ -19,19 +21,26 @@
   };
 
   var ICONS = {
-    // globe = CT internet channel, antenna = "Anténa" (DVB-T2); stroke follows the text colour
+    // globe = CT internet channel, antenna = "Anténa" (DVB-T2), a generic building with columns = Poslanecká
+    // sněmovna (never the Chamber's logo or the state emblem); stroke follows the text colour
     ct: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>',
-    dvb: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 10v11M8.5 21h7M12 10l-3.5 11M12 10l3.5 11"/><circle cx="12" cy="8" r="1.6"/><path d="M8 4.5a5 5 0 0 0 0 7M16 4.5a5 5 0 0 1 0 7M5.2 2.2a9 9 0 0 0 0 11.6M18.8 2.2a9 9 0 0 1 0 11.6"/></svg>'
+    dvb: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 10v11M8.5 21h7M12 10l-3.5 11M12 10l3.5 11"/><circle cx="12" cy="8" r="1.6"/><path d="M8 4.5a5 5 0 0 0 0 7M16 4.5a5 5 0 0 1 0 7M5.2 2.2a9 9 0 0 0 0 11.6M18.8 2.2a9 9 0 0 1 0 11.6"/></svg>',
+    psp: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5L12 4l9 5.5zM4.5 9.5h15M6 12v6M10 12v6M14 12v6M18 12v6M4 18.5h16M3 21h18"/></svg>'
   };
+
+  var SOURCE_NAMES = { ct: 'Internetová TV', dvb: 'Anténa', psp: 'Poslanecká sněmovna PČR' };
 
   /** Small icon telling where a channel comes from (spec/apps.md "Source icon"). */
   CT.sourceIcon = function (source) {
     var icon = document.createElement('span');
     icon.className = 'source-icon source-' + source;
-    icon.title = source === 'dvb' ? 'Anténa' : 'Internetová TV';
+    icon.title = SOURCE_NAMES[source] || '';
     icon.innerHTML = ICONS[source] || '';
     return icon;
   };
+
+  /** Live request kind → channel key prefix ("Kanály" keys). */
+  CT.LIVE_PREFIX = { live: 'ct:', dvbLive: 'dvb:', pspLive: 'psp:' };
 
   /** localStorage as a ResumeStore backend; a failing storage just forgets (private, per TV). */
   function localBackend(key) {
@@ -79,9 +88,15 @@
       this.api = new CT.CtApi(this.transport);
       this.schedules = new CT.ScheduleRepository(this.api);
       this.live = new CT.LiveResolver(this.api);
+      // Poslanecká sněmovna: only the playlist URL, no headers and no cookie (a plain GET without credentials).
+      var pspTransport = CT.Demo.enabled ? CT.Demo.transport : CT.xhrTransport(10000);
+      this.psp = new CT.PspMonitor(function (stream) {
+        return pspTransport({ method: 'GET', url: stream.url, headers: {}, body: null });
+      }, Date.now);
+      this.psp.onChange = function () { self.onPspChange(); };
       this.planner = new CT.Planner(this.api, this.live, Date.now, function () {
         return self.dvbRepo ? self.dvbRepo.client : null;
-      });
+      }, { monitor: this.psp, playUrl: CT.Demo.enabled ? CT.Demo.pspPlayUrl : null });
       this.screens = {
         live: new CT.LiveScreen(this),
         guide: new CT.GuideScreen(this),
@@ -119,8 +134,34 @@
       this.refresh();
       setInterval(function () { self.refresh(); }, REFRESH_MS);
       setInterval(function () { self.tick(); }, 1000);
+      setInterval(function () { self.pspTick(); }, PSP_TICK_MS);
       this.tick();
+      this.pspTick();
       if (CT.Demo.enabled) CT.Demo.afterStart(this);
+    },
+
+    /**
+     * Poslanecká sněmovna "is it on now?": only while Živě or the guide is on screen (not in Nastavení, not behind
+     * the player, not in the background), only the visible streams; PspMonitor keeps one check at a time and the
+     * 60 s / 120 s limits.
+     */
+    pspTick: function () {
+      if (document.hidden || this.player.isOpen() || (this.tab !== 'live' && this.tab !== 'guide')) return;
+      var ids = this.channelList(this.dvbChannels).filter(function (item) {
+        return item.source === 'psp';
+      }).map(function (item) { return item.channel.id; });
+      this.psp.tick(ids);
+    },
+
+    /** A stream's state may have changed (also when it just went stale): Živě cards and the guide's psp cells. */
+    onPspChange: function () {
+      if (this.tab === 'live') this.renderLive();
+      this.screens.guide.refreshPsp();
+    },
+
+    /** 'live' | 'off' | 'unknown' of a Chamber stream id. */
+    pspState: function (id) {
+      return this.psp.state(id);
     },
 
     /** The UI is laid out for 1920×1080 (the TV); a desktop browser window scales it to fit. */
@@ -227,6 +268,7 @@
         }).then(function () { self.renderLive(); });
       }
       this.screens.guide.refreshLooks();
+      this.screens.guide.refreshPsp(); // a live state may have gone stale (no confirming check for 3 min)
       if (this.dvbRepo && Date.now() - (this.thumbsCheckedAt || 0) > 5 * 60 * 1000) this.checkThumbs();
     },
 
@@ -235,7 +277,7 @@
       if (this.tab === 'settings') this.screens.settings.renderChannels();
     },
 
-    /** A whole source ('ct' Internetová TV, 'dvb' Anténa) is on; Anténa also needs a gateway. */
+    /** A whole source ('ct' Internetová TV, 'dvb' Anténa, 'psp' Poslanecká sněmovna) is on; Anténa also needs a gateway. */
     sourceOn: function (source) {
       if (source === 'dvb' && !this.dvbConfig) return false;
       return !CT.ChannelPrefs.isSourceOff(this.channelPrefs, source);
@@ -243,7 +285,7 @@
 
     /**
      * "Kanály": one mixed list of the sources that are on, in this TV's order: [{key, source, channel}]
-     * (`ct:…` / `dvb:…`). `dvbChannels` = the gateway's channels; `all` includes the hidden ones.
+     * (`ct:…` / `dvb:…` / `psp:…`). `dvbChannels` = the gateway's channels; `all` includes the hidden ones.
      */
     channelList: function (dvbChannels, all) {
       var byKey = {};
@@ -255,6 +297,7 @@
       }
       if (this.sourceOn('ct')) CT.Channels.all.forEach(function (ch) { add('ct', ch); });
       if (this.sourceOn('dvb')) (dvbChannels || []).forEach(function (ch) { add('dvb', ch); });
+      if (this.sourceOn('psp')) CT.Psp.streams.forEach(function (s) { add('psp', s); });
       var arranged = CT.ChannelPrefs.arrange(keys, this.channelPrefs);
       return (all ? arranged.all : arranged.visible).map(function (k) { return byKey[k]; });
     },
@@ -262,11 +305,23 @@
     /** Live request for a channelList item (Živě card, number entry, zapping). */
     liveRequest: function (item) {
       var ch = item.channel;
-      return { kind: item.source === 'dvb' ? 'dvbLive' : 'live', channelId: ch.id, title: ch.name };
+      var kind = item.source === 'dvb' ? 'dvbLive' : item.source === 'psp' ? 'pspLive' : 'live';
+      return { kind: kind, channelId: ch.id, title: ch.name };
+    },
+
+    /** Živě card or number entry: a Chamber stream known to be off shows the message instead of the player. */
+    playItem: function (item) {
+      if (item.source === 'psp' && this.pspState(item.channel.id) === 'off') {
+        this.numberEntry.cancel();
+        this.toast(CT.Psp.OFF_MESSAGE);
+        return;
+      }
+      this.play(this.liveRequest(item));
     },
 
     /** The programme airing now on a channelList item, or null (from the guide data kept fresh by refresh). */
     airingNow: function (item) {
+      if (item.source === 'psp') return null; // no programme data
       var state = item.source === 'dvb' ? this.dvbState : this.ctState;
       var info = state && state.onAir ? state.onAir[item.channel.id] : null;
       return info ? info.current : null;
@@ -280,7 +335,7 @@
         this.numberEntry.notFound(number);
         return;
       }
-      this.play(this.liveRequest(list[number - 1]));
+      this.playItem(list[number - 1]);
     },
 
     /** Stores new "Kanály" prefs and redraws Živě and the guide. */
@@ -405,9 +460,7 @@
 
     /** `request` = what was playing last (after zapping: the channel switched to). */
     onPlayerClosed: function (request) {
-      if (request && (request.kind === 'live' || request.kind === 'dvbLive')) {
-        this.screens.live.focusKey((request.kind === 'dvbLive' ? 'dvb:' : 'ct:') + request.channelId);
-      }
+      if (request && CT.LIVE_PREFIX[request.kind]) this.screens.live.focusKey(CT.LIVE_PREFIX[request.kind] + request.channelId);
       this.refresh();
     },
 

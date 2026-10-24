@@ -38,6 +38,12 @@ sealed interface PlayRequest {
         val resumeSeconds: Double? = null,
     ) : PlayRequest
 
+    /**
+     * A live stream of the Chamber of Deputies ([channelId] = stream id, e.g. `stream1`): the published URL, live
+     * only (no start-over, no "Pokračovat").
+     */
+    data class PspLive(override val channelId: String, override val title: String) : PlayRequest
+
     /** Live from the household's own tuner through the gateway ("Anténa"). */
     data class DvbLive(override val channelId: String, override val title: String) : PlayRequest
 
@@ -120,6 +126,12 @@ class Planner(
                     },
                 )
             }
+            is PlayRequest.PspLive -> {
+                val stream = PspStreams.byId(request.channelId)
+                    ?: throw CtException("unknown stream ${request.channelId}", PspMessages.NOT_ON)
+                // As published: no headers of ours (headers stays empty), nothing resolved or signed.
+                return PlayTarget(stream.url, PlayKind.LIVE, request.title)
+            }
             else -> Unit
         }
         val channel = Channels.byId(request.channelId)
@@ -131,7 +143,7 @@ class Planner(
             is PlayRequest.Startover ->
                 startover(channel, request.title, request.start, forceRefresh, request.resumeSeconds)
             is PlayRequest.Programme -> programme(channel, request, forceRefresh)
-            is PlayRequest.DvbLive, is PlayRequest.DvbRecorded -> error("handled above")
+            is PlayRequest.DvbLive, is PlayRequest.DvbRecorded, is PlayRequest.PspLive -> error("handled above")
         }
     }
 

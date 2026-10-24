@@ -5,13 +5,17 @@ enum ChannelPrefsUI {
     static let allHiddenMessage = "Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály."
 }
 
-/// Where a channel comes from: internet (CT) or the household's antenna (spec/apps.md "Source icon").
+/// Where a channel comes from: internet (CT), the household's antenna or the Chamber of Deputies
+/// (spec/apps.md "Source icon"; a generic symbol for the Chamber, never its logo or the state emblem).
 struct SourceIcon: View {
     let source: ChannelPrefs.Source
 
     var body: some View {
-        Image(systemName: source == .ct ? "globe" : "antenna.radiowaves.left.and.right")
-            .accessibilityLabel(source == .ct ? "internet" : "anténa")
+        switch source {
+        case .ct: Image(systemName: "globe").accessibilityLabel("internet")
+        case .dvb: Image(systemName: "antenna.radiowaves.left.and.right").accessibilityLabel("anténa")
+        case .psp: Image(systemName: "building.columns").accessibilityLabel(PSPStreams.sourceLabel)
+        }
     }
 }
 
@@ -46,6 +50,7 @@ struct ChannelSettingsSection: View {
             VStack(alignment: .leading, spacing: 12) {
                 sourceSwitch(.ct, title: "Internetová TV (ČT)")
                 if model.antenna != nil { sourceSwitch(.dvb, title: "Anténa") }
+                sourceSwitch(.psp, title: "Poslanecká sněmovna", detail: "PČR · jen přímé přenosy")
             }
             .focusSection()
 
@@ -77,7 +82,7 @@ struct ChannelSettingsSection: View {
     }
 
     /// Switches a whole source (all CT internet / all Anténa channels) on or off.
-    private func sourceSwitch(_ source: ChannelPrefs.Source, title: String) -> some View {
+    private func sourceSwitch(_ source: ChannelPrefs.Source, title: String, detail: String? = nil) -> some View {
         let isOn = model.channelPrefs.prefs.isOn(source)
         return Button {
             model.channelPrefs.update { $0.setOn(source, !isOn) }
@@ -85,9 +90,13 @@ struct ChannelSettingsSection: View {
             HStack(spacing: 16) {
                 Image(systemName: isOn ? "checkmark.square.fill" : "square")
                 SourceIcon(source: source)
-                Text(title)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                }
             }
-            .frame(width: 560, alignment: .leading)
+            .frame(width: 760, alignment: .leading)
         }
         .accessibilityValue(isOn ? "zapnuto" : "vypnuto")
     }

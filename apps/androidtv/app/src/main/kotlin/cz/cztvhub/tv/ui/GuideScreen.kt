@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -79,6 +80,7 @@ import cz.cztvhub.core.ImagePrefetch
 import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
+import cz.cztvhub.core.PspState
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
@@ -91,6 +93,15 @@ import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+
+/**
+ * Poslanecká sněmovna states for the cells and the detail: read only where a stream is shown, so a state change
+ * recomposes those cells and never rebuilds the grid.
+ */
+private val LocalPspStates = compositionLocalOf<Map<String, PspState>> { emptyMap() }
+
+private fun Map<String, PspState>.of(entry: Entry?): PspState =
+    (entry as? PspEntry)?.let { this[it.stream.id] } ?: PspState.UNKNOWN
 
 private val DP_PER_MINUTE = 6.dp // 30 min = 180 dp, about two hours on screen
 private val CHANNEL_COLUMN = 112.dp
@@ -172,18 +183,30 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     }
     val resume = LocalContext.current.tvApp.resume
     val onSelect: (Entry) -> Unit = remember(selection, resume) {
-        { entry ->
-            when (val action = entry.select(Instant.now(), resume::offer)) {
+        val act: (Selection) -> Unit = { action ->
+            when (action) {
                 is Selection.Notice -> selection.notice = action.text
                 is Selection.Choice -> selection.choice = action
                 is Selection.Play -> currentOnPlay(action.request)
             }
         }
+        val select: (Entry) -> Unit = { entry ->
+            val now = Instant.now()
+            if (entry is PspEntry && entry.isAiring(now)) {
+                // Right before playback: a fresh enough answer, else one more check (spec/apps.md).
+                viewModel.checkPsp(entry.stream.id) { state -> act(entry.select(Instant.now(), psp = state)) }
+            } else {
+                act(entry.select(now, resume::offer))
+            }
+        }
+        select
     }
     val dvb by viewModel.dvb.collectAsStateWithLifecycle()
     val dvbPlans by viewModel.dvbPlans.collectAsStateWithLifecycle()
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
     val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
+    val pspStates by viewModel.psp.collectAsStateWithLifecycle()
+    PspPolling(viewModel)
     val today = Days.today(now)
 
     // "Across days" (spec/apps.md): left/right past a row's end opens the neighbouring day.
@@ -238,12 +261,14 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                         ImageRequest(url, headers, gateway = true,
                             stillRecording = entry.event.recording?.state == RecordingState.RECORDING)
                     }
+                is PspEntry -> null // no thumbnails for the streams
             }
         }
     }
     val scope = rememberCoroutineScope()
     val images = remember { GuideImages(context.tvApp.images, scope) }
 
+    CompositionLocalProvider(LocalPspStates provides pspStates) {
     Column(Modifier.fillMaxSize()) {
         DayPicker(today, day, selection, appButton, onSelect = onChip)
         Spacer(Modifier.height(8.dp))
@@ -258,7 +283,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                 val dvbChannels = dvb?.channels.orEmpty()
                 val dvbPlan = dvbPlans[day].orEmpty()
                 val rows = remember(plan.value, dvbChannels, dvbPlan, prefs) {
-                    guideRows(plan.value, ChannelOrder.visible(prefs, dvbChannels), dvbPlan)
+                    guideRows(plan.value, ChannelOrder.visible(prefs, dvbChannels), dvbPlan, day)
                 }
                 // Anténa on but its channels not loaded yet: not "everything hidden".
                 val antennaPending = dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
@@ -292,6 +317,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                 }
             }
         }
+    }
     }
 
     selection.choice?.let { picked ->
@@ -406,7 +432,12 @@ private fun DetailPanel(
             .fillMaxHeight()
             .clip(RoundedCornerShape(8.dp))
         if (p != null) {
-            GuideImage(images, remember(p, imageOf) { imageOf(p) }, antenna = p is DvbEntry, modifier = imageModifier)
+            val placeholder = when (p) {
+                is DvbEntry -> ChannelSource.DVB
+                is PspEntry -> ChannelSource.PSP
+                else -> null
+            }
+            GuideImage(images, remember(p, imageOf) { imageOf(p) }, placeholder, modifier = imageModifier)
         } else {
             Spacer(imageModifier)
         }
@@ -430,10 +461,14 @@ private fun DetailPanel(
                 modifier = line,
             )
             // "Today follows the clock": a programme airing at 0:10 says "Dnes 0:10" once midnight has passed.
+            // A Poslanecká sněmovna stream has no programme data: only where it comes from.
+            val pspSource = stringResource(R.string.psp_source_line)
             val meta = p?.let {
+                if (it is PspEntry) return@let listOf(pspSource)
                 val day = Days.label(Days.chipDay(it.start), Days.today(now))
                 listOf(it.channelName, "$day ${Days.timeRange(it.start, it.end)}", it.genre).filter(String::isNotBlank)
             }.orEmpty()
+            val pspState = LocalPspStates.current.of(p)
             Text(
                 meta.joinToString("  ·  "),
                 style = MaterialTheme.typography.bodyMedium,
@@ -443,7 +478,7 @@ private fun DetailPanel(
                 modifier = line,
             )
             Text(
-                notice ?: p?.let { stateLabel(it, now) }.orEmpty(),
+                notice ?: p?.let { stateLabel(it, now, pspState) }.orEmpty(),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (notice != null) Palette.nowLine else Palette.accent,
                 minLines = 1,
@@ -477,7 +512,7 @@ private fun DetailPanel(
 }
 
 @Composable
-private fun stateLabel(entry: Entry, now: Instant): String = when (entry) {
+private fun stateLabel(entry: Entry, now: Instant, psp: PspState): String = when (entry) {
     is CtEntry -> when {
         entry.isAiring(now) -> stringResource(R.string.on_air_badge)
         else -> when (Decisions.decide(entry.programme, now).action) {
@@ -494,23 +529,30 @@ private fun stateLabel(entry: Entry, now: Instant): String = when (entry) {
         DvbAction.RECORDING -> stringResource(R.string.state_recording)
         DvbAction.NOT_RECORDED -> stringResource(R.string.not_recorded)
     }
+    is PspEntry -> entry.cellTitle(now, psp)
 }
 
 /**
- * One row per channel "Kanály" shows, CT internet and Anténa mixed in its order ([channels] already arranged);
- * empty rows show as "Mimo vysílání".
+ * One row per channel "Kanály" shows, CT internet, Anténa and Poslanecká sněmovna mixed in its order ([channels]
+ * already arranged); empty rows show as "Mimo vysílání", a stream's row is one cell over the whole [day].
  */
 private fun guideRows(
     plan: DayPlan,
     channels: List<ListedChannel>,
     dvbPlan: Map<String, List<DvbEvent>>,
-): List<GuideRow> = channels.mapNotNull { listed ->
-    val ct = listed.ct
-    val ch = listed.dvb
-    when {
-        ct != null -> GuideRow(ct.id, ct.name, plan[ct.id].orEmpty().map { CtEntry(ct, it) })
-        ch != null -> GuideRow("dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) })
-        else -> null
+    day: LocalDate,
+): List<GuideRow> {
+    val (axisStart, axisEnd) = GuideLayout.axis(day)
+    return channels.mapNotNull { listed ->
+        val ct = listed.ct
+        val ch = listed.dvb
+        val stream = listed.psp
+        when {
+            ct != null -> GuideRow(ct.id, ct.name, plan[ct.id].orEmpty().map { CtEntry(ct, it) })
+            ch != null -> GuideRow("dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) })
+            stream != null -> GuideRow(stream.key, stream.name, listOf(PspEntry(stream, axisStart, axisEnd)))
+            else -> null
+        }
     }
 }
 
@@ -557,7 +599,7 @@ private fun EpgGrid(
                     slot = slot,
                     x = durationToDp(axisStart, slot.start),
                     width = durationToDp(slot.start, slot.end),
-                    startLabel = slot.item?.let { Days.time(it.start) }.orEmpty(),
+                    startLabel = slot.item?.takeIf { it !is PspEntry }?.let { Days.time(it.start) }.orEmpty(),
                     fromMin = minutesBetween(axisStart, slot.start),
                     toMin = minutesBetween(axisStart, slot.end),
                 )
@@ -659,7 +701,7 @@ private fun EpgGrid(
                         ) {
                             // Rows are the visible channels in order: the row index is the channel number.
                             ChannelNumber(index + 1, style = MaterialTheme.typography.bodyMedium)
-                            SourceIcon(row.key.startsWith("dvb:"), size = 18.dp)
+                            SourceIcon(ChannelSource.ofKey(row.key), size = 18.dp)
                             Text(
                                 row.name,
                                 style = MaterialTheme.typography.titleMedium,
@@ -825,7 +867,8 @@ private fun ProgrammeCell(
     onFocus: () -> Unit,
     onClick: () -> Unit,
 ) {
-    val look = p?.look(now)
+    val psp = if (p is PspEntry) LocalPspStates.current.of(p) else PspState.UNKNOWN
+    val look = p?.look(now, psp)
     val container = when (look) {
         null -> Palette.background
         EntryLook.AIRING -> Palette.airing
@@ -862,7 +905,11 @@ private fun ProgrammeCell(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    p?.title ?: stringResource(R.string.off_air),
+                    when (p) {
+                        null -> stringResource(R.string.off_air)
+                        is PspEntry -> p.cellTitle(now, psp)
+                        else -> p.title
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

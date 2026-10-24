@@ -96,10 +96,11 @@ class ImageCache {
 
 /**
  * The guide detail's image ([request] null = none): a CT image, or an Anténa programme's gateway thumbnail with
- * the antenna placeholder ([antenna]) until it arrives or when there is none. Memory only.
+ * the source icon ([placeholder]: antenna, or the building of a Poslanecká sněmovna stream) until it arrives or
+ * when there is none. Memory only.
  */
 @Composable
-fun GuideImage(images: GuideImages, request: ImageRequest?, antenna: Boolean, modifier: Modifier = Modifier) {
+fun GuideImage(images: GuideImages, request: ImageRequest?, placeholder: ChannelSource?, modifier: Modifier = Modifier) {
     val bitmap by produceState<ImageBitmap?>(null, request) {
         // Never the previous programme's image while this one loads.
         value = request?.let(images::decoded)
@@ -110,7 +111,7 @@ fun GuideImage(images: GuideImages, request: ImageRequest?, antenna: Boolean, mo
         Image(image, contentDescription = null, modifier = modifier, contentScale = ContentScale.Crop)
     } else {
         Box(modifier.background(Palette.surfaceDim), contentAlignment = Alignment.Center) {
-            if (antenna) SourceIcon(antenna = true, size = 44.dp, modifier = Modifier.alpha(0.6f))
+            if (placeholder != null) SourceIcon(placeholder, size = 44.dp, modifier = Modifier.alpha(0.6f))
         }
     }
 }

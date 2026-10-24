@@ -61,7 +61,7 @@ object ResumeRules {
             if (idec == null || end == null) null else ResumeSpot(ctKey(idec), request.start, seconds(request.start, end))
         }
         is PlayRequest.DvbRecorded -> request.lengthSeconds?.let { ResumeSpot(dvbKey(request.recordingId), null, it) }
-        is PlayRequest.Live, is PlayRequest.DvbLive -> null
+        is PlayRequest.Live, is PlayRequest.DvbLive, is PlayRequest.PspLive -> null
     }
 
     private fun seconds(start: Instant, end: Instant): Double = Duration.between(start, end).toMillis() / 1000.0

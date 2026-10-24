@@ -9,6 +9,7 @@ import cz.cztvhub.core.Days
 import cz.cztvhub.core.OnAir
 import cz.cztvhub.core.OnAirLike
 import cz.cztvhub.core.Programme
+import cz.cztvhub.core.PspState
 import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbEvent
 import cz.cztvhub.core.dvb.DvbThumbnails
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 
@@ -89,6 +91,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _plans = MutableStateFlow<Map<LocalDate, Load<DayPlan>>>(emptyMap())
     val plans: StateFlow<Map<LocalDate, Load<DayPlan>>> = _plans.asStateFlow()
+
+    /** Poslanecká sněmovna: "is it on now?" per stream id, as shown (stale answers already [PspState.UNKNOWN]). */
+    private val _psp = MutableStateFlow(app.psp.states())
+    val psp: StateFlow<Map<String, PspState>> = _psp.asStateFlow()
+
+    fun pspState(streamId: String): PspState = _psp.value[streamId] ?: PspState.UNKNOWN
+
+    /**
+     * Checks the visible streams one after another, each at most once a minute (spec/apps.md). Called only by Živě
+     * and the guide while they are on screen and the app is visible; cancelling it stops all checks.
+     */
+    suspend fun pollPsp() {
+        while (true) {
+            val ids = ChannelOrder.visible(channelPrefs.value, emptyList()).mapNotNull { it.psp?.id }
+            _psp.value = app.psp.states()
+            val next = withContext(Dispatchers.IO) { app.psp.runDue(ids) }
+            _psp.value = app.psp.states()
+            val wait = next?.let { Duration.between(Instant.now(), it).toMillis() } ?: PSP_IDLE_MS
+            // Wake at least every few seconds: the list may change and stale answers must stop showing.
+            delay(wait.coerceIn(PSP_MIN_WAIT_MS, PSP_IDLE_MS))
+        }
+    }
+
+    /**
+     * Right before playing a stream (spec/apps.md): an answer younger than 60 s, else one more check of its
+     * playlist; [then] gets the state on the main thread.
+     */
+    fun checkPsp(streamId: String, then: (PspState) -> Unit) {
+        viewModelScope.launch {
+            val state = withContext(Dispatchers.IO) { app.psp.stateForPlayback(streamId) }
+            _psp.value = app.psp.states()
+            then(state)
+        }
+    }
+
+    /** A short Czech message over Živě and the guide (e.g. "Poslanecká sněmovna teď nevysílá."). */
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+    private var noticeJob: Job? = null
+
+    fun showNotice(text: String) {
+        noticeJob?.cancel()
+        _notice.value = text
+        noticeJob = viewModelScope.launch {
+            delay(NOTICE_MS)
+            _notice.value = null
+        }
+    }
 
     /** The Živě screen grabs focus only on first display. */
     var initialFocusDone = false
@@ -194,5 +244,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (result is Load.Ready || showLoading) _plans.update { it + (day to result) }
         }
+    }
+
+    private companion object {
+        const val PSP_IDLE_MS = 5_000L
+        const val PSP_MIN_WAIT_MS = 200L
+        const val NOTICE_MS = 3_000L
     }
 }

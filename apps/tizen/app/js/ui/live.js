@@ -1,6 +1,7 @@
 /*
  * "Živě": the channels with the programme on air now, CT internet and "Anténa" in one mixed list, in this TV's
  * order without hidden channels or switched-off sources ("Kanály" in Nastavení); each card shows its source icon.
+ * Poslanecká sněmovna cards show the live check: a red "● ŽIVĚ" badge, dimmed "Nevysílá se" or "Zjišťuji…".
  */
 (function (root) {
   'use strict';
@@ -17,7 +18,7 @@
   function LiveScreen(app) {
     this.app = app;
     this.root = document.getElementById('screen-live');
-    this.cards = []; // [{el, request}]
+    this.cards = []; // [{key, el, item}]
     this.groups = []; // [{start, end}] card index ranges (one: the mixed list)
     this.focus = 0;
   }
@@ -37,8 +38,9 @@
     if (dvbOn && dvb.error) this.root.appendChild(el('div', 'group-error', dvb.error));
     this.group(list, function (item, i) {
       var ch = item.channel;
+      if (item.source === 'psp') return self.pspCard(item, i + 1);
       var onAir = item.source === 'dvb' ? dvb.onAir : ct.onAir;
-      return self.card(item.key, item.source, i + 1, ch.name, onAir ? onAir[ch.id] : null, now, app.liveRequest(item));
+      return self.card(item, i + 1, ch.name, onAir ? onAir[ch.id] : null, now);
     });
 
     // While the Anténa channels are still loading the list may be empty without anything being hidden.
@@ -61,13 +63,8 @@
   };
 
   /** `number` = the channel's number on this TV (spec/apps.md "Channel numbers and zapping"). */
-  LiveScreen.prototype.card = function (key, source, number, name, info, now, request) {
-    var card = el('div', 'card');
-    var channel = el('div', 'card-channel');
-    channel.appendChild(el('span', 'channel-number', String(number)));
-    channel.appendChild(CT.sourceIcon(source));
-    channel.appendChild(el('span', 'card-channel-name', name));
-    card.appendChild(channel);
+  LiveScreen.prototype.card = function (item, number, name, info, now) {
+    var card = this.cardHead(item, number, '');
     var current = info ? info.current : null;
     var next = info ? info.next : null;
     if (current) {
@@ -82,7 +79,32 @@
       card.appendChild(el('div', 'card-title muted', info ? 'Mimo vysílání' : ''));
     }
     if (next) card.appendChild(el('div', 'card-next', 'Potom ' + CT.Days.time(next.start) + ' ' + next.title));
-    this.cards.push({ key: key, el: card, request: request });
+    return card;
+  };
+
+  /** The card with its number, source icon and channel name, registered for focus and OK. */
+  LiveScreen.prototype.cardHead = function (item, number, extraClass) {
+    var card = el('div', 'card' + extraClass);
+    var channel = el('div', 'card-channel');
+    channel.appendChild(el('span', 'channel-number', String(number)));
+    channel.appendChild(CT.sourceIcon(item.source));
+    channel.appendChild(el('span', 'card-channel-name', item.channel.name));
+    card.appendChild(channel);
+    this.cards.push({ key: item.key, el: card, item: item });
+    return card;
+  };
+
+  /** Poslanecká sněmovna: on = red "● ŽIVĚ" and "Přímý přenos"; off = dimmed "Nevysílá se"; not checked yet = "Zjišťuji…". */
+  LiveScreen.prototype.pspCard = function (item, number) {
+    var P = CT.Psp;
+    var state = this.app.pspState(item.channel.id);
+    var card = this.cardHead(item, number, ' card-psp psp-' + state);
+    if (state === 'live') {
+      card.appendChild(el('div', 'live-badge', '● ŽIVĚ'));
+      card.appendChild(el('div', 'card-title', P.LIVE_TEXT));
+    } else {
+      card.appendChild(el('div', 'card-title muted', state === 'off' ? P.OFF_TEXT : P.UNKNOWN_TEXT));
+    }
     return card;
   };
 
@@ -137,7 +159,7 @@
         else if (g < this.groups.length - 1) this.focus = Math.min(this.groups[g + 1].end - 1, this.groups[g + 1].start + col);
         break;
       case 'enter':
-        this.app.play(this.cards[i].request);
+        this.app.playItem(this.cards[i].item);
         break;
       default:
         break;

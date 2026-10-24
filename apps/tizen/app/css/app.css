@@ -1086,3 +1086,55 @@ main {
   background: var(--focus);
   color: #000;
 }
+
+/* Poslanecká sněmovna: live check on the Živě cards and the guide's whole-day cells */
+.live-badge {
+  display: inline-block;
+  padding: 2px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: #d71920;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.card.psp-off {
+  opacity: 0.5;
+}
+
+.card.psp-off.focused {
+  opacity: 0.8;
+}
+
+.cell-psp .live-badge {
+  margin: 0 12px 0 0;
+  padding: 0 10px;
+  font-size: 20px;
+  vertical-align: 2px;
+}
+
+.ch-detail {
+  margin-left: 16px;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.ch-name.focused .ch-detail {
+  color: #444;
+}
+
+/* "Výbory a semináře 1/2/3" must stay distinguishable: the name wraps to two lines instead of an ellipsis */
+.card-psp .card-channel {
+  white-space: normal;
+  font-size: 28px;
+  line-height: 34px;
+  max-height: 68px;
+}
+
+/* Source switches have no ▲ ▼: their row may be as wide as the list, so "PČR · jen přímé přenosy" fits */
+.ch-source .ch-name {
+  width: 788px;
+}

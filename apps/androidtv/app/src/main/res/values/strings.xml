@@ -34,9 +34,18 @@
     <string name="channels_down">Posunout %1$s dolů</string>
     <string name="channels_sources">Zdroje</string>
     <string name="channels_order">Pořadí kanálů</string>
-    <string name="channels_none_listed">Oba zdroje jsou vypnuté.</string>
+    <string name="channels_none_listed">Všechny zdroje jsou vypnuté.</string>
     <string name="source_internet">Internetová TV (ČT)</string>
     <string name="source_antenna">Anténa</string>
+    <string name="source_psp">Poslanecká sněmovna PČR</string>
+    <string name="source_psp_switch">Poslanecká sněmovna</string>
+    <string name="source_psp_switch_detail">PČR · jen přímé přenosy</string>
+    <string name="psp_live_badge">● ŽIVĚ</string>
+    <string name="psp_live">Přímý přenos</string>
+    <string name="psp_off">Nevysílá se</string>
+    <string name="psp_checking">Zjišťuji…</string>
+    <string name="psp_not_on">Poslanecká sněmovna teď nevysílá.</string>
+    <string name="psp_source_line">Zdroj: Poslanecká sněmovna PČR</string>
     <string name="version_line">Verze %1$s (build %2$s · %3$s · %4$s)</string>
     <string name="channels_reset">Obnovit výchozí pořadí</string>
     <string name="channels_antenna_unavailable">Kanály antény se nepodařilo načíst: %1$s</string>
@@ -64,5 +73,5 @@
     <string name="audio_title">Zvuk</string>
     <string name="audio_single">Pořad má jen jednu zvukovou stopu</string>
     <string name="audio_track">Stopa %1$d</string>
-    <string name="disclaimer">Neoficiální projekt, není spojen s Českou televizí. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.</string>
+    <string name="disclaimer">Neoficiální projekt, není spojen s Českou televizí ani s Poslaneckou sněmovnou PČR. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.</string>
 </resources>

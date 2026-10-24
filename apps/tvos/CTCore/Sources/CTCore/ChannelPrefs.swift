@@ -2,20 +2,21 @@ import Foundation
 import Observation
 
 /// "Kanály" (spec/apps.md): channels hidden and reordered on this TV only, in one list that mixes
-/// CT internet and Anténa channels, plus a switch per source.
-/// Keys: `ct:<API id>` for CT internet channels, `dvb:<gateway channel id>` for Anténa channels.
+/// CT internet, Anténa and Poslanecká sněmovna channels, plus a switch per source.
+/// Keys: `ct:<API id>` for CT internet channels, `dvb:<gateway channel id>` for Anténa channels,
+/// `psp:<stream id>` for the Chamber of Deputies' live streams.
 /// Unknown keys are kept (channels of a source that is off keep their place).
 public struct ChannelPrefs: Codable, Equatable, Sendable {
     public static let maxKeys = 500
 
     /// Where a channel comes from; a whole source can be switched off.
     public enum Source: String, Codable, Sendable, CaseIterable {
-        case ct, dvb
+        case ct, dvb, psp
     }
 
     public var order: [String]
     public var hidden: [String]
-    /// Sources switched off (raw values of `Source`); missing in stored JSON = both on.
+    /// Sources switched off (raw values of `Source`); missing in stored JSON = all on.
     public var sourcesOff: [String]
 
     public init(order: [String] = [], hidden: [String] = [], sourcesOff: [String] = []) {
@@ -42,6 +43,7 @@ public struct ChannelPrefs: Codable, Equatable, Sendable {
 
     public static func ctKey(_ channel: Channel) -> String { "ct:\(channel.id)" }
     public static func dvbKey(_ channel: DVBChannel) -> String { "dvb:\(channel.id)" }
+    public static func pspKey(_ stream: PSPStream) -> String { stream.key }
 
     /// `all` = the list's keys in the saved order, then the rest in default order; `visible` = `all` without hidden.
     /// The input is already limited to the sources that are on.
@@ -117,8 +119,8 @@ public final class ChannelPrefsStore {
 
     // MARK: arranged list
 
-    /// The mixed channel list: CT internet channels then the Anténa ones by default, only of the sources
-    /// that are on, in this TV's order.
+    /// The mixed channel list: CT internet channels, then the Anténa ones, then the Chamber's streams by
+    /// default, only of the sources that are on, in this TV's order.
     public func channels(antenna: [DVBChannel]) -> (all: [MixedChannel], visible: [MixedChannel]) {
         prefs.arrange(MixedChannel.defaultList(antenna: antenna, prefs: prefs), key: \.key)
     }
@@ -128,11 +130,14 @@ public final class ChannelPrefsStore {
 public enum MixedChannel: Sendable, Hashable, Identifiable {
     case ct(Channel)
     case antenna(DVBChannel)
+    /// A live stream of the Chamber of Deputies (live only).
+    case parliament(PSPStream)
 
     public var key: String {
         switch self {
         case .ct(let channel): return ChannelPrefs.ctKey(channel)
         case .antenna(let channel): return ChannelPrefs.dvbKey(channel)
+        case .parliament(let stream): return ChannelPrefs.pspKey(stream)
         }
     }
 
@@ -142,6 +147,7 @@ public enum MixedChannel: Sendable, Hashable, Identifiable {
         switch self {
         case .ct(let channel): return channel.name
         case .antenna(let channel): return channel.name
+        case .parliament(let stream): return stream.name
         }
     }
 
@@ -149,11 +155,15 @@ public enum MixedChannel: Sendable, Hashable, Identifiable {
         switch self {
         case .ct: return .ct
         case .antenna: return .dvb
+        case .parliament: return .psp
         }
     }
 
-    /// Default order: the CT catalogue, then the gateway's channels; sources that are off are left out.
+    /// Default order: the CT catalogue, then the gateway's channels, then the Chamber's streams 1…5; sources
+    /// that are off are left out.
     public static func defaultList(antenna: [DVBChannel], prefs: ChannelPrefs) -> [MixedChannel] {
-        (prefs.isOn(.ct) ? Channels.all.map(MixedChannel.ct) : []) + (prefs.isOn(.dvb) ? antenna.map(MixedChannel.antenna) : [])
+        (prefs.isOn(.ct) ? Channels.all.map(MixedChannel.ct) : [])
+            + (prefs.isOn(.dvb) ? antenna.map(MixedChannel.antenna) : [])
+            + (prefs.isOn(.psp) ? PSPStreams.all.map(MixedChannel.parliament) : [])
     }
 }

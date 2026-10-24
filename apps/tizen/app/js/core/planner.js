@@ -8,12 +8,14 @@
  *           {kind: 'dvbLive', channelId, title}
  *           {kind: 'dvbRecorded', channelId, title, recordingId, fromStart}
  *           (a continuous-recording id plays through the channel timeline, a TVHeadend DVR id as before)
+ *           {kind: 'pspLive', channelId: Chamber stream id, title} (live only)
  *           Optional on startover/programme/dvbRecorded: resumeSeconds ("Pokračovat"), and for saving the progress
  *           resumeKey (`ct:<idec>` / `dvb:<recording id>`), lengthSeconds; startover/programme also carry `start`.
  * Targets:  {url, kind: 'live' | 'timeshift' | 'vod' | 'timeline', title, seekToWallClock, fallbackOffsetMs,
  *            startPositionMs, dvb: DvbClient | null, recordingId: finished Anténa recording | null,
  *            timeline: the parsed window (kind 'timeline') | null,
- *            alwaysSeek: seek to startPositionMs even when it is 0 (a growing playlist starts at its live edge)}
+ *            alwaysSeek: seek to startPositionMs even when it is 0 (a growing playlist starts at its live edge),
+ *            psp: bool}
  */
 (function (root) {
   'use strict';
@@ -23,23 +25,28 @@
   function target(url, kind, title, extra) {
     var t = {
       url: url, kind: kind, title: title, seekToWallClock: null, fallbackOffsetMs: 0, startPositionMs: null, dvb: null,
-      recordingId: null, timeline: null, alwaysSeek: false
+      recordingId: null, timeline: null, alwaysSeek: false, psp: false
     };
     return Object.assign(t, extra || {});
   }
 
-  /** `dvb()` returns the configured DvbClient or null. */
-  function Planner(api, live, clock, dvb) {
+  /**
+   * `dvb()` returns the configured DvbClient or null; `psp` = {monitor: PspMonitor, playUrl(stream) → url (optional,
+   * the published URL by default; the browser demo swaps it so it never contacts the Chamber's CDN)}.
+   */
+  function Planner(api, live, clock, dvb, psp) {
     this.api = api;
     this.live = live || new CT.LiveResolver(api);
     this.clock = clock || Date.now;
     this.dvb = dvb || function () { return null; };
+    this.psp = psp || null;
   }
 
   /** Resolves to a target or rejects with CtError carrying a Czech message. */
   Planner.prototype.plan = function (request, forceRefresh) {
     try {
       if (request.kind === 'dvbLive' || request.kind === 'dvbRecorded') return this.planDvb(request);
+      if (request.kind === 'pspLive') return this.planPsp(request, forceRefresh);
       var channel = CT.Channels.byId(request.channelId);
       if (!channel) throw new CT.CtError('unknown channel ' + request.channelId);
       switch (request.kind) {
@@ -110,6 +117,21 @@
     var client = this.dvb();
     if (!client) return Promise.reject(new CT.CtError('DVB not configured', CT.DvbMessages.UNREACHABLE));
     return this.timeline(client, id, title, function () { return time; });
+  };
+
+  /**
+   * Poslanecká sněmovna: the published URL as is (AVPlay sends no cookie or header for it), live only. Not on now
+   * (a fresh check, or the playlist answering 404 right now) → "Poslanecká sněmovna teď nevysílá.".
+   */
+  Planner.prototype.planPsp = function (request, forceRefresh) {
+    var psp = this.psp;
+    var stream = CT.Psp.byId(request.channelId);
+    if (!stream || !psp) return Promise.reject(new CT.CtError('unknown stream ' + request.channelId));
+    return psp.monitor.open(stream.id, !!forceRefresh).then(function (state) {
+      if (state === 'off') throw new CT.CtError(stream.id + ' not on air', CT.Psp.OFF_MESSAGE, 'PSP_OFF');
+      var url = psp.playUrl ? psp.playUrl(stream) : stream.url;
+      return target(url, 'live', request.title, { psp: true });
+    });
   };
 
   Planner.prototype.programme = function (channel, request, forceRefresh) {

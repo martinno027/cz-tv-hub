@@ -1,7 +1,8 @@
 /*
  * "Kanály" (spec/apps.md): channels hidden and reordered on this TV only.
- * Prefs = {order: [keys], hidden: [keys], sourcesOff: ['ct' | 'dvb']}; keys `ct:<API id>` and
- * `dvb:<gateway channel id>`. One mixed list (CT and Anténa channels in any order); the list passed in holds only
+ * Prefs = {order: [keys], hidden: [keys], sourcesOff: ['ct' | 'dvb' | 'psp']}; keys `ct:<API id>`,
+ * `dvb:<gateway channel id>` and `psp:<stream id>` (Poslanecká sněmovna). One mixed list (channels of all sources
+ * in any order); the list passed in holds only
  * the channels of the sources that are on, and stored keys not in it (unknown, or of a source that is off) are
  * kept. Pure functions: every change returns new prefs.
  */
@@ -28,7 +29,7 @@
     return list.indexOf(key) >= 0;
   }
 
-  var SOURCES = ['ct', 'dvb'];
+  var SOURCES = ['ct', 'dvb', 'psp'];
 
   function sourceList(value) {
     return keyList(value).filter(function (s) { return contains(SOURCES, s); });
@@ -46,7 +47,7 @@
     },
 
     /** Defensive: anything that is not {order: [...], hidden: [...], sourcesOff: [...]} becomes empty lists
-     *  (a missing `sourcesOff` = both sources on). */
+     *  (a missing `sourcesOff` = all sources on). */
     parse: function (data) {
       if (typeof data === 'string') {
         try {
@@ -64,7 +65,7 @@
       return JSON.stringify({ order: p.order, hidden: p.hidden, sourcesOff: p.sourcesOff });
     },
 
-    /** `channels` = the keys of the sources that are on, in default order (CT, then Anténa) → {all, visible}. */
+    /** `channels` = the keys of the sources that are on, in default order (CT, then Anténa, then Poslanecká sněmovna) → {all, visible}. */
     arrange: function (channels, prefs) {
       var p = ChannelPrefs.parse(prefs);
       var all = [];
@@ -104,7 +105,7 @@
       return make(p.order, hidden, p.sourcesOff);
     },
 
-    /** Whole source switched off ('ct' = Internetová TV, 'dvb' = Anténa). */
+    /** Whole source switched off ('ct' = Internetová TV, 'dvb' = Anténa, 'psp' = Poslanecká sněmovna). */
     isSourceOff: function (prefs, source) {
       return contains(ChannelPrefs.parse(prefs).sourcesOff, source);
     },
@@ -117,7 +118,7 @@
       return make(p.order, p.hidden, off);
     },
 
-    /** "Obnovit výchozí pořadí": order and hidden cleared, both sources on. */
+    /** "Obnovit výchozí pořadí": order and hidden cleared, all sources on. */
     reset: function () {
       return ChannelPrefs.empty();
     }
