@@ -69,10 +69,12 @@ struct ChannelSettingsSection: View {
             }
             list(items, proxy: proxy)
 
+            // Signed out the TV follows the household default again; signed in the profile gets a copy of it (both: the
+            // built-in order without one).
             Button("Obnovit výchozí pořadí") {
-                prefs.update { $0.reset() }
+                model.household.reset()
             }
-            .disabled(prefs.prefs == ChannelPrefs())
+            .disabled(!model.household.canReset)
             .padding(.top, 10)
         }
         .frame(maxWidth: 1100, alignment: .leading)

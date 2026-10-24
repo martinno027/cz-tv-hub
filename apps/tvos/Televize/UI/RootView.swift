@@ -44,7 +44,7 @@ struct RootView: View {
         .overlay(alignment: .topTrailing) {
             if tab != .settings { NumberEntryBadge(entry: model.numberEntry) }
         }
-        // Profile: pending changes sent and a newer version read at start, failed sends again every 60 s.
+        // Household default and profile read at start (pending profile changes sent first), failed sends again every 60 s.
         .task { await model.runProfileSync() }
         .task(id: VisibleKey(prefs: model.channelPrefs.prefs, gateway: model.gateway)) {
             // Channel numbers: kept current for the screens, the zapping list and number entry.

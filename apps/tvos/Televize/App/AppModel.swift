@@ -37,6 +37,8 @@ final class AppModel {
     let channelPrefs: ChannelPrefsStore
     /// Nastavení → Profil: this TV's settings in a profile on the gateway (spec/apps.md "Profil").
     let profile: ProfileSyncController
+    /// The household default channel list from the gateway, for a TV not signed in that never changed its list.
+    let household: HouseholdDefaultController
     /// "Is it on now?" of the Chamber of Deputies' streams, checked only while Živě or the guide is on screen.
     let parliament = PSPLiveMonitor()
 
@@ -67,6 +69,11 @@ final class AppModel {
             current: ProfileDocument(channelPrefs: channelPrefs.prefs, thumbnails: images.tvAllows),
             credentials: ProfileKeychain()
         )
+        // A TV from before T11: its own list is in the store, or kept aside by a signed-in profile.
+        household = HouseholdDefaultController(
+            prefs: channelPrefs,
+            tvOwn: profile.isSignedIn ? profile.state.local?.channelPrefs ?? ChannelPrefs() : channelPrefs.prefs
+        )
         wireProfile()
         setGateway(GatewayStore.load(), persist: false)
         numberEntry = NumberEntry { [weak self] number in self?.playLive(number: number) }
@@ -77,31 +84,34 @@ final class AppModel {
     private func wireProfile() {
         let channelPrefs = channelPrefs
         let images = images
-        profile.apply = { document in
-            channelPrefs.replace(document.channelPrefs)
-            images.applyTVSwitch(document.thumbnails)
-        }
+        household.connect(profile: profile, thumbnails: { images.tvAllows },
+                          applyThumbnails: { images.applyTVSwitch($0) })
         profile.onMessage = { [weak self] message in self?.alertMessage = message.text }
-        channelPrefs.onChange = { [weak self] prefs in
-            guard let self else { return }
-            profile.settingsChanged(channelPrefs: prefs, thumbnails: images.tvAllows)
-        }
         images.onTVSwitchChange = { [weak self] value in
             guard let self else { return }
             profile.settingsChanged(channelPrefs: channelPrefs.prefs, thumbnails: value)
         }
-        // A session dropped at start (lost Keychain item) brings the TV's own settings back.
+        // A session dropped at start (lost Keychain item) brings the TV's own settings back; signed out, the
+        // household default the TV follows.
         profile.apply(profile.state.active)
     }
 
-    /// App start (and the app back in front): pending changes are sent, a newer profile version applied; a failed
-    /// send is tried again every 60 s.
+    /// App start (and the app back in front): a newer household default is applied, pending profile changes are sent,
+    /// a newer profile version applied; a failed send is tried again every 60 s.
     func runProfileSync() async {
-        await profile.refresh()
+        await refreshFromGateway()
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(ProfileSyncController.retryInterval))
             await profile.retryPending()
         }
+    }
+
+    /// App start and Nastavení open: the household default and the profile, side by side (an unreachable gateway
+    /// does not hold one up behind the other).
+    func refreshFromGateway() async {
+        async let defaults: Void = household.refresh()
+        await profile.refresh()
+        await defaults
     }
 
     // MARK: channel numbers
@@ -193,7 +203,11 @@ final class AppModel {
             if let config { GatewayStore.save(config) } else { GatewayStore.delete() }
         }
         // Odebrat bránu while signed in signs out locally first (spec/apps.md "Profil").
-        profile.setAPI(config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly()) })
+        let client = config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly()) }
+        profile.setAPI(client)
+        household.setAPI(client, gateway: config?.baseURL)
+        // A gateway saved in Nastavení → Server: its household default without leaving Nastavení first.
+        if persist, config != nil { Task { await household.refresh() } }
         gateway = config
         antenna = config.map { AntennaStore(client: DVBClient(config: $0)) }
         images.setGateway(config)
