@@ -113,9 +113,9 @@ class FakeTvheadend:
             "eventId": channel["_index"] * 100_000_000 + k,
             "channelUuid": channel["uuid"], "channelName": channel["name"], "channelNumber": channel["number"],
             "start": k * slot, "stop": (k + 1) * slot,
-            "title": title, "subtitle": f"Díl {k % 100}",
-            "summary": "Testovací pořad.",
-            "description": f"Testovací pořad falešného TVHeadendu na kanálu {channel['name']}.",
+            "title": title, "subtitle": _subtitle(k),
+            "summary": "" if k % 6 == 5 else "Testovací pořad.",  # some with neither summary nor description
+            "description": _description(k, channel["name"]),
             "genre": [genre],
         }
 
@@ -519,3 +519,23 @@ def _make_handler(fake: FakeTvheadend):
                 self.close_connection = True
 
     return Handler
+
+
+def _subtitle(k: int) -> str:
+    """Like real broadcasts: an episode line, none, or a long one that is really a description (Nova sends
+    "Pořad je opatřen audiodeskripcí…" there), so the guide's fixed detail layout gets all three."""
+    if k % 4 == 1:
+        return ""
+    if k % 4 == 3:
+        return f"Pořad je opatřen audiodeskripcí (AD), skrytými titulky (ST). Díl {k % 100} dlouhého seriálu o anténách."
+    return f"Díl {k % 100}"
+
+
+def _description(k: int, channel: str) -> str:
+    """No description on every third programme (seen on real channels), otherwise one or several lines."""
+    if k % 3 == 2:
+        return ""
+    if k % 3 == 1:
+        return (f"Testovací pořad falešného TVHeadendu na kanálu {channel}. Dlouhý popis, který se do detailu průvodce "
+                "nevejde celý a musí se zkrátit, aby se nic v detailu neposunulo.")
+    return f"Testovací pořad falešného TVHeadendu na kanálu {channel}."
