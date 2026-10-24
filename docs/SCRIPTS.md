@@ -64,8 +64,14 @@ Prints the playlist the server would serve, for checking the channel list.
 `/etc/cztvhub/cztvhub.conf` is kept. `install-dvb.sh` also installs TVHeadend (project repository), ffmpeg and
 avahi and creates the config with DVB enabled. Update: `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`.
 
+After the restart `install.sh` waits up to 30 s for `/health` (`server/deploy/health.sh`; the service first loads
+the index of the continuous recording, which grows with every recorded day) and prints "running on port … (ready
+after N s)"; if it never answers, it prints the service state and its log since the restart and exits non-zero.
+Tests: `bash server/deploy/health.test.sh` (fake curl/systemctl, no Pi).
+
 Can go wrong: `install-dvb.sh` asks for a TVHeadend admin name and password (interactive); TVHeadend must listen on
-127.0.0.1 only — the script checks it and warns.
+127.0.0.1 only — the script checks it and warns. Before T07 the check waited only 1 s and reported `curl: (7) Failed
+to connect` for a service that was fine a moment later.
 
 </details>
 
@@ -103,7 +109,8 @@ Includes one line per live start (`dvb: live start …` with the time of each st
 Logic tests in the CTCore package; the app is built from `project.yml` with XcodeGen.
 
 Can go wrong: `xcodegen generate` recreates `Televize.xcodeproj` and drops the signing team chosen in Xcode — pick it
-again before running on a device. In the simulator install `Televize.app`, not the UI-test runner.
+again before running on a device. `Televize.xcodeproj` is generated and not in git: after a pull that adds Swift files, Xcode
+reports "Cannot find type … in scope" until `xcodegen generate` runs again. In the simulator install `Televize.app`, not the UI-test runner.
 
 </details>
 

@@ -18,6 +18,8 @@ fi
 sudo cp deploy/cztvhub.service /etc/systemd/system/cztvhub.service
 sudo systemctl daemon-reload
 sudo systemctl enable cztvhub
+# shellcheck source=server/deploy/health.sh
+source deploy/health.sh
+restarted=$(date '+%Y-%m-%d %H:%M:%S')
 sudo systemctl restart cztvhub
-sleep 1
-curl -fsS http://127.0.0.1:8098/health && echo "cz-tv-hub is running on port 8098"
+wait_for_health "$(service_port)" 30 "$restarted"
