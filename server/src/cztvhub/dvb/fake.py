@@ -7,6 +7,8 @@ live streams (``ffmpeg -f lavfi testsrc``), and a small DVR:
 - channel 2 has completed recordings of past slots only; channels 3 and 4 have none.
 Each channel has one service; channels 1 + 2 share a multiplex, 3 and 4 have their own (for /admin).
 Like the real TVHeadend, EPG events disappear once they end (past programmes = DVR entries).
+The live streams carry EIT present/following like a broadcast (eit.py, ``dvb-starts``): each channel "really"
+switches programme a fixed time after its EPG start (``FAKE_EIT``), the fourth channel sends no EIT at all.
 """
 from __future__ import annotations
 
@@ -23,6 +25,8 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
+from . import eit
+
 # name, number, slot minutes, recording mode ("auto" | "past" | ""), test pattern, tone Hz, multiplex
 CHANNELS = [
     ("ČT1 HD", 1, 30, "auto", "testsrc2", 440, "626MHz"),
@@ -34,6 +38,9 @@ PROGRAMMES = [
     ("Zprávy", 0x20), ("Film: Testovací obrazec", 0x10), ("Sportovní přenos", 0x40), ("Pohádka", 0x50),
     ("Dokument o anténách", 0x90), ("Hudební klip", 0x60), ("Soutěž", 0x30), ("Kulturní magazín", 0x70),
 ]
+# per channel (by index, repeating): seconds after the EPG start when the programme really starts in the stream and
+# how its name is encoded; None = no EIT in the stream
+FAKE_EIT = [(20, "6937"), (150, "utf8"), (-30, "8859-2"), None]
 EXTRA_SLOTS = (15, 20, 25, 30, 45, 60, 90)
 EXTRA_PATTERNS = ("testsrc", "testsrc2", "smptebars", "rgbtestsrc")
 
@@ -51,6 +58,55 @@ FAILED_SLOT_AGO = 5  # the 5th past slot of channel 1 is a failed recording
 UPCOMING_SCHEDULED = 3
 ICON_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def eit_name(title: str, encoding: str) -> bytes:
+    if encoding == "utf8":
+        return b"\x15" + title.encode("utf-8")
+    if encoding == "8859-2":
+        return b"\x10\x00\x02" + title.encode("iso8859-2", "replace")
+    return eit.encode_6937(title)
+
+
+class EitInjector:
+    """Puts EIT p/f packets (PID 0x12) between the TS packets of a fake live stream about once a second.
+    ffmpeg's own TS (service 1) is passed on unchanged, cut only at packet boundaries."""
+
+    def __init__(self, fake: "FakeTvheadend", channel: dict, clock: Callable[[], float] = time.time):
+        self.fake, self.channel, self.clock = fake, channel, clock
+        self.setup = FAKE_EIT[channel["_index"] % len(FAKE_EIT)]
+        self.tail = b""
+        self.cc = 0
+        self.next_at = 0.0
+
+    def feed(self, chunk: bytes) -> bytes:
+        if self.setup is None:
+            return chunk
+        data = self.tail + chunk
+        cut = len(data) - len(data) % eit.TS
+        self.tail, out = data[cut:], data[:cut]
+        now = self.clock()
+        if cut and now >= self.next_at:
+            self.next_at = now + 1.0
+            out += self.packets(now)
+        return out
+
+    def packets(self, now: float) -> bytes:
+        delay, encoding = self.setup
+        slot = self.channel["_slot"]
+        k = int((now - delay) // slot)
+        sections = []
+        for number, (j, running) in enumerate(((k, 4), (k + 1, 1))):
+            ev = self.fake.event_for(self.channel, j)
+            sections.append(eit.build_eit_pf(1, number, [(j & 0xFFFF, ev["start"], slot, running,
+                                                          eit_name(ev["title"], encoding))]))
+        if self.channel["_index"] == 0:  # EIT of another service of the multiplex (rewrite EIT off): ignored
+            sections.append(eit.build_eit_pf(2, 0, [(1, k * slot, slot, 4, eit_name("Jiná služba", encoding))]))
+        out = b""
+        for section in sections:
+            packets, self.cc = eit.packetize(eit.EIT_PID, section, self.cc)
+            out += packets
+        return out
 
 
 def stable_uuid(*parts: Any) -> str:
@@ -460,6 +516,7 @@ def _make_handler(fake: FakeTvheadend):
             cmd = encode_args(channel["_pattern"], channel["_tone"], fake.ffmpeg)
             cmd = cmd[:1] + ["-re"] + cmd[1:] + ["-flush_packets", "1", "pipe:1"]
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+            inject = EitInjector(fake, channel)
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "video/mp2t")
@@ -470,7 +527,7 @@ def _make_handler(fake: FakeTvheadend):
                     chunk = proc.stdout.read1(65536)
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    self.wfile.write(inject.feed(chunk))
             except OSError:
                 pass  # client went away
             finally:
