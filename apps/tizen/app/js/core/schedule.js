@@ -5,7 +5,8 @@
 
   /**
    * In-memory schedule cache, one entry per broadcast day (all channels in one request).
-   * Today's and future days are refetched after `freshForMs`; past days never change.
+   * The broadcast day on air (Days.openDay: after midnight the previous calendar day) and later days are
+   * refetched after `freshForMs`; days before it never change.
    * A failed day is not cached, so it can be retried without breaking the other days.
    */
   function ScheduleRepository(api, clock, freshForMs) {
@@ -21,7 +22,7 @@
     var self = this;
     var now = this.clock();
     var entry = this.cache[day];
-    if (entry && (day < CT.Days.today(now) || now - entry.at < this.freshForMs)) return Promise.resolve(entry.plan);
+    if (entry && (day < CT.Days.openDay(now) || now - entry.at < this.freshForMs)) return Promise.resolve(entry.plan);
     var slugs = this.channels.map(function (c) { return c.slug; });
     return this.api.schedules(slugs, day).then(function (bySlug) {
       var plan = {};

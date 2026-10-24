@@ -6,6 +6,9 @@ struct RootView: View {
 
     @Environment(AppModel.self) private var model
     @State private var tab: Tab = .live
+    /// Every open of the guide (its tab chosen, the app back in front on it) shows now again (spec/apps.md).
+    @State private var guideOpens = 0
+    @Environment(\.scenePhase) private var scenePhase
 
     private struct VisibleKey: Equatable {
         let prefs: ChannelPrefs
@@ -18,12 +21,19 @@ struct RootView: View {
             LiveView()
                 .tabItem { Text("Živě") }
                 .tag(Tab.live)
-            GuideView()
+            GuideView(opens: guideOpens)
                 .tabItem { Text("TV průvodce") }
                 .tag(Tab.guide)
             SettingsView()
                 .tabItem { Text("Nastavení") }
                 .tag(Tab.settings)
+        }
+        .onChange(of: tab) { _, tab in
+            if tab == .guide { guideOpens += 1 }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // back in front on the guide is an open; the player closing is not (the guide stays where it was)
+            if phase == .active, tab == .guide, model.session == nil { guideOpens += 1 }
         }
         // Digits on Živě and the guide start that channel live (spec/apps.md "Number keys").
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in

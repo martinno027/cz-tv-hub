@@ -45,6 +45,19 @@ class ScheduleRepositoryTest {
         assertEquals(1, t.requests.size)
     }
 
+    @Test fun broadcastDayOnAirAfterMidnightIsStillRefetched() {
+        val t = FakeTransport(mapOf("graphql" to "schedule_ct1_ct24.json"))
+        val r = repo(t)
+        now = Instant.parse("2026-10-16T22:20:00Z") // 00:20 on the 17th in Prague: the 16th's broadcast day
+        r.day(LocalDate.of(2026, 10, 16))
+        now = now.plus(Duration.ofMinutes(61))
+        r.day(LocalDate.of(2026, 10, 16))
+        assertEquals(2, t.requests.size)
+        now = Instant.parse("2026-10-17T03:10:00Z") // 05:10: a past day now, kept as it is
+        r.day(LocalDate.of(2026, 10, 16))
+        assertEquals(2, t.requests.size)
+    }
+
     @Test fun failedDayIsRetriedNotCached() {
         var fail = true
         val transport = HttpTransport { _, _ ->

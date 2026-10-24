@@ -100,6 +100,29 @@
       return d.getUTCHours() * 60 + d.getUTCMinutes();
     },
 
+    /**
+     * The broadcast day (05:00–05:00 Prague) containing `now`: the guide's grid on every open, so between
+     * 00:00 and 05:00 it is the previous calendar day (golden cases spec/fixtures/guide_days_cases.json).
+     */
+    openDay: function (now) {
+      var day = Days.today(now);
+      return now < Days.bounds(day)[0] ? Days.addDays(day, -1) : day;
+    },
+
+    /** The day-strip chip of a programme: the calendar day (Prague) of its start. */
+    chipDay: function (time) {
+      return Days.today(time);
+    },
+
+    /**
+     * Selecting a day chip: {day: the grid's broadcast day, anchor: 'now' | the moment to scroll to}.
+     * "Dnes" opens the grid containing now at now (as on open); any other day opens at 20:00.
+     */
+    select: function (chip, now) {
+      if (chip === Days.today(now)) return { day: Days.openDay(now), anchor: 'now' };
+      return { day: chip, anchor: Days.atMinute(chip, 20 * 60) };
+    },
+
     /** The schedule API's date format, MM.DD.YYYY. */
     graphqlDate: function (day) {
       var p = day.split('-');

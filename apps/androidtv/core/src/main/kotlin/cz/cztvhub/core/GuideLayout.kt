@@ -16,7 +16,9 @@ object GuideLayout {
     val MIN_FILLER: Duration = Duration.ofMinutes(1)
 
     /** [item] is null for a filler. */
-    data class Slot<T : Timed>(val start: Instant, val end: Instant, val item: T?)
+    data class Slot<T : Timed>(val start: Instant, val end: Instant, val item: T?) {
+        fun contains(moment: Instant): Boolean = !moment.isBefore(start) && moment.isBefore(end)
+    }
 
     /**
      * The guide's time axis: exactly the broadcast day [day], 05:00 to 05:00 Prague (23 or 25 h on DST days),
@@ -63,10 +65,14 @@ object GuideLayout {
 
     /**
      * The time up/down aim at in the next row (spec/apps.md "Live column first"): [now] while the initial
-     * live mode lasts or when the cell moved from is airing now (it contains [now]), else the kept [cursor].
+     * live mode lasts or when the cell moved from is airing now (its slot or its programme contains [now]: an
+     * overlap or the minimum width can shift a slot off the programme's own times), else the kept [cursor].
      */
-    fun verticalMoment(live: Boolean, from: Slot<*>?, now: Instant, cursor: Instant): Instant =
-        if (live || (from != null && !now.isBefore(from.start) && now.isBefore(from.end))) now else cursor
+    fun verticalMoment(live: Boolean, from: Slot<*>?, now: Instant, cursor: Instant): Instant {
+        fun Timed.airing() = !now.isBefore(start) && now.isBefore(end)
+        val airing = from != null && (from.contains(now) || from.item?.airing() == true)
+        return if (live || airing) now else cursor
+    }
 
     /** Axis ticks every [step], starting at [axisStart]. */
     fun ticks(axisStart: Instant, axisEnd: Instant, step: Duration = Duration.ofMinutes(30)): List<Instant> =

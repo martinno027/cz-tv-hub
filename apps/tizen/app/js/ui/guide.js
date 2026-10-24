@@ -39,11 +39,13 @@
     this.focusRow = 0;
     this.focusSlot = 0;
     this.anchor = 0; // the focused moment, kept when moving up/down
-    this.liveMode = false; // today, before any left/right: up/down lands on what airs now
+    this.liveMode = false; // the grid containing now, before any left/right: up/down lands on what airs now
     this.scrollX = 0;
     this.scrollRow = 0;
-    this.plans = {}; // day -> {ct: plan | null, ctError, dvb: plan | null}
-    this.pickedInitialDay = false;
+    this.today = null; // calendar day of the day strip's labels, follows the clock (onMinute)
+    this.chip = null; // highlighted chip: the calendar day of the focused programme's start
+    this.pending = null; // where to focus once the loading day is built: {edge, anchor, top}
+    this.prefetchedAt = null; // focus {row, time} of the last image prefetch
   }
 
   GuideScreen.prototype.visibleRows = function () {
@@ -54,15 +56,42 @@
     return $('grid-body').clientWidth - 220;
   };
 
-  /** Opens on today (or yesterday's broadcast day after midnight) the first time it is shown. */
+  /**
+   * Every open (app start included, also between 00:00 and 05:00) shows now: the broadcast day containing now
+   * (Days.openDay), focus on the programme airing now in the first row.
+   */
   GuideScreen.prototype.show = function () {
-    if (!this.day) this.selectDay(CT.Days.today(this.app.now));
-    else this.liveMode = this.isToday();
+    var day = CT.Days.openDay(this.app.now);
+    if (this.day === day && this.rows.length) {
+      this.focusNow(true);
+      this.applyFocus();
+    } else {
+      this.selectDay(day, { anchor: 'now', top: true });
+    }
   };
 
-  GuideScreen.prototype.isToday = function () {
+  /** The grid shows the broadcast day containing now ("Live column first" applies here, not by calendar date). */
+  GuideScreen.prototype.isLiveGrid = function () {
+    return this.day === CT.Days.openDay(this.app.now);
+  };
+
+  /** Focus on now in the current row (or the first, `top`), half an hour of past on the left. */
+  GuideScreen.prototype.focusNow = function (top) {
     var now = this.app.now;
-    return this.day === CT.Days.today(now) && now >= this.axisStart && now <= this.axisEnd;
+    if (top) this.focusRow = this.scrollRow = 0;
+    this.anchor = Math.max(this.axisStart, Math.min(now, this.axisEnd - MINUTE));
+    this.scrollX = Math.max(0, px(this.anchor - this.axisStart - 30 * MINUTE));
+    this.liveMode = this.isLiveGrid();
+    this.focusSlot = this.liveMode ? this.verticalSlot(this.focusRow) : this.slotAt(this.focusRow, this.anchor);
+    this.zone = 'grid';
+  };
+
+  /** Called every minute: after midnight "Dnes" moves on by itself (labels, the strip's range, the detail). */
+  GuideScreen.prototype.onMinute = function () {
+    if (this.today && this.today !== CT.Days.today(this.app.now)) {
+      this.renderDays();
+      this.refreshDetail();
+    }
   };
 
   /**
@@ -80,13 +109,14 @@
     return this.slotAt(rowIndex, this.anchor);
   };
 
-  /** `edge` ('start' | 'end'): "Across days", focus that row's first or last cell once the day is built. */
-  GuideScreen.prototype.selectDay = function (day, edge) {
+  /**
+   * Loads `day`'s grid. `opts`: {edge: 'start' | 'end'} ("Across days": that row's first or last cell), or
+   * {anchor: 'now' | moment, top: focus the first row}; without one, now on the grid containing now, else 20:00.
+   */
+  GuideScreen.prototype.selectDay = function (day, opts) {
     var self = this;
     this.day = day;
-    this.pendingEdge = edge || null;
-    var today = CT.Days.today(this.app.now);
-    this.days = CT.Days.guideDays(today);
+    this.pending = opts || {};
     this.renderDays();
     $('grid-message').textContent = 'Načítání…';
     $('grid-rows').innerHTML = '';
@@ -112,36 +142,47 @@
     }) : Promise.resolve(null);
     Promise.all([ct, dvb]).then(function (r) {
       if (self.day !== day) return;
-      if (self.maybeStartOnYesterday(day, r[0])) return;
       self.build(r[0], r[1]);
     });
   };
 
-  /** After midnight the programme on air still belongs to yesterday's broadcast day. */
-  GuideScreen.prototype.maybeStartOnYesterday = function (day, ct) {
-    if (this.pickedInitialDay) return false;
-    this.pickedInitialDay = true;
-    if (!ct.plan || day !== CT.Days.today(this.app.now)) return false;
-    var starts = [];
-    Object.keys(ct.plan).forEach(function (k) { ct.plan[k].forEach(function (p) { starts.push(p.start); }); });
-    if (!starts.length || this.app.now >= Math.min.apply(null, starts)) return false;
-    this.selectDay(CT.Days.addDays(day, -1));
-    return true;
-  };
-
+  /** The day strip for the calendar day of now ("today follows the clock"). */
   GuideScreen.prototype.renderDays = function () {
-    var self = this;
     var today = CT.Days.today(this.app.now);
+    var focusedDay = this.days[this.dayFocus];
+    this.today = today;
+    this.days = CT.Days.guideDays(today);
     var box = $('days');
     box.innerHTML = '';
-    this.dayFocus = Math.max(0, this.days.indexOf(this.day));
     this.days.forEach(function (d, i) {
       var chip = el('div', 'day', CT.Days.label(d, today));
-      if (d === self.day) chip.classList.add('selected');
       chip.dataset.index = String(i);
       box.appendChild(chip);
     });
+    this.dayFocus = Math.max(0, this.days.indexOf(focusedDay));
+    this.chip = null;
     this.applyFocus();
+  };
+
+  /**
+   * The chip to highlight: the calendar day of the focused programme's start (Days.chipDay); on a "Mimo vysílání"
+   * gap the day of the focused moment in it; else (or outside the strip) the grid's day.
+   */
+  GuideScreen.prototype.chipDay = function () {
+    var slot = this.focused();
+    var time = !slot ? 0 : slot.item ? slot.item.start : Math.max(slot.start, Math.min(this.anchor, slot.end - 1));
+    var day = slot ? CT.Days.chipDay(time) : this.day;
+    return this.days.indexOf(day) >= 0 ? day : this.day;
+  };
+
+  GuideScreen.prototype.highlightChip = function () {
+    var day = this.chipDay();
+    if (day === this.chip) return;
+    this.chip = day;
+    var index = this.days.indexOf(day);
+    Array.prototype.forEach.call($('days').children, function (chip, i) {
+      chip.classList.toggle('selected', i === index);
+    });
   };
 
   /**
@@ -208,28 +249,32 @@
     this.viewRows = this.visibleRows();
     this.viewPx = this.viewWidth();
     this.refreshLooks();
+    this.prefetchedAt = null;
 
-    // Open at "now" (or the same time of day on other days), half an hour of past on the left.
-    var now = this.app.now;
-    var anchor = now >= axisStart && now <= axisEnd ? now : CT.Days.atMinute(this.day, CT.Days.minuteOfDay(now));
-    if (anchor < axisStart || anchor > axisEnd) anchor = axisStart;
-    this.anchor = anchor;
-    this.scrollX = Math.max(0, px(anchor - axisStart - 30 * MINUTE));
+    var pending = this.pending || {};
+    this.pending = null;
     this.focusRow = Math.min(this.focusRow, this.rows.length - 1);
     if (this.scrollRow > this.focusRow) this.scrollRow = this.focusRow;
-    this.liveMode = this.isToday();
-    this.focusSlot = this.liveMode ? this.verticalSlot(this.focusRow) : this.slotAt(this.focusRow, anchor);
-    if (this.pendingEdge) {
+    var zone = this.zone === 'days' && this.app.inContent() ? 'days' : 'grid';
+    var anchor = pending.anchor !== undefined ? pending.anchor : this.isLiveGrid() ? 'now' : CT.Days.atMinute(this.day, 20 * 60);
+    if (pending.edge) {
       // Scrolled past the previous day's edge: continue at this day's start (or end), in the same row.
       var slots = this.rows[this.focusRow].slots;
       this.liveMode = false;
-      this.focusSlot = this.pendingEdge === 'start' ? 0 : slots.length - 1;
+      this.focusSlot = pending.edge === 'start' ? 0 : slots.length - 1;
       var edgeSlot = slots[this.focusSlot];
-      this.anchor = this.pendingEdge === 'start' ? edgeSlot.start + MINUTE : edgeSlot.end - MINUTE;
-      this.scrollX = this.pendingEdge === 'start' ? 0 : Math.max(0, px(axisEnd - axisStart) - this.viewPx + 20);
-      this.pendingEdge = null;
+      this.anchor = pending.edge === 'start' ? edgeSlot.start + MINUTE : edgeSlot.end - MINUTE;
+      this.scrollX = pending.edge === 'start' ? 0 : Math.max(0, px(axisEnd - axisStart) - this.viewPx + 20);
+    } else if (anchor === 'now') {
+      this.focusNow(pending.top);
+    } else {
+      // Another day: 20:00 (Days.select), half an hour of past on the left.
+      this.anchor = Math.max(axisStart, Math.min(anchor, axisEnd - MINUTE));
+      this.scrollX = Math.max(0, px(this.anchor - axisStart - 30 * MINUTE));
+      this.liveMode = false;
+      this.focusSlot = this.slotAt(this.focusRow, this.anchor);
     }
-    this.zone = this.zone === 'days' && this.app.inContent() ? 'days' : 'grid';
+    this.zone = pending.top ? 'grid' : zone;
     this.applyFocus();
   };
 
@@ -361,7 +406,20 @@
     if (this.focusEl && this.focusEl !== target) this.focusEl.classList.remove('focused');
     if (target) target.classList.add('focused');
     this.focusEl = target;
+    this.highlightChip();
+    this.prefetch(); // before the detail, so the focused image goes ahead of the window
     this.showDetail(slot ? slot.item : null);
+  };
+
+  /** spec/apps.md "Image prefetch": the images around the focus, once it moved more than 1 h or 3 rows. */
+  GuideScreen.prototype.prefetch = function () {
+    if (!this.rows.length) return;
+    var focus = { row: this.focusRow, time: this.anchor };
+    if (!CT.Prefetch.moved(this.prefetchedAt, focus)) return;
+    this.prefetchedAt = focus;
+    var self = this;
+    var rows = this.rows.map(function (row) { return row.slots; });
+    this.app.images.prefetch(CT.Prefetch.window(rows, focus, function (entry) { return self.imageOf(entry); }));
   };
 
   /**
@@ -430,59 +488,68 @@
   GuideScreen.prototype.ctImage = function (entry) {
     var plan = this.ctPlan;
     if (!plan) return '';
-    var bySlug = {};
-    CT.Channels.all.forEach(function (ch) { bySlug[ch.slug] = plan[ch.id] || []; });
-    var match = CT.CtAntenna.programme(entry.channel.name, entry.title, entry.start, entry.end, bySlug);
+    if (!this.ctBySlug || this.ctBySlug.plan !== plan) {
+      var bySlug = {};
+      CT.Channels.all.forEach(function (ch) { bySlug[ch.slug] = plan[ch.id] || []; });
+      this.ctBySlug = { plan: plan, bySlug: bySlug };
+    }
+    var match = CT.CtAntenna.programme(entry.channel.name, entry.title, entry.start, entry.end, this.ctBySlug.bySlug);
     return match && /^https:\/\//.test(match.imageUrl) ? match.imageUrl : '';
   };
 
-  /** Again for the same entry (e.g. the gateway's thumbnail switch changed). */
+  /**
+   * The image request of an entry for the app's ImageLoader, or null: CT's image (also for Anténa ČT channels,
+   * spec/apps.md "ČT images for Anténa ČT channels"), else the gateway thumbnail while thumbnails are on.
+   */
+  GuideScreen.prototype.imageOf = function (entry) {
+    var url = entry.source === 'dvb' ? this.ctImage(entry) : /^https:\/\//.test(entry.imageUrl) ? entry.imageUrl : '';
+    if (url) return { key: 'ct:' + url, kind: 'ct', final: true, url: url };
+    var recordingId = entry.source === 'dvb' ? CT.Thumbs.wanted(this.app.dvbThumbs, CT.ThumbsSwitch.on(), entry) : null;
+    if (!recordingId) return null;
+    return { key: 'gw:' + recordingId, kind: 'gw', final: entry.item.recording.state === 'completed', recordingId: recordingId };
+  };
+
+  /** Again for the same entry (e.g. the gateway's thumbnail switch changed, or the day after midnight). */
   GuideScreen.prototype.refreshDetail = function () {
+    this.prefetchedAt = null;
+    this.prefetch();
     if (this.detailEntry !== undefined) this.showDetail(this.detailEntry);
   };
 
+  /**
+   * Fixed detail layout (spec/apps.md): every line keeps its place whatever the programme, the episode and
+   * status lines stay reserved when empty, so nothing moves while the viewer clicks through cells.
+   */
   GuideScreen.prototype.showDetail = function (entry) {
     var self = this;
-    var image = $('detail-image');
     this.detailEntry = entry || null;
-    clearTimeout(this.thumbTimer);
     if (!entry) {
-      $('detail-title').textContent = '';
-      $('detail-meta').textContent = '';
-      $('detail-description').textContent = '';
+      ['detail-title', 'detail-episode', 'detail-meta', 'detail-status', 'detail-description'].forEach(function (id) {
+        $(id).textContent = '';
+      });
       setDetailImage('', false);
       return;
     }
-    $('detail-title').textContent = entry.title + (entry.subtitle ? ' · ' + entry.subtitle : '');
-    var meta = [entry.channel.name, CT.Days.label(CT.Days.today(entry.start), CT.Days.today(this.app.now)),
-      CT.Days.timeRange(entry.start, entry.end)];
+    $('detail-title').textContent = entry.title;
+    $('detail-episode').textContent = entry.subtitle || '';
+    var meta = [entry.channel.name,
+      CT.Days.label(CT.Days.chipDay(entry.start), CT.Days.today(this.app.now)) + ' ' + CT.Days.timeRange(entry.start, entry.end)];
     if (entry.genre) meta.push(entry.genre);
-    var look = CT.Entries.look(entry, this.app.now);
-    if (look === 'dimmed') meta.push(entry.source === 'dvb' ? CT.DvbMessages.NOT_RECORDED : 'Nedostupné');
     $('detail-meta').textContent = meta.join('  ·  ');
-    $('detail-description').textContent = entry.description;
-    if (entry.source === 'dvb') {
-      // ČT channels on the antenna: CT's official image (spec/apps.md "ČT images for Anténa ČT channels").
-      var ctImage = this.ctImage(entry);
-      if (ctImage) {
-        setDetailImage(ctImage, true);
-        return;
-      }
-      // Anténa: placeholder, then the gateway thumbnail once focus rests (spec/apps.md "Anténa thumbnails").
-      setDetailImage('', true);
-      var recordingId = CT.Thumbs.wanted(this.app.dvbThumbs, CT.ThumbsSwitch.on(), entry);
-      if (!recordingId) return;
-      var final = entry.item.recording.state === 'completed';
-      this.thumbTimer = setTimeout(function () {
-        self.app.loadThumb(recordingId, final).then(function (url) {
-          if (url && self.detailEntry === entry) setDetailImage(url, true);
-        });
-      }, CT.Thumbs.DELAY_MS);
-      return;
-    }
-    // Only https images from the API; nothing is cached by the app.
-    var url = /^https:\/\//.test(entry.imageUrl) ? entry.imageUrl : '';
-    setDetailImage(url, false);
+    var look = CT.Entries.look(entry, this.app.now);
+    $('detail-status').textContent = look === 'dimmed' ? (entry.source === 'dvb' ? CT.DvbMessages.NOT_RECORDED : 'Nedostupné') : '';
+    $('detail-description').textContent = entry.description || '';
+    // Anténa without a CT image: the antenna placeholder until (unless) the gateway thumbnail is there.
+    var placeholder = entry.source === 'dvb';
+    var request = this.imageOf(entry);
+    setDetailImage('', placeholder);
+    if (!request) return;
+    this.app.images.load(request, function (url, status) {
+      if (self.detailEntry !== entry) return;
+      if (url) setDetailImage(url, placeholder);
+      // CT's CDN refused the blob request (network error): let the image element load it as before.
+      else if (request.kind === 'ct' && status === 0) setDetailImage(request.url, placeholder);
+    });
   };
 
   /** Returns false when the key leaves the screen upwards (to the tabs). */
@@ -490,7 +557,7 @@
     if (this.zone === 'days') return this.onDaysKey(key);
     var slot = this.focused();
     if (!slot) {
-      if (key === 'up') this.zone = 'days';
+      if (key === 'up') this.toDays();
       this.applyFocus();
       return true;
     }
@@ -517,7 +584,7 @@
       }
       case 'up':
         if (this.focusRow === 0) {
-          this.zone = 'days';
+          this.toDays();
           break;
         }
         this.focusRow--;
@@ -549,6 +616,13 @@
     return true;
   };
 
+  /** Up from the first row lands on the highlighted chip. */
+  GuideScreen.prototype.toDays = function () {
+    this.zone = 'days';
+    this.dayFocus = Math.max(0, this.days.indexOf(this.chipDay()));
+  };
+
+  /** "Dnes" = the grid containing now, focused on now; any other chip = that day at 20:00 (Days.select). */
   GuideScreen.prototype.onDaysKey = function (key) {
     switch (key) {
       case 'left':
@@ -557,10 +631,12 @@
       case 'right':
         this.dayFocus = Math.min(this.days.length - 1, this.dayFocus + 1);
         break;
-      case 'enter':
+      case 'enter': {
+        var picked = CT.Days.select(this.days[this.dayFocus], this.app.now);
         this.zone = 'grid';
-        this.selectDay(this.days[this.dayFocus]);
+        this.selectDay(picked.day, { anchor: picked.anchor });
         return true;
+      }
       case 'down':
         this.zone = 'grid';
         break;
@@ -573,9 +649,9 @@
     return true;
   };
 
-  /** Called when "Anténa" settings change: rebuild the current day with the new rows. */
+  /** Called when "Anténa" settings change: rebuild the current day with the new rows, at the same time. */
   GuideScreen.prototype.reload = function () {
-    if (this.day) this.selectDay(this.day);
+    if (this.day) this.selectDay(this.day, this.rows.length ? { anchor: this.liveMode ? 'now' : this.anchor } : null);
   };
 
   CT.GuideScreen = GuideScreen;

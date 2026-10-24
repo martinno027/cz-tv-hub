@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -71,15 +72,17 @@ import cz.cztvhub.core.Action
 import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Channels
 import cz.cztvhub.core.CtAntennaMatch
-import cz.cztvhub.core.Programme
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.GuideLayout
 import cz.cztvhub.core.GuideWindow
+import cz.cztvhub.core.ImagePrefetch
+import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
+import cz.cztvhub.core.dvb.RecordingState
 import cz.cztvhub.tv.OfficialAppLauncher
 import cz.cztvhub.tv.R
 import cz.cztvhub.tv.tvApp
@@ -92,12 +95,22 @@ import java.time.LocalDate
 private val DP_PER_MINUTE = 6.dp // 30 min = 180 dp, about two hours on screen
 private val CHANNEL_COLUMN = 112.dp
 private val HEADER_HEIGHT = 24.dp
+/** Title, episode, meta and status lines and the description's lines (see DetailPanel). */
+private val DETAIL_HEIGHT = 120.dp
+private const val DESCRIPTION_LINES = 2
 
-/** Focus link between the detail panel's "Otevřít v iVysílání" button and the grid below it. */
+/**
+ * Focus links of the day strip, the detail panel's "Otevřít v iVysílání" button and the grid (spec/apps.md). The
+ * vertical order is grid ↔ day strip ↔ button: up from the grid's first row lands on the highlighted chip, up from
+ * the strip on the button (when offered), down from the button on the strip, down from the strip in the grid (one
+ * press, although the button sits between them on screen).
+ */
 private class AppButtonLink {
     val button = FocusRequester()
+    /** The day strip's highlighted chip. */
+    val chip = FocusRequester()
     var shown = false
-    /** Cell to return to when leaving the button downwards. */
+    /** The grid's focused cell, where down from the strip returns. */
     var lastCell: FocusRequester = FocusRequester.Default
 }
 
@@ -133,6 +146,10 @@ private class Cell(
 @Stable
 private class GuideSelection {
     var focused by mutableStateOf<Entry?>(null)
+    /** Start of the focused cell (a programme or "Mimo vysílání"): the day strip highlights its calendar day. */
+    var focusedStart by mutableStateOf<Instant?>(null)
+    /** The day strip's highlight while no cell is focused: the picked chip, "Dnes" on open. */
+    var chip by mutableStateOf<LocalDate?>(null)
     var notice by mutableStateOf<String?>(null)
     var choice by mutableStateOf<Selection.Choice?>(null)
 }
@@ -146,9 +163,10 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val selection = remember { GuideSelection() }
     val appButton = remember { AppButtonLink() }
     val currentOnPlay by rememberUpdatedState(onPlay)
-    val onFocus: (Entry?) -> Unit = remember(selection) {
-        { entry ->
+    val onFocus: (Entry?, Instant) -> Unit = remember(selection) {
+        { entry, start ->
             selection.focused = entry
+            selection.focusedStart = entry?.start ?: start
             selection.notice = null
         }
     }
@@ -166,18 +184,36 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val dvbPlans by viewModel.dvbPlans.collectAsStateWithLifecycle()
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
     val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
-    // "Anténa thumbnails": only for the focused programme, when the gateway (dvb) and this TV allow it.
-    val thumbnailOf: (DvbEvent) -> Pair<String, Map<String, String>>? =
-        remember(dvb?.thumbnails, thumbnailsOnTv) { { event -> viewModel.thumbnail(event) } }
+    val today = Days.today(now)
 
     // "Across days" (spec/apps.md): left/right past a row's end opens the neighbouring day.
     var edge by remember { mutableStateOf<DayEdge?>(null) }
+    // Where a picked chip opens its grid; null = now (as on every open of the guide).
+    var anchorAt by remember { mutableStateOf<Instant?>(null) }
+    // Picking a chip rebuilds the grid even when the day stays (e.g. "Dnes" from the grid containing now).
+    var generation by remember { mutableIntStateOf(0) }
+    // After picking a chip, focus moves into the new grid onto its target cell (once).
+    var focusPicked by remember { mutableStateOf(false) }
     val onEdge: (String, Boolean) -> Unit = { rowKey, forward ->
-        Days.adjacentGuideDay(day, viewModel.today, forward)?.let { next ->
+        Days.adjacentGuideDay(day, today, forward)?.let { next ->
             edge = DayEdge(rowKey, atEnd = !forward)
+            anchorAt = null
             selection.focused = null
+            selection.focusedStart = null
+            selection.chip = next
             viewModel.selectDay(next)
         }
+    }
+    val onChip: (LocalDate) -> Unit = { chip ->
+        val target = Days.select(chip, Instant.now())
+        edge = null
+        anchorAt = target.anchor
+        generation++
+        focusPicked = true
+        selection.focused = null
+        selection.focusedStart = null
+        selection.chip = chip
+        viewModel.selectDay(target.day)
     }
 
     val context = LocalContext.current
@@ -185,15 +221,33 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         { OfficialAppLauncher.open(context)?.let { selection.notice = it } }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        DayPicker(viewModel.today, day, onSelect = { edge = null; selection.focused = null; viewModel.selectDay(it) })
-        Spacer(Modifier.height(8.dp))
-        // "ČT images for Anténa ČT channels": the day's CT schedule by slug, for the focused Anténa programme only.
-        val ctBySlug = remember(plans[day]) {
-            val ready = plans[day] as? Load.Ready
-            ready?.value?.let { plan -> Channels.all.associate { it.slug to plan[it.id].orEmpty() } }.orEmpty()
+    // "ČT images for Anténa ČT channels": the day's CT schedule by slug.
+    val ctBySlug = remember(plans[day]) {
+        val ready = plans[day] as? Load.Ready
+        ready?.value?.let { plan -> Channels.all.associate { it.slug to plan[it.id].orEmpty() } }.orEmpty()
+    }
+    // Detail image priority: CT's image (ČT channels on the antenna too) → gateway thumbnail, when the gateway
+    // (dvb) and this TV allow it → none (the antenna placeholder).
+    val imageOf: (Entry) -> ImageRequest? = remember(dvb?.thumbnails, thumbnailsOnTv, ctBySlug) {
+        { entry ->
+            when (entry) {
+                is CtEntry -> entry.imageUrl.takeIf { it.startsWith("https://") }?.let { ImageRequest(it) }
+                is DvbEntry -> CtAntennaMatch.programme(entry.channel.name, entry.title, entry.start, entry.end, ctBySlug)
+                    ?.imageUrl?.takeIf { it.startsWith("https://") }?.let { ImageRequest(it) }
+                    ?: viewModel.thumbnail(entry.event)?.let { (url, headers) ->
+                        ImageRequest(url, headers, gateway = true,
+                            stillRecording = entry.event.recording?.state == RecordingState.RECORDING)
+                    }
+            }
         }
-        DetailPanel(selection, now, appButton, onOpenApp, thumbnailOf, ctBySlug)
+    }
+    val scope = rememberCoroutineScope()
+    val images = remember { GuideImages(context.tvApp.images, scope) }
+
+    Column(Modifier.fillMaxSize()) {
+        DayPicker(today, day, selection, appButton, onSelect = onChip)
+        Spacer(Modifier.height(8.dp))
+        DetailPanel(selection, now, appButton, onOpenApp, images, imageOf)
         Spacer(Modifier.height(8.dp))
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
@@ -214,10 +268,25 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                 } else if (rows.all { it.entries.isEmpty() }) {
                     CenteredMessage(stringResource(R.string.empty_day))
                 } else {
-                    key(day) {
+                    // "Image prefetch": a new window when the focus moved more than 1 h or 3 rows from the last one.
+                    val onFocusAt: (Int, Instant) -> Unit = remember(rows, imageOf) {
+                        var last: ImagePrefetch.Point? = null
+                        { row, time ->
+                            val point = ImagePrefetch.Point(row, time)
+                            if (ImagePrefetch.moved(last, point)) {
+                                last = point
+                                val entries = rows.map { it.entries }
+                                images.prefetch(
+                                    ImagePrefetch.window(entries, point).mapNotNull { imageOf(entries[it.row][it.index]) },
+                                )
+                            }
+                        }
+                    }
+                    key(day, generation) {
                         EpgGrid(
                             rows = rows, day = day, now = now, appButton = appButton, onFocus = onFocus, onSelect = onSelect,
-                            startAt = edge, onStarted = { edge = null }, onEdge = onEdge,
+                            anchorAt = anchorAt, startAt = edge, onStarted = { edge = null }, onEdge = onEdge,
+                            onFocusAt = onFocusAt, focusOnOpen = focusPicked, onFocusedOnOpen = { focusPicked = false },
                         )
                     }
                 }
@@ -254,9 +323,21 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     }
 }
 
+/**
+ * The day strip. It highlights the calendar day of the focused programme's start (`chipDay`; reading the focus here
+ * keeps the grid out of it), and entering it from below lands on that chip.
+ */
 @Composable
-private fun DayPicker(today: LocalDate, selected: LocalDate, onSelect: (LocalDate) -> Unit) {
-    val selectedRequester = remember { FocusRequester() }
+private fun DayPicker(
+    today: LocalDate,
+    gridDay: LocalDate,
+    selection: GuideSelection,
+    appButton: AppButtonLink,
+    onSelect: (LocalDate) -> Unit,
+) {
+    val days = Days.guideDays(today)
+    val selected = selection.focusedStart?.let { Days.highlightedChip(it, gridDay, today) } ?: selection.chip ?: today
+    val selectedRequester = appButton.chip
     var inside by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Row(
@@ -270,11 +351,16 @@ private fun DayPicker(today: LocalDate, selected: LocalDate, onSelect: (LocalDat
             .focusGroup(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Days.guideDays(today).forEach { day ->
+        days.forEach { day ->
             val isSelected = day == selected
             Surface(
                 onClick = { onSelect(day) },
-                modifier = if (isSelected) Modifier.focusRequester(selectedRequester) else Modifier,
+                modifier = (if (isSelected) Modifier.focusRequester(selectedRequester) else Modifier)
+                    // Up from the strip: the detail panel's button when it is offered; down: the grid, past the button.
+                    .focusProperties {
+                        up = if (appButton.shown) appButton.button else FocusRequester.Default
+                        down = appButton.lastCell
+                    },
                 shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(18.dp)),
                 scale = ClickableSurfaceDefaults.scale(focusedScale = 1.05f),
                 colors = ClickableSurfaceDefaults.colors(
@@ -295,81 +381,98 @@ private fun DayPicker(today: LocalDate, selected: LocalDate, onSelect: (LocalDat
     }
 }
 
+/**
+ * The focused programme's detail. Fixed layout (spec/apps.md): constant height, and every element keeps its place
+ * whatever the programme, so nothing moves while the viewer clicks through cells. The episode and status lines and
+ * the description's lines are reserved even when empty; the "Otevřít v iVysílání" button keeps its place top right
+ * (invisible and unfocusable when not offered).
+ */
 @Composable
 private fun DetailPanel(
     selection: GuideSelection,
     now: Instant,
     appButton: AppButtonLink,
     onOpenApp: () -> Unit,
-    thumbnailOf: (DvbEvent) -> Pair<String, Map<String, String>>?,
-    ctBySlug: Map<String, List<Programme>>,
+    images: GuideImages,
+    imageOf: (Entry) -> ImageRequest?,
 ) {
     val focused = selection.focused
     val notice = selection.notice
     appButton.shown = focused is CtEntry && !now.isBefore(focused.start)
-    Row(Modifier.fillMaxWidth().height(118.dp)) {
-        if (focused == null) return@Row
+    Row(Modifier.fillMaxWidth().height(DETAIL_HEIGHT)) {
         val p = focused
         val imageModifier = Modifier
-            .width(210.dp)
+            .width(DETAIL_HEIGHT * 16 / 9)
             .fillMaxHeight()
-            .background(Palette.surfaceDim, RoundedCornerShape(8.dp))
-        when (p) {
-            is CtEntry -> RemoteImage(p.imageUrl, imageModifier)
-            is DvbEntry -> {
-                // Priority: CT's official image (ČT channels) → gateway thumbnail → antenna placeholder.
-                val ctImage = remember(p.event.id, p.channel.name, ctBySlug) {
-                    CtAntennaMatch.programme(p.channel.name, p.event.title, p.event.start, p.event.end, ctBySlug)
-                        ?.imageUrl?.takeIf { it.startsWith("https://") }
-                }
-                if (ctImage != null) {
-                    RemoteImage(ctImage, imageModifier)
-                } else {
-                    AntennaImage(remember(p.event.id, thumbnailOf) { thumbnailOf(p.event) }, imageModifier)
-                }
-            }
+            .clip(RoundedCornerShape(8.dp))
+        if (p != null) {
+            GuideImage(images, remember(p, imageOf) { imageOf(p) }, antenna = p is DvbEntry, modifier = imageModifier)
+        } else {
+            Spacer(imageModifier)
         }
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
-            Text(p.title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (p.subtitle.isNotBlank()) {
-                Text(
-                    p.subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Palette.textDim,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            val meta = listOf(p.channelName, Days.timeRange(p.start, p.end), p.genre).filter { it.isNotBlank() }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    notice ?: stateLabel(p, now),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (notice != null) Palette.nowLine else Palette.accent,
-                )
-            }
-            Spacer(Modifier.height(4.dp))
+            val line = Modifier.fillMaxWidth()
             Text(
-                p.description,
+                p?.title.orEmpty(),
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = line,
+            )
+            Text(
+                p?.subtitle.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Palette.textDim,
+                minLines = 1,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = line,
+            )
+            // "Today follows the clock": a programme airing at 0:10 says "Dnes 0:10" once midnight has passed.
+            val meta = p?.let {
+                val day = Days.label(Days.chipDay(it.start), Days.today(now))
+                listOf(it.channelName, "$day ${Days.timeRange(it.start, it.end)}", it.genre).filter(String::isNotBlank)
+            }.orEmpty()
+            Text(
+                meta.joinToString("  ·  "),
+                style = MaterialTheme.typography.bodyMedium,
+                minLines = 1,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = line,
+            )
+            Text(
+                notice ?: p?.let { stateLabel(it, now) }.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (notice != null) Palette.nowLine else Palette.accent,
+                minLines = 1,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = line,
+            )
+            Text(
+                p?.description.orEmpty(),
                 style = MaterialTheme.typography.bodySmall,
                 color = Palette.textDim,
-                maxLines = 3,
+                minLines = DESCRIPTION_LINES,
+                maxLines = DESCRIPTION_LINES,
                 overflow = TextOverflow.Ellipsis,
+                modifier = line,
             )
         }
         // For programmes this app may not play (e.g. DRM-only), offer CT's official app.
-        if (appButton.shown) {
-            Spacer(Modifier.width(16.dp))
-            Button(
-                onClick = onOpenApp,
-                modifier = Modifier
-                    .focusRequester(appButton.button)
-                    .focusProperties { down = appButton.lastCell },
-            ) { Text(stringResource(R.string.open_ivysilani)) }
-        }
+        Spacer(Modifier.width(16.dp))
+        Button(
+            onClick = { if (appButton.shown) onOpenApp() },
+            modifier = Modifier
+                .alpha(if (appButton.shown) 1f else 0f)
+                .focusRequester(appButton.button)
+                .focusProperties {
+                    canFocus = appButton.shown
+                    down = appButton.chip
+                },
+        ) { Text(stringResource(R.string.open_ivysilani)) }
     }
 }
 
@@ -418,12 +521,17 @@ private fun EpgGrid(
     day: LocalDate,
     now: Instant,
     appButton: AppButtonLink,
-    onFocus: (Entry?) -> Unit,
+    onFocus: (entry: Entry?, start: Instant) -> Unit,
     onSelect: (Entry) -> Unit,
+    anchorAt: Instant? = null,
     startAt: DayEdge? = null,
     onStarted: () -> Unit = {},
     onEdge: (rowKey: String, forward: Boolean) -> Unit = { _, _ -> },
+    onFocusAt: (row: Int, time: Instant) -> Unit = { _, _ -> },
+    focusOnOpen: Boolean = false,
+    onFocusedOnOpen: () -> Unit = {},
 ) {
+    val focusAt by rememberUpdatedState(onFocusAt)
     val plan = rows // remember() key
     // Opened by scrolling past the previous/next day's edge: start on that row's first/last cell.
     val edgeStart = remember(plan) { startAt }
@@ -432,12 +540,14 @@ private fun EpgGrid(
     val axisStart = axis.first
     val axisEnd = axis.second
     val totalWidth = durationToDp(axisStart, axisEnd) + 8.dp
-    // Open at "now" on the current day, at the same time of day on other days.
+    // Open at the picked chip's moment (`Days.select`), else at "now" on the grid containing it (every open of the
+    // guide), else at the same time of day.
     val anchor = remember(plan) {
         val current = Instant.now()
         val sameTimeOfDay = day.atTime(current.atZone(Days.ZONE).toLocalTime())
             .atZone(Days.ZONE).toInstant()
-        val candidate = if (current in axisStart..axisEnd) current else sameTimeOfDay
+        val candidate = anchorAt?.takeIf { it in axisStart..axisEnd }
+            ?: if (current in axisStart..axisEnd) current else sameTimeOfDay
         if (candidate.isBefore(axisStart) || candidate.isAfter(axisEnd)) axisStart else candidate
     }
     val cellRows = remember(plan) {
@@ -477,12 +587,12 @@ private fun EpgGrid(
     }
     // Plain memory, not state (nothing renders from it): the focused cell and the time cursor
     // that up/down keep, so a column of the guide can be walked without drifting.
-    // "Live column first" (spec/apps.md): on today's guide up/down walk the programmes airing now until
-    // the first left/right (a new plan, i.e. guide opened or today reloaded, starts it again), and
-    // always from a programme that is airing now.
+    // "Live column first" (spec/apps.md): on the grid containing now (the broadcast day, so after midnight the
+    // previous date's grid) up/down walk the programmes airing now from the open at now until the first left/right
+    // (a new plan, i.e. guide opened or the day reloaded, starts it again), and always from a programme airing now.
     val nav = remember(plan) {
-        // A day change ends "Live column first".
-        GridNav(cursor = opensAt, live = edgeStart == null && Instant.now() in axisStart..axisEnd)
+        // A day change, or a chip opening the grid at 20:00, starts without it.
+        GridNav(cursor = opensAt, live = edgeStart == null && anchorAt == null && Instant.now() in axisStart..axisEnd)
     }
     val scroll = rememberScrollState()
     val density = LocalDensity.current
@@ -513,15 +623,22 @@ private fun EpgGrid(
     }
 
     LaunchedEffect(plan) {
+        // A rebuilt grid has new cells: down from the day strip lands on its anchor until a cell is focused.
+        if (nav.last == null) appButton.lastCell = anchorRequester
+        // "Image prefetch": the window around where the grid opens, before focus enters it.
+        if (anchorRow < cellRows.size) focusAt(anchorRow, opensAt)
         snapshotFlow { scroll.maxValue }.first { it in 1 until Int.MAX_VALUE }
         val x = with(density) { durationToDp(axisStart, opensAt.minusSeconds(30 * 60)).toPx() }
         scroll.scrollTo(x.toInt().coerceAtLeast(0))
-        if (edgeStart != null) {
-            // The previous day's grid (and its focus) is gone: focus the edge cell of the new day.
+        if (edgeStart != null || focusOnOpen) {
+            // The previous day's grid (and its focus) is gone, or a chip was picked: focus the target cell.
             entered = true
             for (attempt in 1..5) {
                 withFrameNanos { }
-                if (runCatching { anchorRequester.requestFocus() }.isSuccess) break
+                if (runCatching { anchorRequester.requestFocus() }.isSuccess) {
+                    if (focusOnOpen) onFocusedOnOpen()
+                    break
+                }
             }
         }
     }
@@ -596,9 +713,9 @@ private fun EpgGrid(
                             if (nav.row < 0) return@onPreviewKeyEvent false
                             var next = nav.row + step
                             while (next in cellRows.indices && cellRows[next].second.isEmpty()) next += step
-                            // Up from the top row: the detail panel's button if shown, else the day chips.
-                            if (next < 0 && appButton.shown) {
-                                return@onPreviewKeyEvent runCatching { appButton.button.requestFocus() }.isSuccess
+                            // Up from the top row: the highlighted day chip, never the detail panel's button first.
+                            if (next < 0) {
+                                return@onPreviewKeyEvent runCatching { appButton.chip.requestFocus() }.isSuccess
                             }
                             // From a programme airing now: the next row's airing programme too.
                             val moment = GuideLayout.verticalMoment(nav.live, nav.last?.slot, Instant.now(), nav.cursor)
@@ -646,7 +763,9 @@ private fun EpgGrid(
                                                 )
                                                 nav.cursor = maxOf(cell.slot.start, visibleStart).plusSeconds(60)
                                             }
-                                            onFocus(p)
+                                            onFocus(p, cell.slot.start)
+                                            val at = nav.cursor
+                                            focusAt(rowIndex, if (at in cell.slot.start..cell.slot.end) at else cell.slot.start)
                                         },
                                         onClick = { if (p != null) onSelect(p) },
                                     )

@@ -119,6 +119,17 @@ public struct DVBStatus: Sendable, Equatable {
 }
 
 /// "Anténa thumbnails" (spec/apps.md): which recording's still the guide detail may show.
+public enum DVBThumbnail: Sendable, Equatable {
+    case image(Data)
+    /// 404: no thumbnail for this recording.
+    case missing
+    /// 503: the gateway's ffmpeg slots are busy; ask again after `retryAfter` seconds, never remembered as missing.
+    case busy(retryAfter: TimeInterval)
+    case failed
+
+    public static let defaultRetryAfter: TimeInterval = 5
+}
+
 public enum AntennaThumbnails {
     /// Recording id to load, or nil: only completed/recording entries, only when both the gateway
     /// and this TV allow thumbnails.
@@ -273,12 +284,19 @@ public struct DVBClient: Sendable {
         return try AdBreaks.parse(status: response.status, body: response.body)
     }
 
-    /// One still of a recording as JPEG, or nil when the gateway has none (404) or it is not an image.
+    /// One still of a recording as JPEG; `.missing` when the gateway has none (404, not asked again for a
+    /// while, spec/apps.md "Image prefetch"), `.busy` for a 503 (with `Retry-After`, default 5 s), `.failed` for
+    /// any other answer or one that is not an image.
     /// Memory only: the caller passes a transport without a disk cache (spec/dvb-gateway.md "Thumbnails").
-    public func thumbnail(recordingID: String) async throws -> Data? {
+    public func thumbnail(recordingID: String) async throws -> DVBThumbnail {
         let response = try await get("/dvb/recording/\(escape(recordingID))/thumb.jpg")
-        guard response.status == 200, response.body.starts(with: [0xFF, 0xD8]) else { return nil }
-        return response.body
+        if response.status == 404 { return .missing }
+        if response.status == 503 {
+            let seconds = response.headers["retry-after"].flatMap { TimeInterval($0.trimmingCharacters(in: .whitespaces)) }
+            return .busy(retryAfter: max(1, seconds ?? DVBThumbnail.defaultRetryAfter))
+        }
+        guard response.status == 200, response.body.starts(with: [0xFF, 0xD8]) else { return .failed }
+        return .image(response.body)
     }
 
     public func liveURL(channelID: String) -> URL { config.url("/dvb/live/\(escape(channelID)).m3u8") }
@@ -346,8 +364,8 @@ public actor AntennaStore {
 
     public func epg(for day: BroadcastDay) async throws -> EPG {
         let now = clock()
-        let today = BroadcastDay(containing: now)
-        if let hit = epgCache[day], day < today || now.timeIntervalSince(hit.fetchedAt) < todayMaxAge {
+        // Until 05:00 the guide shows the previous broadcast day, whose recordings still change.
+        if let hit = epgCache[day], day < GuideDays.openDay(now: now) || now.timeIntervalSince(hit.fetchedAt) < todayMaxAge {
             return hit.epg
         }
         let epg = try await client.epg(day: day)

@@ -6,7 +6,8 @@ import java.time.LocalDate
 
 /**
  * In-memory schedule cache, one entry per broadcast day (all channels in one request).
- * Today's and future days are refetched after [freshFor]; past days never change.
+ * The broadcast day on air (`Days.openDay`, also after midnight) and later days are refetched after [freshFor];
+ * earlier days never change.
  * A failed day is not cached, so it can be retried without breaking the other days.
  */
 class ScheduleRepository(
@@ -24,7 +25,8 @@ class ScheduleRepository(
         val now = clock()
         synchronized(cache) {
             cache[day]?.let { entry ->
-                val past = day.isBefore(Days.today(now))
+                // The broadcast day on air is current too: after midnight it is the previous date.
+                val past = day.isBefore(Days.openDay(now))
                 if (past || Duration.between(entry.fetchedAt, now) < freshFor) return entry.plan
             }
         }

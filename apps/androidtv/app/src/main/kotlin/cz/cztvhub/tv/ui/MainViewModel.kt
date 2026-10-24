@@ -83,9 +83,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _onAir = MutableStateFlow<Load<OnAirMap>>(Load.Loading)
     val onAir: StateFlow<Load<OnAirMap>> = _onAir.asStateFlow()
 
-    val today: LocalDate get() = Days.today(_now.value)
-
-    private val _selectedDay = MutableStateFlow(Days.today(Instant.now()))
+    /** The broadcast day the guide shows; every open starts on the one containing now (`Days.openDay`). */
+    private val _selectedDay = MutableStateFlow(Days.openDay(Instant.now()))
     val selectedDay: StateFlow<LocalDate> = _selectedDay.asStateFlow()
 
     private val _plans = MutableStateFlow<Map<LocalDate, Load<DayPlan>>>(emptyMap())
@@ -95,7 +94,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     var initialFocusDone = false
 
     private var dayJob: Job? = null
-    private var pickedInitialDay = false
 
     init {
         viewModelScope.launch {
@@ -165,6 +163,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Every open of the guide (spec/apps.md): the grid of the broadcast day containing now, also 00:00–05:00. */
+    fun openGuide() {
+        _now.value = Instant.now()
+        selectDay(Days.openDay(_now.value))
+    }
+
     fun selectDay(day: LocalDate, force: Boolean = false) {
         _selectedDay.value = day
         loadDvbDay(day)
@@ -189,16 +193,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             if (result is Load.Ready || showLoading) _plans.update { it + (day to result) }
-            maybeStartOnYesterday(day, result)
         }
-    }
-
-    /** After midnight the programme on air still belongs to yesterday's broadcast day. */
-    private fun maybeStartOnYesterday(day: LocalDate, result: Load<DayPlan>) {
-        if (pickedInitialDay) return
-        pickedInitialDay = true
-        val plan = (result as? Load.Ready)?.value ?: return
-        val firstStart = plan.values.flatten().minOfOrNull { it.start } ?: return
-        if (day == today && _now.value.isBefore(firstStart)) selectDay(day.minusDays(1))
     }
 }

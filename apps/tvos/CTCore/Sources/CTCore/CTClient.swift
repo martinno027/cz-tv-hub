@@ -3,10 +3,13 @@ import Foundation
 public struct HTTPResponse: Sendable {
     public let status: Int
     public let body: Data
+    /// Header fields, names lowercased.
+    public let headers: [String: String]
 
-    public init(status: Int, body: Data) {
+    public init(status: Int, body: Data, headers: [String: String] = [:]) {
         self.status = status
         self.body = body
+        self.headers = Dictionary(headers.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { $1 })
     }
 }
 
@@ -32,7 +35,12 @@ public struct URLSessionTransport: HTTPTransport {
 
     public func send(_ request: URLRequest) async throws -> HTTPResponse {
         let (data, response) = try await session.data(for: request)
-        return HTTPResponse(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
+        let http = response as? HTTPURLResponse
+        var headers: [String: String] = [:]
+        for (name, value) in http?.allHeaderFields ?? [:] {
+            if let name = name as? String, let value = value as? String { headers[name] = value }
+        }
+        return HTTPResponse(status: http?.statusCode ?? 0, body: data, headers: headers)
     }
 }
 

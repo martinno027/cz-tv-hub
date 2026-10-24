@@ -67,7 +67,12 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         if (tab != 2 || settingsSection == null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TabRow(selectedTabIndex = tab) {
                 tabs.forEachIndexed { index, title ->
-                    Tab(selected = tab == index, onFocus = { tab = index }, onClick = { tab = index }) {
+                    val open = {
+                        // Every open of the guide shows now (spec/apps.md), whatever day it showed before.
+                        if (index == 1 && tab != 1) viewModel.openGuide()
+                        tab = index
+                    }
+                    Tab(selected = tab == index, onFocus = open, onClick = open) {
                         Text(
                             title,
                             style = MaterialTheme.typography.titleMedium,

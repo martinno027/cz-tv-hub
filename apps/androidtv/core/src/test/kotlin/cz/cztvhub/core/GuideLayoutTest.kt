@@ -117,5 +117,8 @@ class GuideLayoutTest {
         assertEquals(cursor, GuideLayout.verticalMoment(live = false, from = null, now = now, cursor = cursor))
         // the end is exclusive: a programme that just ended is not airing
         assertEquals(cursor, GuideLayout.verticalMoment(false, airing, t("21:00"), cursor))
+        // a slot pushed right by an overlap: its programme is still airing
+        val pushed = GuideLayout.Slot(t("20:50"), t("21:30"), p("o", "20:40", "21:30"))
+        assertEquals(t("20:45"), GuideLayout.verticalMoment(false, pushed, t("20:45"), cursor))
     }
 }

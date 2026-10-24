@@ -127,9 +127,9 @@ struct ServerSettingsSection: View {
                     Text(statusText).font(.callout)
                 }
 
-                if model.gateway != nil, model.thumbnails.gatewayAllows {
-                    @Bindable var thumbnails = model.thumbnails
-                    Toggle(isOn: $thumbnails.tvAllows) {
+                if model.gateway != nil, model.images.gatewayAllows {
+                    @Bindable var images = model.images
+                    Toggle(isOn: $images.tvAllows) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Náhledy anténních pořadů")
                             Text("Snímek z nahrávky v detailu TV průvodce. Jen v paměti, nic se neukládá.")
@@ -191,7 +191,7 @@ struct ServerSettingsSection: View {
         do {
             let status = try await DVBClient(config: config).status()
             model.setGateway(config)
-            await model.thumbnails.refreshStatus(force: true)
+            await model.images.refreshStatus(force: true)
             let tuners = status.tuners.count
             statusText = status.tvheadendReachable
                 ? "Uloženo. Brána odpovídá · tunery: \(tuners) · záznamy \(status.retentionDays) dny."

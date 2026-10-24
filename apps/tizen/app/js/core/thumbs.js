@@ -1,15 +1,14 @@
 /*
  * "Anténa" thumbnails in the guide detail (spec/apps.md "Anténa thumbnails", spec/dvb-gateway.md "Thumbnails",
  * approved 2026-10-23): one still per recording from the gateway, shown only when the gateway and this TV both
- * have them on. Kept in memory only (object URLs of blobs; evicted ones are revoked), never in any storage.
+ * have them on. Kept in memory only (object URLs of blobs; evicted ones are revoked), never in any storage;
+ * fetched around the guide focus by CT.ImageLoader (prefetch.js).
  */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
 
   var Thumbs = {
-    /** Focus has to rest this long on a programme before its thumbnail is asked for. */
-    DELAY_MS: 300,
     MAX_ENTRIES: 20,
     /** A growing recording's still is asked again after this (the gateway refreshes early ones). */
     REFRESH_MS: 60 * 1000,
@@ -33,13 +32,16 @@
   };
 
   /**
-   * Small LRU of object URLs: get(id, now) → url | null; put(id, url, now, final). `revoke(url)` is called for
-   * every URL that leaves the cache (eviction, replacement, clear), so blobs do not pile up in memory.
+   * Small LRU of object URLs: get(id, now) → url | null; put(id, url, now, final, size). At most `max` entries
+   * and `maxBytes` of blobs (sizes as given to put). `revoke(url)` is called for every URL that leaves the
+   * cache (eviction, replacement, clear), so blobs do not pile up in memory.
    */
-  function ThumbCache(max, revoke) {
+  function ThumbCache(max, revoke, maxBytes) {
     this.max = max || Thumbs.MAX_ENTRIES;
+    this.maxBytes = maxBytes || Infinity;
+    this.bytes = 0;
     this.revoke = revoke || function () {};
-    this.items = []; // [{id, url, at, final}], oldest first
+    this.items = []; // [{id, url, at, final, size}], oldest first
   }
 
   ThumbCache.prototype.indexOf = function (id) {
@@ -57,20 +59,31 @@
     return item.url;
   };
 
-  ThumbCache.prototype.put = function (id, url, now, final) {
+  ThumbCache.prototype.put = function (id, url, now, final, size) {
     var i = this.indexOf(id);
     if (i >= 0) {
       var old = this.items.splice(i, 1)[0];
+      this.bytes -= old.size;
       if (old.url !== url) this.revoke(old.url);
     }
-    this.items.push({ id: id, url: url, at: now, final: !!final });
-    while (this.items.length > this.max) this.revoke(this.items.shift().url);
+    this.items.push({ id: id, url: url, at: now, final: !!final, size: size || 0 });
+    this.bytes += size || 0;
+    while (this.items.length > 1 && (this.items.length > this.max || this.bytes > this.maxBytes)) {
+      var gone = this.items.shift();
+      this.bytes -= gone.size;
+      this.revoke(gone.url);
+    }
   };
 
-  ThumbCache.prototype.clear = function () {
+  /** Drops every entry, or only those whose id `match(id)` accepts. */
+  ThumbCache.prototype.clear = function (match) {
     var self = this;
-    this.items.forEach(function (item) { self.revoke(item.url); });
-    this.items = [];
+    this.items = this.items.filter(function (item) {
+      if (match && !match(item.id)) return true;
+      self.bytes -= item.size;
+      self.revoke(item.url);
+      return false;
+    });
   };
 
   CT.Thumbs = Thumbs;

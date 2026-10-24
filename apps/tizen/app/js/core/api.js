@@ -176,7 +176,8 @@
         xhr.responseType = 'blob';
         Object.keys(request.headers || {}).forEach(function (k) { xhr.setRequestHeader(k, request.headers[k]); });
         xhr.onload = function () {
-          resolve({ status: xhr.status, blob: xhr.response, type: xhr.getResponseHeader('Content-Type') || '' });
+          resolve({ status: xhr.status, blob: xhr.response, type: xhr.getResponseHeader('Content-Type') || '',
+            retryAfter: xhr.getResponseHeader('Retry-After') || '' });
         };
         xhr.onerror = function () { reject(new Error('network error')); };
         xhr.ontimeout = function () { reject(new Error('timeout')); };

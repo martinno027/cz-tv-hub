@@ -247,20 +247,24 @@ One still per recording so the viewer sees what a programme is ("it does not hav
 on"). Implemented in `src/cztvhub/dvb/thumbs.py`.
 - `GET /dvb/recording/<dvr entry uuid>/thumb.jpg` (same key as all `/dvb/*`) → `200 image/jpeg`,
   `Cache-Control: private, no-store`. `404` when thumbnails are off, the entry is unknown, not `completed`/`recording`,
-  its channel is not offered, or no frame could be made yet.
+  its channel is not offered, or no frame could be made yet. `503` + `Retry-After: 5` (JSON `{"error": "Náhledy se
+  právě připravují"}`) when both ffmpeg slots stayed busy for 10 s: try again later, never remembered as missing.
 - Source: the recording only (`/dvrfile` byte range, at most 2 MB), never a live tuner subscription, never ČT internet
   streams. Frame position: `t = min(300 s, 20 % of the recorded duration)` after the start, as a byte offset from
   the file size per recorded second. ffmpeg reads stdin and writes one JPEG to stdout (`-frames:v 1`, width ≤ 480,
   fixed quality); no file outputs. No client parameters (no seek, no series).
-- Cache: memory only, at most 200 entries; an entry is kept for the life of the recording once `t` reached 300 s or
-  the recording finished, else refreshed after 60 s. Every request checks the DVR entry first (cache hit included);
-  a gone entry drops its cache entry. Switching thumbnails off clears the cache. At most 2 ffmpeg at a time,
+- Cache: memory only, at most 600 entries (the apps prefetch around the guide focus, spec/apps.md "Image prefetch"); an entry is kept for the life of the recording once `t` reached 300 s or
+  the recording finished, else refreshed after 60 s. Every request checks the DVR entry first (cache hit included) against TVHeadend's DVR
+  list, which is fetched at most every 5 s and shared by all requests; a gone entry drops its cache entry (so a
+  deleted recording stops being served within 5 s). Requests for the same entry at the same time share one ffmpeg run. Switching thumbnails off clears the cache. At most 2 ffmpeg at a time,
   10 s timeout.
 - Household switch: on the `/admin` page ("Náhledy pořadů", default on), stored in `<state dir>/settings.json`
   (`/var/lib/cztvhub`, the service's StateDirectory). `GET /dvb/status` adds `"thumbnails": true|false`.
 - Apps: the guide detail of an Anténa programme with `recording.state` `completed`/`recording` shows the thumbnail
   when the gateway reports `thumbnails: true` and the TV's own switch (Nastavení → Server, "Náhledy anténních
   pořadů", default on) is on; otherwise the antenna placeholder. Images are kept in memory only (no disk cache).
+  The apps ask for the focused programme first, then prefetch a bounded window around the focus (3 rows above,
+  8 below, ±3 h), nearest first, at most 2 requests at a time (spec/apps.md "Image prefetch"); never the whole guide.
 
 ## App behaviour for "Anténa" programmes
 Channels appear as a second group "Anténa" in Živě and in the TV guide (rows after the CT internet channels).
