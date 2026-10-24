@@ -20,6 +20,9 @@ Can go wrong: running it from the repo root instead of `server/` finds no tests 
 
 A fake TVHeadend with synthetic HEVC test streams and fake recordings, for developing the gateway and the apps
 without a tuner. `--channels 60` generates a big guide; `--tuners 1` helps to test "tuner busy".
+Its programmes vary like real broadcasts: no episode line, a short one or one too long for the line, a long
+description, none, and every sixth programme with neither description nor summary (the case that moved the Apple TV
+guide detail, T09).
 
 Can go wrong: the default port is 9981. If 9981 is already taken (for example by an SSH tunnel to a real
 TVHeadend), the fake fails to start — and a gateway configured for 9981 then talks to whatever owns that port. Pick

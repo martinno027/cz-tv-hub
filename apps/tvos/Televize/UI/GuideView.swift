@@ -1033,7 +1033,10 @@ private struct GuideCell: View {
 /// Fixed layout (spec/apps.md): constant height, every line in a constant place whatever the programme, so nothing
 /// moves while the viewer clicks through cells. Empty episode / status lines and short descriptions keep their space.
 private struct EntryDetail: View {
-    static let height: CGFloat = 203
+    /// Tall enough for the whole text column (title, episode, meta, status, two description lines ≈ 228 pt at the
+    /// tvOS text sizes). At 203 (the image height) the column overflowed whenever a programme had a description and
+    /// SwiftUI centred the overflow, so every detail with a description sat ~12 pt higher than one without (T09).
+    static let height: CGFloat = 236
     static let imageSize = CGSize(width: 360, height: 203)
 
     let entry: GuideEntry?
@@ -1068,12 +1071,13 @@ private struct EntryDetail: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .foregroundStyle(state == .airing ? .red : (state == .buffer || state == .archive ? .green : .secondary))
-                    Text(description(entry))
+                    // An empty Text takes no height even with reservesSpace: keep the two lines with a space.
+                    Text(description(entry).isEmpty ? " " : description(entry))
                         .font(.system(size: 25))
                         .foregroundStyle(.secondary)
                         .lineLimit(2, reservesSpace: true)
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
+                .frame(height: Self.height, alignment: .top)
                 Spacer(minLength: 0)
                 // For CT programmes we cannot play (DRM-only ones show CT's slate in our stream). Its place is
                 // kept when there is none, so the text beside it never changes width.
@@ -1085,7 +1089,7 @@ private struct EntryDetail: View {
                     .disabled(!showsButton)
                     .accessibilityHidden(!showsButton)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .topLeading)
             // Vertical order grid ↔ day strip ↔ this button: up from any chip reaches it, down from it the strip.
             .focusSection()
         } else {
