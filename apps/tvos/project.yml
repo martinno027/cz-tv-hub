@@ -60,7 +60,21 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
         # The version stamp below reads git (outside the sandboxed inputs).
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # Tailscale bridge (spec/apps.md "Tailscale v aplikaci"): a static Go library built by the phase below, one
+        # per SDK. Not an xcframework: that must exist when Xcode plans the build, before the phase has run.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/../tailnet/dist/tvos/include
+        "LIBRARY_SEARCH_PATHS[sdk=appletvos*]": $(SRCROOT)/../tailnet/dist/tvos/appletvos
+        "LIBRARY_SEARCH_PATHS[sdk=appletvsimulator*]": $(SRCROOT)/../tailnet/dist/tvos/appletvsimulator
+        OTHER_LDFLAGS: -ltailnet -lresolv -framework CoreFoundation -framework Security
+        # The bridge is built for arm64 only (Apple TV, simulators on Apple silicon).
+        "EXCLUDED_ARCHS[sdk=appletvsimulator*]": x86_64
     preBuildScripts:
+      # Builds apps/tailnet into a static library (Go; nothing to do when up to date). Xcode's PATH has no
+      # Homebrew; build.py finds Go itself.
+      - name: Build Tailscale bridge
+        basedOnDependencyAnalysis: false
+        script: |
+          python3 "${SRCROOT}/../tailnet/build.py" tvos
       # Version line in Nastavení (spec/apps.md): build number = git commit count, short commit
       # (+ = uncommitted changes in apps/tvos), build time (Prague), generated as Swift source
       # (gitignored) so it is compiled and signed like any other file. Runs on every build.

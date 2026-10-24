@@ -75,6 +75,9 @@ antenna ─▶ tuner ─▶ TVHeadend (127.0.0.1:9981): scan, EPG, autorec of ev
 - The gateway never passes TVHeadend credentials to ffmpeg: Python opens the TVHeadend stream (so a busy tuner is
   detected before ffmpeg starts) and pipes it into ffmpeg's stdin.
 - API contract for the apps: `spec/dvb-gateway.md`. Setup for the user (Czech): `docs/dvb-setup.md`.
+- Away from home Apple TV and Android TV reach the gateway through Tailscale built into the app (`apps/tailnet`, Go
+  `tsnet`, T12): a userspace tailnet node plus an HTTP bridge on the TV's `127.0.0.1` that forwards to the gateway, so
+  the apps only swap their gateway base URL. Nothing changes on the Pi; Samsung uses the LAN.
 
 ## Chamber of Deputies live streams (TV apps only, live only)
 

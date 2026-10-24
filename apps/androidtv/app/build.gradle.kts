@@ -24,6 +24,23 @@ val gitCommit = git("rev-parse", "--short", "HEAD")?.let { hash ->
 } ?: "?"
 val buildTime: String = ZonedDateTime.now(ZoneId.of("Europe/Prague")).format(DateTimeFormatter.ofPattern("d. M. HH:mm"))
 
+// The Tailscale bridge (spec/apps.md "Tailscale v aplikaci"): a gomobile AAR built from apps/tailnet (Go + NDK).
+// build.py does nothing when the AAR is newer than its sources; Gradle skips it when its inputs did not change.
+val tailnetDir: File = rootDir.resolve("../tailnet").normalize()
+val tailnetAar: File = tailnetDir.resolve("dist/android/tailnet.aar")
+val buildTailnet = tasks.register<Exec>("buildTailnet") {
+    description = "Builds apps/tailnet/dist/android/tailnet.aar (gomobile bind)"
+    inputs.files(
+        fileTree(tailnetDir) {
+            include("**/*.go", "go.mod", "go.sum", "build.py")
+            exclude("dist/**", ".bin/**")
+        },
+    ).withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(tailnetAar)
+    workingDir = tailnetDir
+    commandLine("python3", "build.py", "android")
+}
+
 android {
     namespace = "cz.cztvhub.tv"
     compileSdk = 36
@@ -63,8 +80,11 @@ android {
     testOptions.unitTests.isReturnDefaultValues = true
 }
 
+tasks.named("preBuild") { dependsOn(buildTailnet) }
+
 dependencies {
     implementation(project(":core"))
+    implementation(files(tailnetAar).builtBy(buildTailnet))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

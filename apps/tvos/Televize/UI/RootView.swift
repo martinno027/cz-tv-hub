@@ -34,6 +34,8 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             // back in front on the guide is an open; the player closing is not (the guide stays where it was)
             if phase == .active, tab == .guide, model.session == nil { guideOpens += 1 }
+            // the Tailscale node's newest state into the Keychain (status polling stops once it runs)
+            if phase == .background { Task { await model.tailnet.refresh() } }
         }
         // Digits on Živě and the guide start that channel live (spec/apps.md "Number keys").
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in
