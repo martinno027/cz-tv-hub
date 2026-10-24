@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.IntSize
 /**
  * "Kanály" in Nastavení (spec/apps.md): the source switches "Internetová TV (ČT)", "Anténa" (with a gateway) and
  * "Poslanecká sněmovna", then one list "Pořadí kanálů" mixing the sources, rows `[icon ☑ name] [▲] [▼]` that hide/show and reorder the
- * channels of Živě and the guide on this device, then "Obnovit výchozí pořadí".
+ * channels of Živě and the guide on this device (or in the signed-in profile), then "Obnovit výchozí pořadí".
  */
 @Composable
 fun ChannelsSection(viewModel: MainViewModel) {
@@ -51,7 +51,11 @@ fun ChannelsSection(viewModel: MainViewModel) {
     val dvb by viewModel.dvb.collectAsStateWithLifecycle()
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(stringResource(R.string.channels_intro), color = Palette.textDim)
+        val profile by viewModel.profiles.state.collectAsStateWithLifecycle()
+        Text(
+            profile.profile?.let { stringResource(R.string.channels_intro_profile, it) } ?: stringResource(R.string.channels_intro),
+            color = Palette.textDim,
+        )
 
         val antenna = dvb
         Text(stringResource(R.string.channels_sources), style = MaterialTheme.typography.titleMedium)

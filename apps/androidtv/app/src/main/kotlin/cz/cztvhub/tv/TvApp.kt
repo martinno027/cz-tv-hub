@@ -30,11 +30,14 @@ class TvApp : Application() {
     /** "Pokračovat": remembered positions, on this device only. */
     val resume by lazy { ResumeStore(ResumePrefs(this)) }
 
-    /** "Kanály": hidden channels and their order, on this device only. */
+    /** "Kanály": hidden channels and their order, this TV's own or a signed-in profile's. */
     val channelPrefs by lazy { ChannelPrefsStore(this) }
 
-    /** "Náhledy anténních pořadů": this TV's own switch for gateway thumbnails. */
+    /** "Náhledy anténních pořadů": the switch for gateway thumbnails, this TV's own or a signed-in profile's. */
     val thumbnailPrefs by lazy { ThumbnailPrefs(this) }
+
+    /** "Profil": the settings above kept in a profile on the gateway while signed in. */
+    val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) }
 
     private var dvbRepository: DvbRepository? = null
 

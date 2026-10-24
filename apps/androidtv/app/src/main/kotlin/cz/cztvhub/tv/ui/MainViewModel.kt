@@ -60,17 +60,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _dvbPlans = MutableStateFlow<Map<LocalDate, Map<String, List<DvbEvent>>>>(emptyMap())
     val dvbPlans: StateFlow<Map<LocalDate, Map<String, List<DvbEvent>>>> = _dvbPlans.asStateFlow()
 
-    /** "Kanály": hidden channels and their order on this device. */
+    /** "Kanály": hidden channels and their order on this device (or in the signed-in profile). */
     val channelPrefs: StateFlow<ChannelPrefs> = app.channelPrefs.value
 
-    fun updateChannelPrefs(change: (ChannelPrefs) -> ChannelPrefs) = app.channelPrefs.update(change)
+    // Every settings change while signed in is saved in the profile (spec/apps.md "Profil").
+    fun updateChannelPrefs(change: (ChannelPrefs) -> ChannelPrefs) {
+        if (app.channelPrefs.update(change)) app.profiles.changed()
+    }
 
-    fun resetChannelPrefs() = app.channelPrefs.reset()
+    fun resetChannelPrefs() {
+        if (app.channelPrefs.reset()) app.profiles.changed()
+    }
 
     /** "Náhledy anténních pořadů" on this TV. */
     val antennaThumbnails: StateFlow<Boolean> = app.thumbnailPrefs.on
 
-    fun setAntennaThumbnails(on: Boolean) = app.thumbnailPrefs.set(on)
+    fun setAntennaThumbnails(on: Boolean) {
+        if (app.thumbnailPrefs.set(on)) app.profiles.changed()
+    }
+
+    /** "Profil": the signed-in profile (null = signed out) and its sync state. */
+    val profiles get() = app.profiles
+
+    /** Nastavení opened: send a pending change or read a newer profile version. */
+    fun syncProfile() = app.profiles.sync()
 
     /** Thumbnail URL and headers of an Anténa event when the gateway and this TV allow it (spec/apps.md). */
     fun thumbnail(event: DvbEvent): Pair<String, Map<String, String>>? {
@@ -131,11 +144,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val notice: StateFlow<String?> = _notice.asStateFlow()
     private var noticeJob: Job? = null
 
-    fun showNotice(text: String) {
+    fun showNotice(text: String, ms: Long = NOTICE_MS) {
         noticeJob?.cancel()
         _notice.value = text
         noticeJob = viewModelScope.launch {
-            delay(NOTICE_MS)
+            delay(ms)
             _notice.value = null
         }
     }
@@ -155,6 +168,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         selectDay(_selectedDay.value)
+        // App start (spec/apps.md "Profil"); the gateway's "signed out" is said once, over any screen.
+        app.profiles.sync()
+        viewModelScope.launch {
+            app.profiles.message.collect { text ->
+                if (text != null) {
+                    showNotice(text, LONG_NOTICE_MS)
+                    app.profiles.consumeMessage()
+                }
+            }
+        }
         viewModelScope.launch {
             app.dvbSettings.config.collect {
                 _dvbPlans.value = emptyMap()
@@ -250,5 +273,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val PSP_IDLE_MS = 5_000L
         const val PSP_MIN_WAIT_MS = 200L
         const val NOTICE_MS = 3_000L
+        const val LONG_NOTICE_MS = 8_000L
     }
 }
