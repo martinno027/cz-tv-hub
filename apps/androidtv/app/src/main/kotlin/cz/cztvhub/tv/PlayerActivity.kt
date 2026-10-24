@@ -1,6 +1,7 @@
 package cz.cztvhub.tv
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
 import android.os.SystemClock
@@ -9,6 +10,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
@@ -23,7 +25,9 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Format
 import androidx.media3.common.Timeline
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -48,6 +52,10 @@ import cz.cztvhub.core.ResumeSpot
 import cz.cztvhub.core.dvb.AdBreak
 import cz.cztvhub.core.dvb.AdBreaks
 import cz.cztvhub.core.dvb.DvbParser
+import cz.cztvhub.core.dvb.DvbTimeline
+import cz.cztvhub.core.dvb.TimelineEdge
+import cz.cztvhub.core.dvb.TimelineRules
+import cz.cztvhub.core.dvb.TimelineScrub
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -55,6 +63,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.util.Locale
 
 /**
  * Full-screen playback. The stream is resolved here, on the device, right before playback;
@@ -116,6 +125,32 @@ class PlayerActivity : ComponentActivity() {
     /** OK used the number buffer: its key-up must not reach the controller. */
     private var swallowSelectUp = false
 
+    /**
+     * Anténa timeline playback (spec/apps.md "Anténa timeline player"): the window being played, its own bar instead
+     * of Media3's controller, the ←/→ press being chosen and the one window switch allowed at a time.
+     */
+    private var timeline: DvbTimeline? = null
+    private lateinit var timelineBar: TimelineOverlay
+    private var barJob: Job? = null
+    private var barHideAt = 0L
+    private var scrub: TimelineScrub? = null
+    private var timelineRefreshJob: Job? = null
+    private var switching = false
+
+    /** A key whose first press only showed the bar: the rest of that press (repeats, release) does nothing. */
+    private var swallowedKey: Int? = null
+    private var selectLongPressed = false
+
+    /** OK pressed while the bar was hidden: its release only shows the bar. */
+    private var selectShowsOnly = false
+    private var releaseJob: Job? = null
+
+    /** Ad breaks per programme id of the window, with when they were fetched (elapsed realtime). */
+    private val timelineBreaks = mutableMapOf<String, Pair<Long, List<AdBreak>>>()
+
+    private val isTimeline: Boolean
+        get() = (request as? PlayRequest.DvbRecorded)?.recordingId?.let(TimelineRules::isTimelineId) == true
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         request = PlayRequests.from(intent) ?: return finish()
@@ -124,6 +159,7 @@ class PlayerActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         playerView = PlayerView(this).apply {
+            useController = !isTimeline
             setShowSubtitleButton(true)
             setShowNextButton(false)
             setShowPreviousButton(false)
@@ -198,7 +234,7 @@ class PlayerActivity : ComponentActivity() {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.END,
-        ).apply { setMargins(0, 0, dp(48), dp(120)) }
+        ).apply { setMargins(0, 0, dp(48), dp(if (isTimeline) TIMELINE_SKIP_MARGIN_DP else 120)) }
         // Zapping: "<number>  <channel>" and the programme on air, top left; the number buffer top right.
         zapOverlay = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -226,9 +262,15 @@ class PlayerActivity : ComponentActivity() {
             },
             onNumber = ::pickNumber,
         )
+        timelineBar = TimelineOverlay(this).apply { visibility = View.GONE }
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             addView(playerView, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            addView(timelineBar, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM,
+            ))
             addView(skipAd, skipParams)
             addView(infoBox, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -274,6 +316,7 @@ class PlayerActivity : ComponentActivity() {
         startTitles()
         startAdBreaks()
         startProgressSaving()
+        startTimelineRefresh()
     }
 
     override fun onStop() {
@@ -300,6 +343,15 @@ class PlayerActivity : ComponentActivity() {
         adBreaksJob?.cancel()
         adBreaksJob = null
         updateSkipAd(null)
+        timelineRefreshJob?.cancel()
+        timelineRefreshJob = null
+        barJob?.cancel()
+        barJob = null
+        releaseJob?.cancel()
+        releaseJob = null
+        scrub = null
+        swallowedKey = null
+        switching = false
         playerView.player = null
         player?.release()
         player = null
@@ -308,6 +360,8 @@ class PlayerActivity : ComponentActivity() {
     private fun load(forceRefresh: Boolean, resume: Resume) {
         loadJob?.cancel()
         showMessage(getString(R.string.loading))
+        // A timeline window re-opens at the wall clock it was left at (re-resolve, back from the background).
+        val timelineAt = if (isTimeline) (resume as? Resume.WallClock)?.let { Instant.ofEpochMilli(it.epochMs) } else null
         loadJob = lifecycleScope.launch {
             // Poslanecká sněmovna, right before playback: an answer younger than 60 s (e.g. the one Živě just made),
             // else one more check of the playlist. Off (e.g. zapped onto): the message instead of a player error.
@@ -322,7 +376,7 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
             val planned = try {
-                withContext(Dispatchers.IO) { tvApp.planner.plan(request, forceRefresh) }
+                withContext(Dispatchers.IO) { tvApp.planner.plan(request, forceRefresh, timelineAt) }
             } catch (e: CtException) {
                 Log.w(TAG, "cannot play $request: ${e.message}")
                 showMessage(e.userMessage)
@@ -332,48 +386,56 @@ class PlayerActivity : ComponentActivity() {
                 }
                 return@launch
             }
-            val exo = player ?: return@launch
-            target = planned
-            pendingWallClockMs = null
-            var startPositionMs: Long? = planned.startPositionMs
-            when {
-                resume is Resume.Position -> startPositionMs = resume.ms
-                resume is Resume.WallClock -> {
-                    pendingWallClockMs = resume.epochMs
-                    pendingFallbackMs = 0
-                }
-                planned.kind == PlayKind.TIMESHIFT -> {
-                    pendingWallClockMs = planned.seekToWallClock?.toEpochMilli()
-                    pendingFallbackMs = planned.fallbackOffsetMs
-                }
-            }
-            val item = MediaItem.Builder()
-                .setUri(planned.url)
-                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                .setMediaMetadata(MediaMetadata.Builder().setTitle(planned.title).build())
-                .build()
-            val http = if (request is PlayRequest.PspLive) {
-                // Poslanecká sněmovna: its own data source, the published URL as is, no header of ours (no gateway
-                // key, nothing faked).
-                DefaultHttpDataSource.Factory()
-                    .setReadTimeoutMs(HTTP_TIMEOUT_MS)
-                    .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
-            } else {
-                // Headers (the gateway's bearer key) go on every request: playlists and segments.
-                DefaultHttpDataSource.Factory()
-                    .setDefaultRequestProperties(planned.headers)
-                    .setReadTimeoutMs(HTTP_TIMEOUT_MS) // a gateway live start blocks until the first segment
-                    .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
-            }
-            val source = HlsMediaSource.Factory(http).createMediaSource(item)
-            // A master playlist with several audio renditions gets new track groups: the menu's override is stale.
-            exo.trackSelectionParameters = audioPreference.applyTo(exo.trackSelectionParameters)
-            if (startPositionMs != null) exo.setMediaSource(source, startPositionMs) else exo.setMediaSource(source)
-            // Hold playback until the start-over seek is done, so the live edge never flashes by.
-            exo.playWhenReady = pendingWallClockMs == null
-            exo.prepare()
-            hideMessage()
+            play(planned, resume)
         }
+    }
+
+    /** Starts [planned]; [resume] applies to the native player only (a timeline target is already mapped). */
+    private fun play(planned: PlayTarget, resume: Resume) {
+        val exo = player ?: return
+        target = planned
+        timeline = planned.timeline
+        pendingWallClockMs = null
+        var startPositionMs: Long? = planned.startPositionMs
+        when {
+            planned.timeline != null -> Unit
+            resume is Resume.Position -> startPositionMs = resume.ms
+            resume is Resume.WallClock -> {
+                pendingWallClockMs = resume.epochMs
+                pendingFallbackMs = 0
+            }
+            planned.kind == PlayKind.TIMESHIFT -> {
+                pendingWallClockMs = planned.seekToWallClock?.toEpochMilli()
+                pendingFallbackMs = planned.fallbackOffsetMs
+            }
+        }
+        val item = MediaItem.Builder()
+            .setUri(planned.url)
+            .setMimeType(MimeTypes.APPLICATION_M3U8)
+            .setMediaMetadata(MediaMetadata.Builder().setTitle(planned.title).build())
+            .build()
+        val http = if (request is PlayRequest.PspLive) {
+            // Poslanecká sněmovna: its own data source, the published URL as is, no header of ours (no gateway
+            // key, nothing faked).
+            DefaultHttpDataSource.Factory()
+                .setReadTimeoutMs(HTTP_TIMEOUT_MS)
+                .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
+        } else {
+            // Headers (the gateway's bearer key) go on every request: playlists and segments.
+            DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(planned.headers)
+                .setReadTimeoutMs(HTTP_TIMEOUT_MS) // a gateway live start blocks until the first segment
+                .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
+        }
+        val source = HlsMediaSource.Factory(http).createMediaSource(item)
+        // A master playlist with several audio renditions gets new track groups: the menu's override is stale.
+        exo.trackSelectionParameters = audioPreference.applyTo(exo.trackSelectionParameters)
+        if (startPositionMs != null) exo.setMediaSource(source, startPositionMs) else exo.setMediaSource(source)
+        // Hold playback until the start-over seek is done, so the live edge never flashes by.
+        exo.playWhenReady = pendingWallClockMs == null
+        exo.prepare()
+        hideMessage()
+        if (planned.timeline != null) showBar()
     }
 
     private val listener = object : Player.Listener {
@@ -387,6 +449,12 @@ class PlayerActivity : ComponentActivity() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) applyPendingSeek()
+            if (playbackState == Player.STATE_ENDED) timelineEnded()
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // A paused timeline keeps its bar on screen.
+            if (timeline != null) showBar()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -454,6 +522,7 @@ class PlayerActivity : ComponentActivity() {
     private fun currentResume(): Resume {
         val exo = player ?: return resumeOnStart
         pendingWallClockMs?.let { return Resume.WallClock(it) }
+        if (timeline != null) return playheadTime()?.let { Resume.WallClock(it.toEpochMilli()) } ?: resumeOnStart
         return when (target?.kind) {
             PlayKind.VOD -> Resume.Position(exo.currentPosition)
             PlayKind.TIMESHIFT -> {
@@ -469,7 +538,7 @@ class PlayerActivity : ComponentActivity() {
 
     /** "Pokračovat": remember the position every [SAVE_INTERVAL_MS] while playing (and in [onStop]). */
     private fun startProgressSaving() {
-        if (spot == null) return
+        if (spot == null && !isTimeline) return
         progressJob?.cancel()
         progressJob = lifecycleScope.launch {
             while (isActive) {
@@ -480,6 +549,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private fun saveProgress() {
+        if (isTimeline) return saveTimelineProgress()
         val remembered = spot ?: return
         val seconds = progressSeconds(remembered) ?: return
         tvApp.resume.save(remembered.key, seconds, remembered.lengthSeconds)
@@ -519,6 +589,7 @@ class PlayerActivity : ComponentActivity() {
      * and every minute, the position checked twice a second. Gateway failures are silent: no button.
      */
     private fun startAdBreaks() {
+        if (isTimeline) return startTimelineAdBreaks()
         val recorded = request as? PlayRequest.DvbRecorded ?: return
         if (recorded.fromStart) return
         adBreaksJob?.cancel()
@@ -606,6 +677,352 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    // -- Anténa timeline (spec/apps.md "Anténa timeline player") ------------------------------------------
+
+    /** The window's length the bar and the edges use: a growing window also what the player already knows. */
+    private fun windowDuration(t: DvbTimeline): Double {
+        if (t.complete) return t.duration
+        val known = player?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }?.let { it / 1000.0 } ?: 0.0
+        return maxOf(t.duration, known)
+    }
+
+    /** Wall clock of the shown frame; null before playback or on an error page. */
+    private fun playheadTime(): Instant? {
+        val t = timeline ?: return null
+        val exo = player ?: return null
+        if (switching || message.visibility == View.VISIBLE || exo.playbackState == Player.STATE_IDLE) return null
+        return TimelineRules.toTime(t.pieces, exo.currentPosition / 1000.0, growing = !t.complete)
+    }
+
+    /** "Pokračovat" remembers the programme at the playhead (with an id): wall clock − its start. */
+    private fun saveTimelineProgress() {
+        val t = timeline ?: return
+        val time = playheadTime() ?: return
+        val remembered = TimelineRules.resumeSpot(t.programmes, time) ?: return
+        val start = remembered.start ?: return
+        tvApp.resume.save(remembered.key, TimelineRules.resumeProgress(start, time), remembered.lengthSeconds)
+    }
+
+    /** Shows the bar for [BAR_MS]; it stays while paused, while a seek is chosen and across a window switch. */
+    private fun showBar() {
+        if (timeline == null) return
+        barHideAt = SystemClock.elapsedRealtime() + BAR_MS
+        timelineBar.visibility = View.VISIBLE
+        renderBar()
+        if (barJob?.isActive == true) return
+        barJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(BAR_TICK_MS)
+                val paused = player?.playWhenReady == false
+                if (!paused && scrub == null && !switching && SystemClock.elapsedRealtime() >= barHideAt) {
+                    timelineBar.visibility = View.GONE
+                    break
+                }
+                renderBar()
+            }
+        }
+    }
+
+    private val barVisible: Boolean get() = timelineBar.visibility == View.VISIBLE
+
+    private fun renderBar() {
+        val t = timeline ?: return
+        val exo = player ?: return
+        val position = scrub?.target(SystemClock.uptimeMillis()) ?: (exo.currentPosition / 1000.0)
+        timelineBar.render(TimelineFrame(t, windowDuration(t), position, channelName(), Instant.now()))
+    }
+
+    /**
+     * Keys of the timeline player: OK / play-pause = pause/play, long OK or the audio key = audio, ←/→ = ±10 s or
+     * scrub while held (seek on release), ⏪/⏩ scrub (at least 1 s), ▲/▼ = start of this / the next programme.
+     * With the bar hidden the first press only shows it, except play/pause, Back, the audio keys and OK on
+     * "Přeskočit reklamu". Back is left to the activity (closes the player).
+     */
+    private fun handleTimelineKey(event: KeyEvent): Boolean {
+        val code = event.keyCode
+        if (code == KeyEvent.KEYCODE_BACK || message.visibility == View.VISIBLE) return false
+        val down = event.action == KeyEvent.ACTION_DOWN
+        val first = down && event.repeatCount == 0
+        if (swallowedKey == code) {
+            if (!down) swallowedKey = null
+            return true
+        }
+        // "Přeskočit reklamu" takes OK while it is shown (spec/ad-breaks.md).
+        if (isSelectKey(code) && skipAd.visibility == View.VISIBLE) {
+            if (!down) skipAd()
+            return true
+        }
+        when (code) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                if (first) {
+                    val exo = player ?: return true
+                    exo.playWhenReady = when (code) {
+                        KeyEvent.KEYCODE_MEDIA_PLAY -> true
+                        KeyEvent.KEYCODE_MEDIA_PAUSE -> false
+                        else -> !exo.playWhenReady
+                    }
+                    showBar()
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK -> {
+                if (first) showAudioChoice()
+                return true
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                when {
+                    first -> {
+                        selectLongPressed = false
+                        selectShowsOnly = !barVisible
+                    }
+                    down -> if (!selectLongPressed &&
+                        event.eventTime - event.downTime >= ViewConfiguration.getLongPressTimeout()
+                    ) {
+                        selectLongPressed = true
+                        showAudioChoice()
+                    }
+                    selectLongPressed -> selectLongPressed = false
+                    selectShowsOnly -> showBar()
+                    else -> {
+                        player?.let { it.playWhenReady = !it.playWhenReady }
+                        showBar()
+                    }
+                }
+                return true
+            }
+        }
+        val forward = when (code) {
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> true
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_REWIND -> false
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> null
+            else -> return false
+        }
+        if (timeline == null) return true
+        if (first && !barVisible) {
+            swallowedKey = code
+            showBar()
+            return true
+        }
+        if (forward == null) {
+            if (first) jump(up = code == KeyEvent.KEYCODE_DPAD_UP)
+            showBar()
+            return true
+        }
+        if (first) {
+            val media = code == KeyEvent.KEYCODE_MEDIA_REWIND || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+            scrub = TimelineScrub(
+                from = player?.currentPosition?.div(1000.0) ?: 0.0,
+                forward = forward,
+                downAtMs = event.downTime,
+                minHeldSeconds = if (media) TimelineRules.MEDIA_MIN_HELD_SECONDS else 0.0,
+            )
+        }
+        val chosen = scrub ?: return true
+        if (down) {
+            watchRelease(chosen, code, event.eventTime)
+        } else {
+            releaseScrub(chosen, event.eventTime)
+        }
+        showBar()
+        return true
+    }
+
+    /** Without a key-up event the release counts [TimelineRules.RELEASE_TIMEOUT_MS] after the last repeat. */
+    private fun watchRelease(chosen: TimelineScrub, code: Int, lastEventAt: Long) {
+        releaseJob?.cancel()
+        releaseJob = lifecycleScope.launch {
+            delay(TimelineRules.RELEASE_TIMEOUT_MS)
+            if (scrub !== chosen) return@launch
+            Log.i(TAG, "no key-up for $code: counted as released")
+            swallowedKey = code // its late key-up, if it comes, does nothing
+            releaseScrub(chosen, lastEventAt + TimelineRules.RELEASE_TIMEOUT_MS)
+        }
+    }
+
+    private fun releaseScrub(chosen: TimelineScrub, atMs: Long) {
+        releaseJob?.cancel()
+        releaseJob = null
+        if (scrub !== chosen) return
+        scrub = null
+        seekTimeline(chosen.target(atMs))
+        showBar()
+    }
+
+    /**
+     * ▲/▼: the start of this programme (or the previous one) / of the next one through the map, a target outside
+     * the window by the edge rule; nothing there = nothing happens.
+     */
+    private fun jump(up: Boolean) {
+        val t = timeline ?: return
+        if (playheadTime() == null) return
+        val exo = player ?: return
+        val target = TimelineRules.jumpTarget(t, exo.currentPosition / 1000.0, up) ?: return
+        seekTimeline(target)
+    }
+
+    /** A chosen seek: inside the window, clamped to it, or on into the previous / next window at its wall clock. */
+    private fun seekTimeline(target: Double) {
+        val t = timeline ?: return
+        val exo = player ?: return
+        val duration = windowDuration(t)
+        when (TimelineRules.edge(target, duration, t.complete, t.previous != null, t.next != null)) {
+            TimelineEdge.SEEK -> exo.seekTo(Math.round(target * 1000))
+            TimelineEdge.CLAMP -> {
+                val end = if (t.complete) duration else maxOf(0.0, duration - TIMELINE_LIVE_GUARD_S)
+                exo.seekTo(Math.round(target.coerceIn(0.0, end) * 1000))
+            }
+            TimelineEdge.PREVIOUS -> t.previous?.let { openWindow(it, TimelineRules.targetTime(t.pieces, target)) }
+            TimelineEdge.NEXT -> t.next?.let { openWindow(it, TimelineRules.targetTime(t.pieces, target)) }
+        }
+    }
+
+    /** Playback reached the end of a complete window: on into the next one, if any (else it stays). */
+    private fun timelineEnded() {
+        val t = timeline ?: return
+        val duration = windowDuration(t)
+        if (TimelineRules.edge(duration, duration, t.complete, t.previous != null, t.next != null) == TimelineEdge.NEXT) {
+            t.next?.let { openWindow(it, TimelineRules.toTime(t.pieces, duration)) }
+        }
+    }
+
+    /** Opens the neighbouring window [id] with its own JSON, continuing at [at]; one switch at a time. */
+    private fun openWindow(id: String, at: Instant) {
+        if (switching) return
+        val current = request as? PlayRequest.DvbRecorded ?: return
+        val next = current.copy(recordingId = id, fromStart = false, lengthSeconds = null, resumeSeconds = null)
+        switching = true
+        showBar()
+        loadJob?.cancel()
+        loadJob = lifecycleScope.launch {
+            try {
+                // JSON and playlist both first: a failure keeps this window playing, its reason shown in the bar.
+                val planned = try {
+                    withContext(Dispatchers.IO) {
+                        tvApp.planner.plan(next, timelineAt = at).also { planned ->
+                            val window = planned.timeline ?: throw CtException("$id is no timeline")
+                            tvApp.dvb()?.client?.checkPlaylist(window)
+                        }
+                    }
+                } catch (e: CtException) {
+                    Log.w(TAG, "cannot open timeline $id: ${e.message}")
+                    timelineBar.notice(e.userMessage)
+                    showBar()
+                    return@launch
+                }
+                saveTimelineProgress()
+                request = next
+                spot = ResumeRules.spot(next)
+                intent = PlayRequests.intent(this@PlayerActivity, next)
+                play(planned, Resume.Default)
+            } finally {
+                switching = false
+            }
+        }
+    }
+
+    /** A growing window re-fetches its JSON every minute (new pieces, programmes, completion). */
+    private fun startTimelineRefresh() {
+        timelineRefreshJob?.cancel()
+        if (!isTimeline) return
+        timelineRefreshJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(TimelineRules.REFRESH.toMillis())
+                val t = timeline ?: continue
+                if (t.complete) continue
+                val client = tvApp.dvb()?.client ?: continue
+                val fresh = try {
+                    withContext(Dispatchers.IO) { client.timeline(t.id) }
+                } catch (e: CtException) {
+                    Log.i(TAG, "timeline refresh failed: ${e.message}")
+                    continue
+                }
+                if (timeline?.id == fresh.id && fresh.playlist == t.playlist) timeline = fresh
+            }
+        }
+    }
+
+    /** Breaks of the programme at the playhead (id, `breaks: true`, ended), as positions of this window. */
+    private fun startTimelineAdBreaks() {
+        adBreaksJob?.cancel()
+        adBreaksJob = lifecycleScope.launch {
+            while (isActive) {
+                updateSkipAd(timelineSkipTarget())
+                delay(SKIP_CHECK_MS)
+            }
+        }
+    }
+
+    private suspend fun timelineSkipTarget(): Double? {
+        val t = timeline ?: return null
+        val exo = player ?: return null
+        if (scrub != null) return null
+        val time = playheadTime() ?: return null
+        val programme = TimelineRules.breaksProgramme(t.programmes, time, Instant.now()) ?: return null
+        val id = programme.id ?: return null
+        val breaks = TimelineRules.breaksInWindow(t.pieces, programme.start, programmeBreaks(id))
+        return AdBreaks.skipTarget(breaks, exo.currentPosition / 1000.0)
+    }
+
+    /** Fetched once a minute per programme; failures are silent (no button). */
+    private suspend fun programmeBreaks(id: String): List<AdBreak> {
+        val now = SystemClock.elapsedRealtime()
+        timelineBreaks[id]?.let { (at, breaks) -> if (now - at < AD_BREAKS_REFRESH_MS) return breaks }
+        val client = tvApp.dvb()?.client
+        val breaks = if (client == null) {
+            emptyList()
+        } else {
+            try {
+                withContext(Dispatchers.IO) { client.breaks(id) }
+            } catch (e: CtException) {
+                Log.i(TAG, "no ad breaks: ${e.message}")
+                timelineBreaks[id]?.second.orEmpty()
+            } catch (e: RuntimeException) {
+                Log.i(TAG, "no ad breaks: $e")
+                timelineBreaks[id]?.second.orEmpty()
+            }
+        }
+        timelineBreaks[id] = now to breaks
+        return breaks
+    }
+
+    /** Long OK: the audio renditions of the stream (Czech stays the default until the viewer picks another). */
+    private fun showAudioChoice() {
+        val exo = player ?: return
+        val labels = mutableListOf<String>()
+        val overrides = mutableListOf<TrackSelectionOverride>()
+        var selected = -1
+        for (group in exo.currentTracks.groups) {
+            if (group.type != C.TRACK_TYPE_AUDIO) continue
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) continue
+                if (group.isTrackSelected(i)) selected = labels.size
+                labels += audioLabel(group.getTrackFormat(i), labels.size + 1)
+                overrides += TrackSelectionOverride(group.mediaTrackGroup, i)
+            }
+        }
+        if (labels.size < 2) {
+            showOverlayText(getString(R.string.audio_single))
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.audio_title)
+            .setSingleChoiceItems(labels.toTypedArray(), selected) { dialog, which ->
+                exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                    .setOverrideForType(overrides[which])
+                    .build()
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun audioLabel(format: Format, number: Int): String {
+        format.label?.takeIf { it.isNotBlank() }?.let { return it }
+        val language = format.language?.takeIf { it.isNotBlank() && it != C.LANGUAGE_UNDETERMINED }
+            ?.let { Locale.forLanguageTag(it).getDisplayLanguage(CZECH) }
+            ?.takeIf { it.isNotBlank() }
+        return language?.replaceFirstChar { it.titlecase(CZECH) } ?: getString(R.string.audio_track, number)
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun showMessage(text: String) {
@@ -622,6 +1039,7 @@ class PlayerActivity : ComponentActivity() {
     // Lint flags any dispatchKeyEvent override in a ComponentActivity (androidx.core restriction); false positive.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (isTimeline && handleTimelineKey(event)) return true
         if (handleZapKey(event)) return true
         if (event.keyCode == KeyEvent.KEYCODE_BACK && playerView.isControllerFullyVisible) {
             if (event.action == KeyEvent.ACTION_UP) playerView.hideController()
@@ -783,5 +1201,12 @@ class PlayerActivity : ComponentActivity() {
         const val START_BUFFER_MS = 1_000
         const val RE_RESOLVE_COOLDOWN_MS = 5 * 60 * 1000L
         const val LIVE_EDGE_GUARD_MS = 10_000L
+        const val BAR_MS = 5_000L
+        const val BAR_TICK_MS = 250L
+        const val TIMELINE_SKIP_MARGIN_DP = 300
+
+        /** A growing window is clamped this far before its live edge (the playlist's target is 3 s). */
+        const val TIMELINE_LIVE_GUARD_S = 6.0
+        val CZECH: Locale = Locale.forLanguageTag("cs")
     }
 }

@@ -119,7 +119,9 @@ Needs `JAVA_HOME` (Android Studio's JBR) and `ANDROID_HOME` (the SDK) when not s
 
 Tests include the Chromium 56 syntax guard. UI check in a browser: serve the repo root and open
 `apps/tizen/app/index.html?demo` (`&channels=60` for a big guide; `&psp=13` = invented Chamber streams 1 and 3
-on air, `&psp=0` none; the demo never contacts the Chamber's CDN). `build.py` packages `dist/Televize.wgt` with the
+on air, `&psp=0` none; the demo never contacts the Chamber's CDN; `&timeline` opens the Anténa timeline player bar
+over `spec/fixtures/dvb/dvb_timeline.json`, `&timeline=growing` as a growing window; the demo player is a
+clock-driven fake). `build.py` packages `dist/Televize.wgt` with the
 Tizen Studio CLI; `--gateway`/`--key-file` preset the gateway in that build only.
 
 Can go wrong: the preset key ends up in the built package — never share or commit `dist/`.

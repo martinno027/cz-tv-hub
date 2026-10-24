@@ -40,6 +40,9 @@ or Poslanecká sněmovna Parlamentu ČR.
   is deleted automatically after the retention period (default 3 days, maximum 14) or earlier when space runs short,
   and cannot be downloaded or exported. Only free-to-air channels from TVHeadend on the Pi are recorded; ČT internet
   streams never.
+- Playback of the recording is one programme, the live window, or a channel timeline: a window of at most 12 hours
+  of one channel around a programme (the programme ± 3 h), opened one at a time as the viewer seeks (approved by the
+  user on 2026-10-24). No playlist covers a channel's whole recording, and no view can be downloaded or exported.
 - Remote viewing over Tailscale is meant for members of the same household only (Tailscale ACLs, no Funnel, no node
   sharing). Relaying broadcasts outside the home is a legal grey area; you decide whether to enable it and you are
   responsible for that decision. Another household needs its own tuner.

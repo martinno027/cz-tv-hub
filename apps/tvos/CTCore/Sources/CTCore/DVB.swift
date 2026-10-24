@@ -313,7 +313,7 @@ public struct DVBClient: Sendable {
         }
     }
 
-    private func get(_ path: String) async throws -> HTTPResponse {
+    func get(_ path: String) async throws -> HTTPResponse {
         try await send(config.url(path), timeout: timeout)
     }
 
@@ -330,7 +330,7 @@ public struct DVBClient: Sendable {
         }
     }
 
-    private func escape(_ component: String) -> String {
+    func escape(_ component: String) -> String {
         component.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(["/"])) ?? component
     }
 }

@@ -20,14 +20,39 @@ final class PlayerAudioUITests: XCTestCase {
         assertCzechMenu(try openAudioMenu(language: "en"))
     }
 
-    /// Start-over of the airing programme (a growing `b…` recording, EVENT playlist).
+    /// Start-over of the airing programme (a growing `b…` recording): the timeline player's own audio list
+    /// (long OK, spec/apps.md "Anténa timeline player"), Czech focused.
     func testStartOverAudioMenu() throws {
-        assertCzechMenu(try openAudioMenu(play: "dvbstartover", language: "en"))
+        try assertCzechTimelineList(play: "dvbstartover", language: "en")
     }
 
-    /// The latest finished programme of the channel (VOD playlist).
+    /// The latest finished programme of the channel, also in the timeline player.
     func testRecordingAudioMenu() throws {
-        assertCzechMenu(try openAudioMenu(play: "dvbrec", language: "en"))
+        try assertCzechTimelineList(play: "dvbrec", language: "en")
+    }
+
+    private func assertCzechTimelineList(play: String, language: String) throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let gateway = env["AUDIO_GATEWAY"], let key = env["AUDIO_KEY"] else {
+            throw XCTSkip("set TEST_RUNNER_AUDIO_GATEWAY and TEST_RUNNER_AUDIO_KEY")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["-gatewayAddress", gateway, "-gatewayKey", key,
+                               "-play", "\(play):\(env["AUDIO_CHANNEL"] ?? "1")",
+                               "-AppleLanguages", "(\(language))", "-AppleLocale", language == "cs" ? "cs_CZ" : "en_US"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["timeline.title"].waitForExistence(timeout: 30), "player did not open")
+        sleep(3)
+        XCUIRemote.shared.press(.select, forDuration: 1.2)
+        let czech = app.buttons["Čeština"].firstMatch
+        XCTAssertTrue(czech.waitForExistence(timeout: 3), "Čeština missing")
+        XCTAssertTrue(app.buttons["Angličtina"].firstMatch.exists, "Angličtina missing")
+        XCTAssertTrue(czech.hasFocus, "Čeština not selected")
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "audio-list-\(play)-\(language)"
+        shot.lifetime = .keepAlways
+        add(shot)
     }
 
     /// Picking the other track in the menu switches to it (English AC-3 rendition) and playback goes on.

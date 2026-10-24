@@ -9,6 +9,43 @@ struct PlayerScreen: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        if let timeline = session.timeline {
+            timelineBody(timeline)
+        } else {
+            nativeBody
+        }
+    }
+
+    /// `b…` recordings: the video without AVKit's controls, the own bar at the bottom.
+    private func timelineBody(_ timeline: TimelineController) -> some View {
+        TimelinePlayerView(controller: session.controller, timeline: timeline)
+            .ignoresSafeArea()
+            .background(Color.black)
+            .overlay(alignment: .bottom) {
+                if timeline.barVisible {
+                    TimelineBar(timeline: timeline).transition(.opacity)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if timeline.skipTarget != nil {
+                    TimelineSkipBadge().padding(.bottom, timeline.barVisible ? 330 : 80)
+                }
+            }
+            .ignoresSafeArea()
+            .animation(.easeInOut(duration: 0.25), value: timeline.barVisible)
+            .onAppear {
+                model.isPlayerOnScreen = true
+                session.controller.start()
+                timeline.start()
+            }
+            .onDisappear {
+                model.isPlayerOnScreen = false
+                timeline.stop()
+                session.controller.stop()
+            }
+    }
+
+    private var nativeBody: some View {
         PlayerViewControllerView(controller: session.controller, zapper: session.zapper)
             .ignoresSafeArea()
             .background(Color.black)

@@ -13,6 +13,7 @@ here knows about programmes: a programme is a time range (archive.py). Local dis
 """
 from __future__ import annotations
 
+import bisect
 import calendar
 import json
 import os
@@ -74,6 +75,14 @@ class _Channel:
     segments: list[Segment] = field(default_factory=list)  # sorted by g (= by time within a run)
     next_g: int = 0
     sizes: dict[str, int] = field(default_factory=dict)  # block → bytes
+    # starts in time order too (the normal case), so ranges are found by bisection; a clock that jumped back
+    # (a Pi without a real-time clock before NTP) only makes the lookups linear again
+    ordered: bool = True
+    longest: float = 0.0  # longest segment, how far before a range a segment overlapping it can start
+
+    def reindex(self) -> None:
+        self.ordered = all(a.start <= b.start for a, b in zip(self.segments, self.segments[1:]))
+        self.longest = max((s.duration for s in self.segments), default=0.0)
 
 
 class BufferStore:
@@ -113,6 +122,7 @@ class BufferStore:
                     chan.segments.append(seg)
                 chan.sizes[bdir.name] = size
             chan.segments.sort(key=lambda s: s.g)
+            chan.reindex()
             chan.next_g = chan.segments[-1].g + 1 if chan.segments else 0
             self._channels[cdir.name] = chan
             # ffmpeg working dirs of a previous run are useless after a restart
@@ -175,6 +185,9 @@ class BufferStore:
         with open(bdir / INDEX, "a", encoding="utf-8") as f:
             f.write(json.dumps({"r": run, "n": n, "g": seg.g, "t": round(start, 3), "d": round(duration, 3)}) + "\n")
         with self._lock:
+            if chan.segments and start < chan.segments[-1].start:
+                chan.ordered = False
+            chan.longest = max(chan.longest, duration)
             chan.segments.append(seg)
             chan.sizes[block] = chan.sizes.get(block, 0) + size
         return seg
@@ -188,7 +201,14 @@ class BufferStore:
         """Segments overlapping [start, end), in order."""
         with self._lock:
             chan = self._channels.get(channel)
-            return [s for s in chan.segments if s.end > start and s.start < end] if chan else []
+            if not chan:
+                return []
+            segments = chan.segments
+            if chan.ordered:
+                lo = bisect.bisect_left(segments, start - chan.longest, key=lambda s: s.start)
+                hi = bisect.bisect_left(segments, end, lo, key=lambda s: s.start)
+                segments = segments[lo:hi]
+            return [s for s in segments if s.end > start and s.start < end]
 
     def by_g(self, channel: str, g: int) -> Segment | None:
         with self._lock:
@@ -215,6 +235,11 @@ class BufferStore:
                 if total >= seconds:
                     break
             return list(reversed(out))
+
+    def oldest(self, channel: str) -> Segment | None:
+        with self._lock:
+            chan = self._channels.get(channel)
+            return chan.segments[0] if chan and chan.segments else None
 
     def newest(self, channel: str) -> Segment | None:
         with self._lock:
@@ -278,6 +303,7 @@ class BufferStore:
             chan = self._channels.get(channel)
             if chan:
                 chan.segments = [s for s in chan.segments if s.block != block]
+                chan.reindex()
                 freed = chan.sizes.pop(block, 0)
             else:
                 freed = 0

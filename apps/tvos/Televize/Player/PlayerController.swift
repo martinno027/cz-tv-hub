@@ -53,6 +53,9 @@ final class PlayerController {
     // "Pokračovat": where to save progress; nil for live.
     private let progressTarget: ResumeTarget?
     private let resumeStore: ResumeStore?
+    /// Timeline playback: the programme at the playhead and its progress for a player position (it changes
+    /// while playing), instead of the fixed target.
+    private let progressAt: (@MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)?
     private var progressObserver: Any?
     private var title: PlayerTitle
     private var liveTitle: (@MainActor () async -> PlayerTitle)?
@@ -62,6 +65,7 @@ final class PlayerController {
     private var backgroundObserver: NSObjectProtocol?
     /// False until the start position has been applied, so the pre-seek position is never saved.
     private var positionApplied = false
+    var isStartApplied: Bool { positionApplied }
     /// Audio renditions of the current item (gateway master playlists with several broadcast tracks).
     private var audioGroup: AVMediaSelectionGroup?
 
@@ -73,6 +77,7 @@ final class PlayerController {
     init(source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
          adBreaks: (@Sendable () async throws -> [AdBreak])? = nil,
          progress: (target: ResumeTarget, store: ResumeStore)? = nil,
+         progressAt: (store: ResumeStore, at: @MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)? = nil,
          title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
          offAir: (@MainActor () -> Void)? = nil) {
         self.source = source
@@ -83,7 +88,8 @@ final class PlayerController {
         self.fetchAdBreaks = adBreaks
         let tracked = source.mode == .live ? nil : progress
         self.progressTarget = tracked?.target
-        self.resumeStore = tracked?.store
+        self.resumeStore = tracked?.store ?? progressAt?.store
+        self.progressAt = progressAt?.at
         applyAudioPreference(language: nil, describesVideo: false)
     }
 
@@ -121,6 +127,25 @@ final class PlayerController {
         startLiveTitle()
     }
 
+    /// Timeline playback: plays another window of the channel's recording in this player, from
+    /// `source.startPosition`; `resolve` belongs to the new window from now on.
+    func switchSource(to source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource) {
+        guard started, !stopped else { return }
+        saveProgress()
+        keepSelectedAudio()
+        self.source = source
+        self.resolve = resolve
+        hasRetried = false
+        load(source, resume: nil)
+    }
+
+    /// The info bar title without reloading (timeline: the programme at the playhead).
+    func updateTitle(_ next: PlayerTitle) {
+        guard next != title else { return }
+        title = next
+        player.currentItem?.externalMetadata = Self.metadata(for: next)
+    }
+
     /// Safe to call more than once (fatal error, then the screen disappearing).
     func stop() {
         stopped = true
@@ -154,7 +179,7 @@ final class PlayerController {
     // MARK: progress ("Pokračovat")
 
     private func startProgressSaving() {
-        guard progressTarget != nil else { return }
+        guard progressTarget != nil || progressAt != nil else { return }
         let interval = CMTime(seconds: ResumeRules.saveInterval, preferredTimescale: 1)
         progressObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -171,9 +196,14 @@ final class PlayerController {
 
     /// Seconds from the programme's start: timeshift by the frame's wall clock, otherwise the position.
     private func saveProgress() {
-        guard let target = progressTarget, let store = resumeStore, positionApplied,
-              let item = player.currentItem, item.status == .readyToPlay else { return }
+        guard let store = resumeStore, positionApplied, let item = player.currentItem, item.status == .readyToPlay else { return }
         let position = item.currentTime().seconds
+        if let progressAt {
+            guard position.isFinite, let (target, progress) = progressAt(position) else { return }
+            store.save(target, progress: progress)
+            return
+        }
+        guard let target = progressTarget else { return }
         let liveEdge = item.seekableTimeRanges.last.map { CMTimeRangeGetEnd($0.timeRangeValue).seconds }
         guard let progress = ResumeRules.progress(mode: source.mode, position: position, frameDate: item.currentDate(),
                                                   liveEdgePosition: liveEdge, programmeStart: target.programmeStart,
@@ -288,6 +318,7 @@ final class PlayerController {
                             await self.applyStartPosition(item, source: source, resume: resume)
                             if self.player.currentItem === item { self.positionApplied = true }
                             self.player.play()
+                            await self.keepRecordingStart(item)
                         }
                     case .failed:
                         self.statusHandled = true
@@ -332,8 +363,10 @@ final class PlayerController {
 
     private func applyStartPosition(_ item: AVPlayerItem, source: PlaybackSource, resume: Resume?) async {
         switch (source.mode, resume) {
-        case (.vod, .seconds(let seconds)?), (.recording, .seconds(let seconds)?):
+        case (.vod, .seconds(let seconds)?):
             await item.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+        case (.recording, .seconds(let seconds)?):
+            await seekRecording(item, to: seconds)
         case (.startOver, .date(let date)?):
             await seek(item, to: date, fallbackOffset: nil)
         case (.startOver(let date, let offset), _):
@@ -344,9 +377,46 @@ final class PlayerController {
                 await item.seek(to: CMTime(seconds: start, preferredTimescale: 600))
             }
         case (.recording, _):
-            await item.seek(to: CMTime(seconds: source.startPosition ?? 0, preferredTimescale: 600))
+            // "Od začátku" of a growing recording too: players open a growing playlist at its live edge.
+            await seekRecording(item, to: source.startPosition ?? 0)
         default:
             break  // live edge
+        }
+    }
+
+    /// Where a recording / timeline was asked to start; checked once it plays (`keepRecordingStart`).
+    private var recordingStart: (item: AVPlayerItem, seconds: Double)?
+
+    /// Recordings and timelines start exactly at `seconds` (zero tolerance), the result logged.
+    private func seekRecording(_ item: AVPlayerItem, to seconds: Double) async {
+        recordingStart = (item, seconds)
+        let finished = await item.seek(to: CMTime(seconds: seconds, preferredTimescale: 600),
+                                       toleranceBefore: .zero, toleranceAfter: .zero)
+        let now = item.currentTime().seconds
+        let ranges = item.seekableTimeRanges.map { range -> String in
+            let r = range.timeRangeValue
+            return String(format: "%.1f-%.1f", r.start.seconds, CMTimeRangeGetEnd(r).seconds)
+        }.joined(separator: ",")
+        playerLog.info("start seek to \(seconds, format: .fixed(precision: 1)): finished=\(finished) now=\(now, format: .fixed(precision: 1)) seekable=\(ranges, privacy: .public)")
+    }
+
+    /// AVPlayer moves a growing (EVENT) playlist without `EXT-X-START` to its live edge when playback starts, after
+    /// an already finished seek (tvOS 26 simulator, 2026-10-24: seek to 0 finished, then playing at 132 of 132).
+    /// For the first seconds of playback: if the position left the start, seek there again.
+    private func keepRecordingStart(_ item: AVPlayerItem) async {
+        guard let start = recordingStart, start.item === item else { return }
+        recordingStart = nil
+        for attempt in 1...3 {
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard player.currentItem === item, !stopped else { return }
+                if player.timeControlStatus == .playing { break }
+            }
+            let now = item.currentTime().seconds
+            playerLog.info("start check \(attempt): now=\(now, format: .fixed(precision: 1)) wanted=\(start.seconds, format: .fixed(precision: 1))")
+            // Playing on from the start is fine; only a jump ahead of it is not.
+            guard now.isFinite, now - start.seconds > 5 else { return }
+            await item.seek(to: CMTime(seconds: start.seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
 
@@ -425,6 +495,23 @@ final class PlayerController {
 
     // MARK: audio ("Audio choice for Anténa", spec/apps.md)
 
+    /// The audio renditions of the current item with the selected one (timeline player's own audio list).
+    var audioChoices: (options: [AVMediaSelectionOption], selected: AVMediaSelectionOption?) {
+        guard let group = audioGroup, let item = player.currentItem else { return ([], nil) }
+        return (group.options, item.currentMediaSelection.selectedMediaOption(in: group))
+    }
+
+    func selectAudio(_ option: AVMediaSelectionOption) {
+        guard let group = audioGroup, let item = player.currentItem else { return }
+        item.select(option, in: group)
+        playerLog.info("audio selected \(option.displayName, privacy: .public)")
+    }
+
+    static func audioTitle(_ option: AVMediaSelectionOption) -> String {
+        AVMetadataItem.metadataItems(from: option.commonMetadata, filteredByIdentifier: .commonIdentifierTitle)
+            .first?.stringValue ?? option.displayName
+    }
+
     /// Czech first, or the viewer's own pick when the stream is reloaded. Applies to the next items too,
     /// so AVPlayerViewController's audio menu starts on that track and still lists all of them.
     private func applyAudioPreference(language: String?, describesVideo: Bool) {
@@ -441,9 +528,7 @@ final class PlayerController {
               player.currentItem === item else { return }
         audioGroup = group
         let names = group.options.map { option in
-            let title = AVMetadataItem.metadataItems(from: option.commonMetadata, filteredByIdentifier: .commonIdentifierTitle)
-                .first?.stringValue ?? option.displayName
-            return "\(title) [\(option.extendedLanguageTag ?? "-")]"
+            "\(Self.audioTitle(option)) [\(option.extendedLanguageTag ?? "-")]"
         }.joined(separator: ", ")
         let selected = item.currentMediaSelection.selectedMediaOption(in: group)?.displayName ?? "-"
         playerLog.info("audio options: \(names, privacy: .public); selected \(selected, privacy: .public)")

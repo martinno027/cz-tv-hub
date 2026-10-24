@@ -163,7 +163,10 @@
     /** The gateway's Czech `error` text from a JSON error body, if any. */
     errorText: function (body) {
       return J.str(J.parse(body), 'error');
-    }
+    },
+
+    /** The JSON object of a 2xx answer, else a CtError with the gateway's Czech text. */
+    ensureOk: ensureOk
   };
 
   /** `transport` as for CtApi. */
@@ -197,6 +200,13 @@
   DvbClient.prototype.breaks = function (recordingId) {
     return this.get('/dvb/recording/' + encodeURIComponent(recordingId) + '/breaks').then(function (r) {
       return DvbParser.parseBreaks(r.status, r.body);
+    });
+  };
+
+  /** The channel timeline around a continuous-recording programme (spec/dvb-gateway.md "Channel timeline"). */
+  DvbClient.prototype.timeline = function (recordingId) {
+    return this.get('/dvb/timeline/' + encodeURIComponent(recordingId)).then(function (r) {
+      return CT.Timeline.parse(r.status, r.body);
     });
   };
 

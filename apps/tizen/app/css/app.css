@@ -951,6 +951,142 @@ main {
   text-overflow: ellipsis;
 }
 
+/* Anténa timeline bar (spec/apps.md "Anténa timeline player"): replaces the plain progress bar */
+#tl {
+  display: none;
+}
+
+#osd.timeline #tl {
+  display: block;
+}
+
+#osd.timeline #osd-bar,
+#osd.timeline #osd-position,
+#osd.timeline #osd-duration {
+  display: none;
+}
+
+#tl-label-row {
+  position: relative;
+  height: 44px;
+}
+
+#tl-label {
+  position: absolute;
+  bottom: 6px;
+  font-size: 28px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+#tl-track {
+  position: relative;
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+#tl-pieces, #tl-ticks {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.tl-piece {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+#tl-programme {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 3px solid rgba(255, 255, 255, 0.9);
+}
+
+#tl-played {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+.tl-tick {
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  width: 3px;
+  margin-left: -1px;
+  background: #fff;
+}
+
+#tl-head {
+  position: absolute;
+  top: -10px;
+  width: 6px;
+  height: 34px;
+  margin-left: -3px;
+  border-radius: 3px;
+  background: var(--focus);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+}
+
+#tl-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 24px;
+  color: #ddd;
+  margin-top: 12px;
+}
+
+/* Audio list (long OK in the timeline player) */
+#audio-list {
+  position: absolute;
+  right: 96px;
+  top: 120px;
+  min-width: 420px;
+  padding: 20px 0;
+  border-radius: 14px;
+  background: rgba(13, 17, 23, 0.92);
+  border: 2px solid var(--surface-hi);
+  display: none;
+  z-index: 4;
+}
+
+#audio-list.visible {
+  display: block;
+}
+
+#audio-list .audio-title {
+  font-size: 24px;
+  color: var(--muted);
+  padding: 0 32px 10px;
+}
+
+.audio-item {
+  font-size: 32px;
+  padding: 12px 32px;
+}
+
+.audio-item.current::after {
+  content: ' ✓';
+}
+
+.audio-item.focused {
+  background: var(--focus);
+  color: #000;
+}
+
 /* Poslanecká sněmovna: live check on the Živě cards and the guide's whole-day cells */
 .live-badge {
   display: inline-block;

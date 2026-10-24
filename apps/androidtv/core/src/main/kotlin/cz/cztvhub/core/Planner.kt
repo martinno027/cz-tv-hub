@@ -2,6 +2,8 @@ package cz.cztvhub.core
 
 import cz.cztvhub.core.dvb.DvbClient
 import cz.cztvhub.core.dvb.DvbMessages
+import cz.cztvhub.core.dvb.DvbTimeline
+import cz.cztvhub.core.dvb.TimelineRules
 import java.time.Instant
 
 /** What the viewer asked to play. Holds no stream URLs, so it is safe to keep in an Intent. */
@@ -48,6 +50,8 @@ sealed interface PlayRequest {
     /**
      * A gateway recording; [fromStart] plays a still-growing recording from its beginning. [lengthSeconds]
      * (the EPG event's length) lets the player remember progress; [resumeSeconds] starts there instead.
+     * A continuous-recording id (`b…`) plays in its channel timeline, where [resumeSeconds] counts from the
+     * programme's start (spec/apps.md "Anténa timeline player").
      */
     data class DvbRecorded(
         override val channelId: String,
@@ -75,6 +79,8 @@ data class PlayTarget(
     val headers: Map<String, String> = emptyMap(),
     /** Explicit start position, e.g. 0 for a still-growing recording. */
     val startPositionMs: Long? = null,
+    /** The channel timeline window a `b…` recording plays in; [startPositionMs] is then mapped through it. */
+    val timeline: DvbTimeline? = null,
 )
 
 /** Turns a [PlayRequest] into a playable URL, resolving on the device right before playback. */
@@ -84,8 +90,11 @@ class Planner(
     private val clock: () -> Instant = Instant::now,
     private val dvb: () -> DvbClient? = { null },
 ) {
-    /** Throws [CtException] with a Czech message when nothing can be played. */
-    fun plan(request: PlayRequest, forceRefresh: Boolean = false): PlayTarget {
+    /**
+     * Throws [CtException] with a Czech message when nothing can be played. [timelineAt] opens a timeline
+     * window at that wall clock (a hand-off to a neighbouring window, or a re-open) instead of the programme.
+     */
+    fun plan(request: PlayRequest, forceRefresh: Boolean = false, timelineAt: Instant? = null): PlayTarget {
         when (request) {
             is PlayRequest.DvbLive -> {
                 val client = dvb() ?: throw CtException("DVB not configured", DvbMessages.UNREACHABLE)
@@ -93,6 +102,18 @@ class Planner(
             }
             is PlayRequest.DvbRecorded -> {
                 val client = dvb() ?: throw CtException("DVB not configured", DvbMessages.UNREACHABLE)
+                if (TimelineRules.isTimelineId(request.recordingId)) {
+                    val timeline = client.timeline(request.recordingId)
+                    val position = TimelineRules.startPosition(timeline, request.resumeSeconds, timelineAt)
+                    return PlayTarget(
+                        url = client.timelineUrl(timeline),
+                        kind = PlayKind.VOD,
+                        title = request.title,
+                        headers = client.config.authHeaders,
+                        startPositionMs = Math.round(position * 1000),
+                        timeline = timeline,
+                    )
+                }
                 return PlayTarget(
                     url = client.recordingUrl(request.recordingId),
                     kind = PlayKind.VOD,
