@@ -9,6 +9,10 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
   Běžící pořad: **Od začátku** (Zpět v čase / rostoucí záznam antény) nebo **Živě**. Odvysílaný pořad:
   archiv iVysílání, do 3 h od začátku vždy ze „Zpět v čase“, u antény ze záznamu. Nedostupné pořady jsou ztlumené,
   po výběru se ukáže důvod od ČT („ČT nemá práva pro internet“, u DRM odkaz na oficiální aplikaci iVysílání).
+- **Poslanecká sněmovna**: pět veřejných přímých přenosů Poslanecké sněmovny PČR (schůze, tiskové konference,
+  výbory a semináře), jen živě: nic se nenahrává, žádné „Od začátku“ ani „Pokračovat“. Karta v Živě ukazuje
+  červené **● ŽIVĚ**, ztlumené „Nevysílá se“ nebo „Zjišťuji…“; zjišťuje se jen při otevřeném Živě nebo průvodci,
+  každý přenos nejvýš jednou za minutu. Vypíná se v Nastavení → Kanály.
 - **Pokračovat**: televize si pamatuje, kde jste pořad přestali sledovat (jen v sobě, nikam to neposílá), a při dalším
   výběru nabídne „Pokračovat od 23:10“. Dosledované pořady zapomene.
 - **Přeskočit reklamu** (volitelné, zapíná se na bráně, viz [`spec/ad-breaks.md`](../../spec/ad-breaks.md)): u hotových
@@ -20,7 +24,7 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
 Stream se vždy vyžádá až na televizi těsně před přehráním (odkazy ČT jsou vázané na IP a platí asi hodinu).
 Aplikace nic nenahrává, neukládá ani neobchází DRM či geoblokaci. Bez reklam, analytiky a účtů.
 
-> Neoficiální projekt, není spojen s Českou televizí. ČT a iVysílání jsou ochranné známky České televize.
+> Neoficiální projekt, není spojen s Českou televizí ani s Poslaneckou sněmovnou PČR. ČT a iVysílání jsou ochranné známky České televize.
 
 ## Stav
 
@@ -33,7 +37,9 @@ je vyzkoušené v prohlížeči s ukázkovými daty. **Na skutečné televizi za
   skáče o spočítaný posun od začátku 3h bufferu),
 - anténa: AVPlay neumí poslat hlavičku `Authorization`, proto posílá klíč brány jako cookie `cztvhub_key`
   (brána ji přijímá) a fMP4/HEVC HLS z brány,
-- balení přes `tizen` CLI (`build.py`).
+- balení přes `tizen` CLI (`build.py`),
+- přímé přenosy Poslanecké sněmovny: dotaz na playlist z aplikace (CDN nemusí posílat CORS hlavičky, spoléhá se na
+  `<access origin="*">`) a jejich přehrání v AVPlay.
 
 ## Struktura
 
@@ -56,7 +62,8 @@ cd ../.. && python3 -m http.server 8000    # z kořene repozitáře
 ```
 
 Ukázkový režim (`?demo`) odpovídá na všechny požadavky z testovacích fixtur (`spec/fixtures`) posunutých na
-zvolený den; nic se nepřehrává. Ovládání: šipky, Enter, Esc/Backspace = Zpět, PageUp/PageDown = o stránku řádků.
+zvolený den; nic se nepřehrává. Přenosy Poslanecké sněmovny jsou v ukázce vymyšlené (vysílá jen Stream 1,
+`?demo&psp=13` = vysílají 1 a 3), na CDN sněmovny se ukázka nikdy neptá. Ovládání: šipky, Enter, Esc/Backspace = Zpět, PageUp/PageDown = o stránku řádků.
 
 ## Instalace do televize (bez obchodu Samsung)
 

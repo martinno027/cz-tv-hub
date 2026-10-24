@@ -3,7 +3,9 @@
  * error (typically an expired signed URL) it is re-resolved once and resumed.
  *
  * Samsung's AVPlay plays HLS natively. It cannot send request headers, so "Anténa" streams carry the
- * gateway key as a cookie (setStreamingProperty COOKIE). A desktop browser falls back to <video>.
+ * gateway key as a cookie (setStreamingProperty COOKIE) - only for the gateway's own streams. Poslanecká sněmovna
+ * streams are opened with the published URL and nothing else (no cookie, no header), live only. A desktop browser
+ * falls back to <video>.
  */
 (function (root) {
   'use strict';
@@ -20,11 +22,11 @@
   var HINT_OTHER = 'OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · ▲ AUDIO zvuk · Zpět konec';
 
   function isLive(request) {
-    return !!request && (request.kind === 'live' || request.kind === 'dvbLive');
+    return !!request && (request.kind === 'live' || request.kind === 'dvbLive' || request.kind === 'pspLive');
   }
 
   function channelKey(request) {
-    return (request.kind === 'dvbLive' ? 'dvb:' : 'ct:') + request.channelId;
+    return CT.LIVE_PREFIX[request.kind] + request.channelId;
   }
 
   function $(id) {
@@ -52,7 +54,8 @@
     av.open(target.url);
     av.setDisplayRect(0, 0, 1920, 1080);
     av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
-    if (target.dvb) av.setStreamingProperty('COOKIE', target.dvb.config.cookie());
+    // The gateway key cookie goes only to the gateway (never to CT's or the Chamber's CDN).
+    if (target.dvb && !target.psp) av.setStreamingProperty('COOKIE', target.dvb.config.cookie());
     if (target.kind === 'live') {
       // Live: start once ~2 s (one gateway segment) is buffered; not every firmware accepts this.
       try {
@@ -355,7 +358,12 @@
     channel.appendChild(number);
     channel.appendChild(document.createTextNode(item.channel.name));
     var now = this.app.airingNow(item);
-    $('zap-programme').textContent = now ? now.title : '';
+    var text = now ? now.title : '';
+    if (item.source === 'psp') {
+      var state = this.app.pspState(item.channel.id);
+      text = state === 'live' ? CT.Psp.LIVE_TEXT : state === 'off' ? CT.Psp.OFF_TEXT : '';
+    }
+    $('zap-programme').textContent = text;
     $('zap-box').classList.add('visible');
     clearTimeout(this.zapBoxTimer);
     this.zapBoxTimer = setTimeout(function () { $('zap-box').classList.remove('visible'); }, ZAP_BOX_MS);
@@ -368,7 +376,9 @@
     var app = this.app;
     var isDvb = r.kind === 'dvbLive' || r.kind === 'dvbRecorded';
     var channel = null;
-    if (isDvb) {
+    if (r.kind === 'pspLive') {
+      channel = CT.Psp.byId(r.channelId);
+    } else if (isDvb) {
       var list = (app.dvbState && app.dvbState.channels) || app.dvbChannels || [];
       channel = list.filter(function (c) { return c.id === r.channelId; })[0] || null;
     } else {
@@ -378,6 +388,8 @@
     var t;
     if (r.kind === 'live') {
       t = CT.PlayerTitle.live(name, app.ctState && app.ctState.onAir ? app.ctState.onAir[r.channelId] : null, Date.now());
+    } else if (r.kind === 'pspLive') {
+      t = { title: name, subtitle: CT.Psp.LIVE_TEXT + ' · ' + CT.Psp.SOURCE_LABEL };
     } else if (r.kind === 'dvbLive') {
       t = CT.PlayerTitle.live(name, app.dvbState && app.dvbState.onAir ? app.dvbState.onAir[r.channelId] : null, Date.now());
     } else {
@@ -427,7 +439,17 @@
     } else {
       this.backend.close();
       this.showMessage(CT.Messages.PLAYBACK);
+      if (this.request.kind === 'pspLive') this.explainPsp();
     }
+  };
+
+  /** A Chamber stream failed again: if its playlist says it is not on (a check reused or ≥ 60 s apart), say so. */
+  Player.prototype.explainPsp = function () {
+    var self = this;
+    var request = this.request;
+    this.app.psp.open(request.channelId, false).then(function (state) {
+      if (self.request === request && state === 'off') self.showMessage(CT.Psp.OFF_MESSAGE);
+    });
   };
 
   /**

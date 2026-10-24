@@ -6,7 +6,8 @@ Tizen 4.0+ web app, plain ES2017 JavaScript/AVPlay). All follow this document an
 behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `guide.py`).
 
 ## Hard rules (from CLAUDE.md, non-negotiable)
-- Only Ceska televize's own official streams, through the endpoints below. No other sources.
+- Only Ceska televize's own official streams, through the endpoints below, the household's own antenna (gateway) and
+  the Chamber of Deputies' public live streams ("Poslanecká sněmovna", live only). No other sources.
 - Resolve every stream **on the device** right before playback (URLs are IP-bound, expire ~1 h). Never persist
   signed URLs; an in-memory reuse of at most 60 s is fine.
 - Never circumvent DRM, geo-blocking or token/IP checks (never touch `skipIpAddressCheck`, never request DRM).
@@ -185,8 +186,9 @@ In **Nastavení → Kanály** the viewer hides channels and changes their order,
 "Pokračovat": no sync, no account; another TV keeps its own). Applies to **Živě** and the **TV průvodce** alike.
 Separate from the gateway's `/admin` page: a channel switched off there is not received at all; here a channel is just
 not shown on this TV.
-- **Keys**: CT internet channel `ct:<API id>` (`ct:CH_1`); Anténa channel `dvb:<gateway channel id>`.
-- **Stored**: `{"order": [keys], "hidden": [keys], "sourcesOff": ["ct" | "dvb"]}` (missing `sourcesOff` = both on; tvOS `UserDefaults` key `channelPrefs`, Android
+- **Keys**: CT internet channel `ct:<API id>` (`ct:CH_1`); Anténa channel `dvb:<gateway channel id>`; Chamber of
+  Deputies stream `psp:<stream id>` (`psp:stream1`, see "Poslanecká sněmovna").
+- **Stored**: `{"order": [keys], "hidden": [keys], "sourcesOff": ["ct" | "dvb" | "psp"]}` (missing `sourcesOff` = all on; tvOS `UserDefaults` key `channelPrefs`, Android
   `SharedPreferences` `channel_prefs`, Samsung `localStorage` `cztvhub.channelPrefs`; JSON, at most 500 keys each).
   Unknown keys are kept (an Anténa channel switched off in `/admin` keeps its place when it comes back).
 - **Sources**: the whole **Internetová TV** (`ct`, the six CT channels) and the whole **Anténa** (`dvb`, the gateway's
@@ -194,7 +196,7 @@ not shown on this TV.
   settings order list); its channels keep their stored order/hidden state for when it is switched on again. Anténa
   without a configured gateway has no channels anyway (its switch is not shown).
 - **One mixed list** (no "Internet ČT" / "Anténa" groups any more): the channels of the sources that are on, in default
-  order CT first (catalogue order), then Anténa (gateway order). The viewer may put Anténa channels between CT ones.
+  order CT first (catalogue order), then Anténa (gateway order), then Poslanecká sněmovna (stream 1…5). The viewer may put Anténa channels between CT ones.
 - **arrange(channels in default order, prefs)** → `all` = keys of `order` that are in the list (first occurrence),
   then the list's other channels in default order (a new channel is appended at the end); `visible` = `all` without
   `hidden`. Živě and the guide show `visible`; the settings list shows `all`.
@@ -216,8 +218,8 @@ not shown on this TV.
   discovery in the local network; "O aplikaci" at its end). The remote's **Back** (Siri Remote Menu/‹, Android
   Back, Samsung Return) returns to the choice, with focus on the item just left; Back on the choice leaves Nastavení
   as before.
-- **Settings UI (Kanály)**: first the two source switches `[☑ Internetová TV (ČT)]` and `[☑ Anténa]` (the latter only
-  with a gateway), then one list "Pořadí kanálů" of rows `[icon ☑ ČT1] [▲] [▼]` (left/right moves between the three
+- **Settings UI (Kanály)**: first the source switches `[☑ Internetová TV (ČT)]`, `[☑ Anténa]` (only with a gateway)
+  and `[☑ Poslanecká sněmovna]`, then one list "Pořadí kanálů" of rows `[icon ☑ ČT1] [▲] [▼]` (left/right moves between the three
   controls; select on the name toggles "zobrazovat", hidden rows dimmed, ▲ on the first / ▼ on the last row
   disabled), then "Obnovit výchozí pořadí". Anténa channels need the gateway (unreachable → Czech message above the
   list, the CT channels still listed). Focus stays on the moved row's button after ▲/▼ and the list scrolls so the
@@ -226,6 +228,48 @@ not shown on this TV.
   "Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály."
 - Golden cases: `spec/fixtures/channel_prefs_cases.json` (`arrange` and `move` on mixed lists; the input list is
   already filtered by the sources that are on), tested in all three apps.
+
+## "Poslanecká sněmovna" (live streams of the Chamber of Deputies, T06, approved 2026-10-24)
+A third source, **on by default**, with five live-only channels the Chamber publishes on psp.cz ("Živé vysílání").
+Catalogue (`spec/fixtures/psp_cases.json` "streams", the same in every app; no other URLs, no mirrors):
+
+| key | name | URL |
+|---|---|---|
+| `psp:stream1` | Schůze PS | `https://pspcr-ott-live.ssl.cdn.cra.cz/channels/ps-stream1/playlist/cze.m3u8` |
+| `psp:stream2` | Tiskové konference | `…/channels/ps-stream2/playlist/cze.m3u8` |
+| `psp:stream3` | Výbory a semináře 1 | `…/channels/ps-stream3/playlist/cze.m3u8` |
+| `psp:stream4` | Výbory a semináře 2 | `…/channels/ps-stream4/playlist/cze.m3u8` |
+| `psp:stream5` | Výbory a semináře 3 | `…/channels/ps-stream5/playlist/cze.m3u8` |
+
+- **Play only, live only** (CLAUDE.md hard rules): the player opens the URL as published, no extra or faked headers,
+  no recording, no "Pokračovat", no start-over or rewind beyond the player's own live window, no thumbnails.
+- **"Is it on now?"** `isLive(status, body)` = HTTP 200 and the body is an HLS playlist (`#EXTM3U`) with at least one
+  media segment (`#EXTINF`) or variant (`#EXT-X-STREAM-INF`); anything else (404 "channel ps-streamN is not processed
+  now" outside broadcasts, seen 2026-10-24; any 4xx/5xx; an empty playlist; not a playlist) = not on. A **network
+  error** (no answer) keeps the last known state; a "live" state older than 180 s without a confirming check is shown as
+  unknown ("Zjišťuji…"), not as live. Next check: after a normal answer (200, or the 404 "not processed now")
+  60 s; after a 5xx or a network error 120 s.
+  Checked only while Živě or the guide is on screen, the five streams one after another, each at most once per
+  60 s (after an error: 120 s); nothing in the background, no segment is fetched. **Right before playback** the app
+  reuses a check younger than 60 s or makes one more check of the same playlist (one GET per viewer action; the
+  player fetches that playlist anyway), so an off stream gets the message instead of a player error. Golden cases:
+  `psp_cases.json` "live".
+- **Icon**: a generic building-with-columns symbol (SF Symbols `building.columns`, Material `AccountBalance`, inline SVG
+  on Samsung), never the Chamber's logo or the state emblem. Source label in settings: "Poslanecká sněmovna PČR".
+- **Živě**: on → the card shows a clear red **"● ŽIVĚ"** badge and "Přímý přenos"; off → the card is dimmed with
+  "Nevysílá se". Selecting an off channel shows "Poslanecká sněmovna teď nevysílá." (no player); an on channel plays
+  live. Unknown state (not checked yet) = "Zjišťuji…", selecting it tries to play.
+- **TV průvodce**: one row per stream with a single cell over the whole day. **Today**: "Přímý přenos" (look
+  `airing`, select = play live) or "Nevysílá se" (dimmed, select = the message above). **Other days**: a dimmed
+  "Jen přímé přenosy" cell; select → "Poslanecká sněmovna: jen přímé přenosy, bez záznamů." The detail shows the
+  channel name and "Zdroj: Poslanecká sněmovna PČR". No programme data.
+- **Labels**: the source switch may read "Poslanecká sněmovna" with a muted second line "PČR · jen přímé přenosy";
+  long stream names wrap to two lines on the Živě cards (the three "Výbory a semináře N" must stay distinguishable).
+- **Zapping / numbers**: the streams are ordinary channels in `visible` (numbered, ▲/▼, digits). Zapping onto a
+  stream that is not on shows the overlay with "Nevysílá se" and the player's message instead of a stream error.
+- **Player errors**: a 404 when opening means the broadcast just ended → "Poslanecká sněmovna teď nevysílá."
+- Golden cases `psp_cases.json`: "streams" (catalogue), "live" (status/body → on or not), "arrange" (default order
+  with three sources and `sourcesOff` containing `psp`). Tests never contact psp.cz or its CDN.
 
 ## Channel numbers and zapping
 Every channel shown on this TV has a **number**: its 1-based position in `visible` of "Kanály" (hidden channels

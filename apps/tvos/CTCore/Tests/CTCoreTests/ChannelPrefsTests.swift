@@ -76,7 +76,8 @@ final class ChannelPrefsTests: XCTestCase {
         let store = ChannelPrefsStore(backend: MemoryBackend())
         let antenna = [DVBChannel(id: "a", number: 1, name: "ČT1 HD"), DVBChannel(id: "b", number: 2, name: "Nova")]
         XCTAssertEqual(store.channels(antenna: antenna).all.map(\.key),
-                       Channels.all.map(ChannelPrefs.ctKey) + ["dvb:a", "dvb:b"])
+                       Channels.all.map(ChannelPrefs.ctKey) + ["dvb:a", "dvb:b"] + PSPStreams.all.map(\.key))
+        store.update { $0.setOn(.psp, false) }
         let keys = store.channels(antenna: antenna).all.map(\.key)
         store.update { $0.move("dvb:a", by: -1, in: keys) }  // Anténa channel between CT ones
         XCTAssertEqual(store.channels(antenna: antenna).all.map(\.key).suffix(3), ["dvb:a", "ct:CH_6", "dvb:b"])

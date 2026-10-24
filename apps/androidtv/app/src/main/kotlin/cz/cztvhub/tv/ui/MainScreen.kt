@@ -55,6 +55,7 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     )
 
     val numbers = rememberNumberKeys(viewModel, onPlay)
+    val notice by viewModel.notice.collectAsStateWithLifecycle()
 
     CompositionLocalProvider(LocalContentColor provides Palette.text) {
     Box(Modifier.fillMaxSize().onPreviewKeyEvent { tab != 2 && numbers.onKey(it.nativeKeyEvent) }) {
@@ -91,9 +92,11 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
             else -> SettingsScreen(viewModel, settingsSection) { settingsSection = it }
         }
     }
-    if (numbers.text.isNotEmpty()) {
+    // The number buffer, else a short notice (e.g. "Poslanecká sněmovna teď nevysílá.").
+    val overlay = numbers.text.ifEmpty { notice.orEmpty() }
+    if (overlay.isNotEmpty()) {
         Text(
-            numbers.text,
+            overlay,
             style = MaterialTheme.typography.displaySmall,
             color = Palette.text,
             modifier = Modifier
@@ -140,6 +143,7 @@ private fun rememberNumberKeys(viewModel: MainViewModel, onPlay: (PlayRequest) -
     val play by rememberUpdatedState(onPlay)
     // Unformatted "Kanál %1$d není", formatted when a number misses.
     val missing by rememberUpdatedState(stringResource(R.string.channel_missing))
+    val notOn by rememberUpdatedState(stringResource(R.string.psp_not_on))
     return remember {
         var keys: NumberKeys? = null
         var messageJob: Job? = null
@@ -155,8 +159,12 @@ private fun rememberNumberKeys(viewModel: MainViewModel, onPlay: (PlayRequest) -
             onNumber = { number ->
                 val channels = visible()
                 val key = ChannelNumbers.resolve(channels.map { it.key }, number)
-                val request = channels.firstOrNull { it.key == key }?.let { ZapChannel(it.key, it.name).liveRequest() }
-                if (request != null) {
+                val listed = channels.firstOrNull { it.key == key }
+                val request = listed?.let { ZapChannel(it.key, it.name).liveRequest() }
+                val stream = listed?.psp
+                if (stream != null) {
+                    selectPsp(viewModel, stream, play) { viewModel.showNotice(notOn) }
+                } else if (request != null) {
                     play(request)
                 } else {
                     keys?.text = missing.format(number)

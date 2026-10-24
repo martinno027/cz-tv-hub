@@ -1,7 +1,23 @@
 # Legal notes (not legal advice)
 
-cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed by or connected to Česká televize.
+cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed by or connected to Česká televize
+or Poslanecká sněmovna Parlamentu ČR.
 "ČT", "ČT1", "ČT2", "ČT24", "ČT sport", "ČT :D", "ČT art" and "iVysílání" are trademarks of Česká televize.
+
+## Live streams of the Chamber of Deputies (approved by the user on 2026-10-24)
+- Only the public live streams that Poslanecká sněmovna Parlamentu ČR publishes for everyone on psp.cz ("Živé
+  vysílání", Stream 1–5: sessions, press conferences, committees and seminars). The viewer's TV app plays them directly
+  from the Chamber's CDN; there is no proxy, no server, no playlist or Kodi export.
+- Play only, live only: no recording, download, caching or timeshift, now or later. They are never fed into TVHeadend.
+- No circumvention: the apps request the published URL without extra or faked headers. If the streams start to need a
+  token, login, referer or geo check, the apps show an error and the source is removed.
+- The "live now" check reads only the playlist, only while the screen showing it is visible, at most once a minute
+  per stream, plus one read of the same playlist right before the viewer starts a stream (the player fetches it
+  anyway); no segments, nothing in the background.
+- Not affiliated with or endorsed by the Chamber; its name only says where a stream comes from. Its logo and the state
+  emblem (zákon č. 352/2001 Sb.) are not used. No specific terms of use for the streams were found on psp.cz
+  (checked 2026-10-24); the basis is "play only, as offered". The archive videoarchiv.psp.cz is not used (it would
+  need its own review).
 
 ## Internet streams of Česká televize
 - Only the public live streams, the "Zpět v čase" buffer and the iVysílání archive that Česká televize offers to
@@ -42,5 +58,5 @@ cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed
 - The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,
   playlists or EPG exports and runs no public server. You build and run it yourself, for your own household only.
 - Do not host it for others, expose it to the public internet or share access outside your household.
-- Do not add third-party or pirate sources.
+- Do not add sources other than those listed above, and never pirate sources.
 - The Czech TV licence fee (televizní poplatek) remains your responsibility.

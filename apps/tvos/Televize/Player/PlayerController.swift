@@ -56,6 +56,8 @@ final class PlayerController {
     private var progressObserver: Any?
     private var title: PlayerTitle
     private var liveTitle: (@MainActor () async -> PlayerTitle)?
+    /// Poslanecká sněmovna: a 404 when opening = the broadcast ended (no retry, its own message).
+    private var offAir: (@MainActor () -> Void)?
     private var titleTask: Task<Void, Never>?
     private var backgroundObserver: NSObjectProtocol?
     /// False until the start position has been applied, so the pre-seek position is never saved.
@@ -71,8 +73,10 @@ final class PlayerController {
     init(source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
          adBreaks: (@Sendable () async throws -> [AdBreak])? = nil,
          progress: (target: ResumeTarget, store: ResumeStore)? = nil,
-         title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil) {
+         title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
+         offAir: (@MainActor () -> Void)? = nil) {
         self.source = source
+        self.offAir = offAir
         self.title = title ?? PlayerTitle(title: source.title)
         self.liveTitle = liveTitle
         self.resolve = resolve
@@ -103,12 +107,13 @@ final class PlayerController {
     /// Zapping (live only): plays another channel's already resolved live stream in this player; `resolve` and
     /// `liveTitle` belong to the new channel from now on (re-resolve after a failure, info bar title).
     func switchLive(to source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
-                    liveTitle: @escaping @MainActor () async -> PlayerTitle) {
+                    liveTitle: @escaping @MainActor () async -> PlayerTitle, offAir: (@MainActor () -> Void)? = nil) {
         guard started, !stopped, self.source.mode == .live, source.mode == .live else { return }
         titleTask?.cancel()
         self.source = source
         self.resolve = resolve
         self.liveTitle = liveTitle
+        self.offAir = offAir
         hasRetried = false
         title = PlayerTitle(title: source.title)
         applyAudioPreference(language: nil, describesVideo: false)
@@ -364,6 +369,13 @@ final class PlayerController {
 
     private func handleFailure(_ error: Error?) {
         playerLog.error("playback failed: \(String(describing: error), privacy: .public)")
+        if let offAir, Self.isNotFound(error, item: player.currentItem) {
+            playerLog.info("stream not found: broadcast over")
+            stop()
+            offAir()
+            onFatalError?(PSPStreams.offAirMessage)
+            return
+        }
         guard !hasRetried else {
             stop()
             onFatalError?("Přehrávání se nezdařilo. Zkuste to prosím znovu.")
@@ -383,6 +395,19 @@ final class PlayerController {
                 onFatalError?(AppModel.message(for: error))
             }
         }
+    }
+
+    /// HTTP 404 for the playlist: in the item's error log, or CoreMedia's -12938 (HTTP 404) in the error chain.
+    private static func isNotFound(_ error: Error?, item: AVPlayerItem?) -> Bool {
+        if item?.errorLog()?.events.contains(where: { $0.errorStatusCode == 404 }) == true { return true }
+        var current = error.map { $0 as NSError }
+        while let nsError = current {
+            if nsError.code == -12938 || (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorFileDoesNotExist) {
+                return true
+            }
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 
     private func currentResume() -> Resume? {

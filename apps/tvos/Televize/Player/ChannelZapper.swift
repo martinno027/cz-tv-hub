@@ -92,8 +92,15 @@ final class ChannelZapper {
             let source = try await start.resolve()
             // A later press took over.
             guard !stopped, targetKey == key else { return }
-            controller.switchLive(to: source, resolve: start.resolve, liveTitle: start.liveTitle)
+            controller.switchLive(to: source, resolve: start.resolve, liveTitle: start.liveTitle, offAir: start.offAir)
             playingKey = key
+        } catch let error as CTError where error.code == PSPStreams.offAirCode {
+            // A Chamber stream that is not on: the banner says "Nevysílá se" with the message; the old picture
+            // stays and ▲/▼ steps on from this channel.
+            guard !stopped, targetKey == key else { return }
+            zapLog.info("zap to \(key, privacy: .public): not on air")
+            showBanner(for: key)
+            entry.show(message: error.userMessage)
         } catch {
             guard !stopped, targetKey == key else { return }
             zapLog.error("zap failed: \(String(describing: error), privacy: .public)")

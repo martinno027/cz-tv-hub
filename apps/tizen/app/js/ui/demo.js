@@ -3,6 +3,9 @@
  * fixtures in spec/fixtures (served from the repository root), moved to the requested day, so the UI can
  * be checked without a TV, CT or a gateway. Nothing in it plays (the fixture URLs are not real).
  * `?demo&channels=60` adds generated Anténa channels up to that count (for checking a big guide).
+ * Poslanecká sněmovna: synthetic playlists (stream 1 on, the others "not processed now" 404), and playback gets a
+ * local URL that does not exist, so the demo never contacts the Chamber's CDN.
+ * `?demo&psp=13` = streams 1 and 3 on; `?demo&psp=0` = none on.
  */
 (function (root) {
   'use strict';
@@ -17,6 +20,19 @@
     return m ? Math.min(300, Number(m[1])) : 0;
   })();
   var SLOTS = [15, 20, 25, 30, 45, 60, 90];
+  var PSP_ON = (function () {
+    var m = /[?&]psp=(\d+)/.exec(root.location.search);
+    return m ? m[1] : '1';
+  })();
+  var PSP_LIVE = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\nchunklist.m3u8\n';
+
+  /** The synthetic answer for a Chamber playlist URL (never fetched from the CDN in the demo). */
+  function pspPlaylist(url) {
+    var m = /\/ps-stream(\d)\//.exec(url);
+    var n = m ? m[1] : '?';
+    if (PSP_ON.indexOf(n) >= 0) return { status: 200, body: PSP_LIVE };
+    return { status: 404, body: 'NOT_FOUND: channel ps-stream' + n + ' is not processed now' };
+  }
   var TITLES = ['Zprávy', 'Pohádka', 'Sportovní přenos', 'Film: Testovací obrazec', 'Soutěž', 'Hudební klip',
     'Dokument o anténách', 'Kulturní magazín'];
 
@@ -76,6 +92,9 @@
 
   function transport(request) {
     var url = request.url;
+    if (url.indexOf('pspcr-ott-live.ssl.cdn.cra.cz') >= 0) {
+      return new Promise(function (resolve) { setTimeout(function () { resolve(pspPlaylist(url)); }, 300); });
+    }
     if (url.indexOf('/graphql/') >= 0) {
       var date = JSON.parse(request.body).variables.date.split('.'); // MM.DD.YYYY
       var day = date[2] + '-' + date[0] + '-' + date[1];
@@ -138,6 +157,10 @@
     enabled: /[?&]demo\b/.test(root.location.search),
     transport: transport,
     blobTransport: blobTransport,
+    /** Playback URL of a Chamber stream in the demo: local and absent (nothing plays, nothing leaves the PC). */
+    pspPlayUrl: function (stream) {
+      return 'demo-psp-' + stream.id + '.m3u8';
+    },
     dvbConfig: function () {
       return new CT.DvbConfig('http://cztvhub.local:8098', KEY);
     }

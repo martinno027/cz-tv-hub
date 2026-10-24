@@ -8,7 +8,7 @@ Aplikace si stream vyžádá vždy až na Apple TV těsně před přehráním (o
 a po hodině vyprší). Nic neukládá, nenahrává a neobchází DRM ani geoblokaci; když ČT pořad
 na internetu nesmí pouštět, zobrazí se hláška ČT.
 
-> Neoficiální projekt, není spojen s Českou televizí. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.
+> Neoficiální projekt, není spojen s Českou televizí ani s Poslaneckou sněmovnou PČR. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.
 
 Snímky obrazovky jen s testovacím obrazem (falešná brána Anténa) a chybovou obrazovkou:
 ![Anténa živě](docs/screenshots/dvb-live.jpg)
@@ -48,6 +48,8 @@ Ladicí parametry (jen v Debug buildu), např. `xcrun simctl launch booted cz.cz
 - `-play live:CH_24`, `-play startover:CH_1`, `-play buffer:CH_1` (skončilo před < 3 h → Zpět v čase), `-play archive:CH_1`, `-play unavailable:CH_6`
 - `-openOfficialApp YES` – zkusí otevřít stránku iVysílání v App Store; `-showDRMError YES` – ukáže obrazovku „vyžaduje DRM“
 - `-breakURLs first` / `-breakURLs all` – nasimuluje vypršelý odkaz (test opakovaného načtení / chybové hlášky)
+- `-liveScroll psp` – v Živě odroluje na první přenos Poslanecké sněmovny (pro snímky obrazovky; stav přenosů se
+  zjišťuje doopravdy, ukázková data tu nejsou)
 
 ## Anténa (DVB-T2)
 
@@ -60,6 +62,15 @@ nastavené době). Bez nastavení je skupina skrytá.
 Vývoj proti falešné bráně na Macu: `-gatewayAddress 127.0.0.1:8098 -gatewayKey dev-key-dev-key-dev-key-dev-key-0000`,
 pak např. `-play dvblive:1`, `-play dvbrec:1`, `-play dvbstartover:1` (číslo = číslo kanálu brány),
 `-liveScroll antenna`, `-tab guide -guideRow 6`, `-tab settings`.
+
+## Poslanecká sněmovna
+
+Pět veřejných přímých přenosů Poslanecké sněmovny PČR z psp.cz (Schůze PS, Tiskové konference, Výbory a semináře
+1–3), přehrávaných přímo z CDN sněmovny tak, jak je zveřejnila. Jen živě: nic se nenahrává, žádné „Od začátku“ ani
+„Pokračovat“. Karta v Živě ukazuje červené **● ŽIVĚ**, ztlumené „Nevysílá se“, nebo „Zjišťuji…“, dokud stav není
+známý; v průvodci má každý přenos jeden řádek přes celý den (jiné dny: „Jen přímé přenosy“). Zjišťuje se jen při
+otevřeném Živě nebo průvodci, každý přenos nejvýš jednou za minutu. Výběr přenosu, který nevysílá, ukáže
+„Poslanecká sněmovna teď nevysílá.“ Zapnuté je výchozí, vypíná se v Nastavení → Kanály.
 
 **Pokračovat**: Apple TV si pamatuje, kde jste pořad přestali sledovat (jen v zařízení), a v průvodci nabídne
 „Pokračovat od 23:10“. Dosledované pořady zapomene.
@@ -96,4 +107,6 @@ Exportní prohlášení o šifrování je vyřešené v Info.plist (`ITSAppUsesN
   Siri Remote ještě ne.
 - Hledání brány přes Bonjour v simulátoru nic nenašlo (prohlížeč běží, služba z Macu se neobjevila);
   na skutečné Apple TV v domácí síti zatím neověřeno. Adresu lze vždy zadat ručně.
+- Přenosy Poslanecké sněmovny zatím neověřené během skutečného vysílání (přehrání, červené „● ŽIVĚ“) ani hláška
+  při 404 z AVPlayeru, když přenos skončí právě při spuštění.
 - Zatím bez vyhledávání a oblíbených. Ikona je jen zástupná.

@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.LocalTextStyle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -40,8 +41,8 @@ import kotlinx.coroutines.yield
 import androidx.compose.ui.unit.IntSize
 
 /**
- * "Kanály" in Nastavení (spec/apps.md): the source switches "Internetová TV (ČT)" and "Anténa" (with a gateway),
- * then one list "Pořadí kanálů" mixing both sources, rows `[icon ☑ name] [▲] [▼]` that hide/show and reorder the
+ * "Kanály" in Nastavení (spec/apps.md): the source switches "Internetová TV (ČT)", "Anténa" (with a gateway) and
+ * "Poslanecká sněmovna", then one list "Pořadí kanálů" mixing the sources, rows `[icon ☑ name] [▲] [▼]` that hide/show and reorder the
  * channels of Živě and the guide on this device, then "Obnovit výchozí pořadí".
  */
 @Composable
@@ -54,8 +55,12 @@ fun ChannelsSection(viewModel: MainViewModel) {
 
         val antenna = dvb
         Text(stringResource(R.string.channels_sources), style = MaterialTheme.typography.titleMedium)
-        SourceSwitch(prefs, ChannelPrefs.SOURCE_CT, R.string.source_internet, viewModel)
-        if (antenna != null) SourceSwitch(prefs, ChannelPrefs.SOURCE_DVB, R.string.source_antenna, viewModel)
+        SourceSwitch(prefs, ChannelPrefs.SOURCE_CT, ChannelSource.CT, R.string.source_internet, viewModel)
+        if (antenna != null) SourceSwitch(prefs, ChannelPrefs.SOURCE_DVB, ChannelSource.DVB, R.string.source_antenna, viewModel)
+        SourceSwitch(
+            prefs, ChannelPrefs.SOURCE_PSP, ChannelSource.PSP, R.string.source_psp_switch, viewModel,
+            detail = R.string.source_psp_switch_detail,
+        )
 
         Text(
             stringResource(R.string.channels_order),
@@ -81,9 +86,16 @@ fun ChannelsSection(viewModel: MainViewModel) {
     }
 }
 
-/** `[☑ icon Internetová TV (ČT)]`: the whole source on or off. */
+/** `[☑ icon Internetová TV (ČT)]`: the whole source on or off; [detail] = a muted second line. */
 @Composable
-private fun SourceSwitch(prefs: ChannelPrefs, source: String, label: Int, viewModel: MainViewModel) {
+private fun SourceSwitch(
+    prefs: ChannelPrefs,
+    source: String,
+    icon: ChannelSource,
+    label: Int,
+    viewModel: MainViewModel,
+    detail: Int? = null,
+) {
     val on = prefs.isSourceOn(source)
     Button(
         onClick = { viewModel.updateChannelPrefs { it.toggleSource(source) } },
@@ -91,8 +103,19 @@ private fun SourceSwitch(prefs: ChannelPrefs, source: String, label: Int, viewMo
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (on) "☑" else "☐")
-            SourceIcon(source == ChannelPrefs.SOURCE_DVB)
-            Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            SourceIcon(icon)
+            Column {
+                Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (detail != null) {
+                    Text(
+                        stringResource(detail),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalContentColor.current.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
@@ -167,7 +190,7 @@ private fun OrderList(
                             // Visible rows show their channel number; a hidden row has none.
                             val number = ChannelNumbers.number(visible, item.key)
                             if (number != null) ChannelNumber(number, style = LocalTextStyle.current)
-                            SourceIcon(item.isAntenna)
+                            SourceIcon(item.source)
                             Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
