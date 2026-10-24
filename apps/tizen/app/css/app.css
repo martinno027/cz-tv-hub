@@ -736,7 +736,7 @@ main {
   color: #ff9c8f;
 }
 
-/* Toast and dialog */
+/* Toast */
 #toast {
   position: absolute;
   left: 50%;
@@ -755,34 +755,110 @@ main {
   opacity: 1;
 }
 
-#dialog {
+/* Programme page (spec/apps.md "Programme page (T15)"): full screen over the guide, under toasts and the player */
+#programme {
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  bottom: 0;
+  width: 1920px;
+  height: 1080px;
+  display: flex;
+  padding: 90px 96px 120px;
+  background: var(--bg);
+  z-index: 15;
+}
+
+#pg-image {
+  flex: none;
+  width: 640px;
+  height: 360px;
+  margin-right: 64px;
+  border-radius: 14px;
+  background: var(--surface) center / cover no-repeat;
+}
+
+#pg-image.poster {
+  width: 420px;
+  height: 630px;
+}
+
+#pg-image.placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.7);
-  z-index: 30;
+  color: var(--muted);
 }
 
-.dialog-box {
-  min-width: 700px;
-  padding: 44px 52px;
-  border-radius: 20px;
-  background: var(--surface);
+#pg-image.placeholder .source-icon {
+  width: 120px;
+  height: 120px;
+  margin: 0;
 }
 
-#dialog-title {
-  font-size: 34px;
+#pg-text {
+  flex: 1;
+  min-width: 0;
+}
+
+#pg-title {
+  font-size: 52px;
   font-weight: 700;
-  margin-bottom: 30px;
+  line-height: 62px;
+  max-height: 124px;
+  overflow: hidden;
 }
 
-#dialog-buttons {
-  display: flex;
+#pg-episode {
+  font-size: 32px;
+  line-height: 42px;
+  margin-top: 6px;
+}
+
+#pg-facts,
+#pg-rating,
+#pg-original,
+#pg-state {
+  font-size: 28px;
+  line-height: 38px;
+  margin-top: 14px;
+  color: var(--muted);
+}
+
+#pg-rating {
+  color: var(--text);
+}
+
+#pg-description {
+  margin-top: 24px;
+  font-size: 28px;
+  line-height: 40px;
+  max-height: 320px; /* eight whole lines: the state and the buttons stay on screen with every other line shown */
+  overflow: hidden;
+}
+
+#pg-state {
+  margin-top: 24px;
+}
+
+#pg-buttons {
+  margin-top: 20px;
+}
+
+#pg-tmdb {
+  position: absolute;
+  left: 96px;
+  right: 96px;
+  bottom: 40px;
+  font-size: 20px;
+  line-height: 28px;
+  color: var(--muted);
+}
+
+/* TMDb's own logo (spec/assets, unchanged colours and shape), smaller than the app's name */
+.tmdb-logo {
+  height: 18px;
+  margin-right: 16px;
+  vertical-align: -2px;
 }
 
 /* Player */

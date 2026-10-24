@@ -120,11 +120,20 @@
 
     <div id="toast"></div>
 
-    <div id="dialog" class="hidden">
-      <div class="dialog-box">
-        <div id="dialog-title"></div>
-        <div id="dialog-buttons"></div>
+    <!-- Programme page (spec/apps.md "Programme page (T15)"): full screen over the guide -->
+    <div id="programme" class="hidden">
+      <div id="pg-image"></div>
+      <div id="pg-text">
+        <div id="pg-title"></div>
+        <div id="pg-episode"></div>
+        <div id="pg-facts"></div>
+        <div id="pg-rating" class="hidden"></div>
+        <div id="pg-original" class="hidden"></div>
+        <div id="pg-description"></div>
+        <div id="pg-state"></div>
+        <div id="pg-buttons" class="buttons"></div>
       </div>
+      <div id="pg-tmdb" class="hidden"><img class="tmdb-logo" src="img/tmdb-logo-short.svg" alt="TMDB"><span id="pg-attribution"></span></div>
     </div>
 
     <div id="player" class="hidden">
@@ -179,6 +188,7 @@
   <script src="js/core/psp.js"></script>
   <script src="js/core/profile.js"></script>
   <script src="js/core/household.js"></script>
+  <script src="js/core/programme.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
   <!-- Optional, written only into the build by build.py (version, build number, commit, build time). -->
@@ -191,6 +201,7 @@
   <script src="js/ui/player.js"></script>
   <script src="js/ui/live.js"></script>
   <script src="js/ui/guide.js"></script>
+  <script src="js/ui/programme.js"></script>
   <script src="js/ui/settings.js"></script>
   <script src="js/ui/app.js"></script>
 </body>
