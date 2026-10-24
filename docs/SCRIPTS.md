@@ -22,7 +22,8 @@ A fake TVHeadend with synthetic HEVC test streams and fake recordings, for devel
 without a tuner. `--channels 60` generates a big guide; `--tuners 1` helps to test "tuner busy".
 Its programmes vary like real broadcasts: no episode line, a short one or one too long for the line, a long
 description, none, and every sixth programme with neither description nor summary (the case that moved the Apple TV
-guide detail, T09).
+guide detail, T09). Its live streams carry EIT present/following (programme changes 20 s, 2:30 and −0:30 after the
+EPG start, the fourth channel none) for `dvb-starts`.
 
 Can go wrong: the default port is 9981. If 9981 is already taken (for example by an SSH tunnel to a real
 TVHeadend), the fake fails to start — and a gateway configured for 9981 then talks to whatever owns that port. Pick
@@ -86,6 +87,32 @@ live session and reports tuner signal and error counters, segment lengths and ga
 with `--frames`, the picture (segment start pictures, open GOP, interlacing, decoder errors; ~2 min kept in memory).
 
 Can go wrong: it is a viewer too — on a channel nobody watches it starts a session and uses a tuner.
+
+</details>
+
+<details>
+<summary><code>python3 -m cztvhub dvb-starts --config /etc/cztvhub/cztvhub.conf [--hours 24] [--channel NAME]</code> — real programme starts from the broadcast vs the EPG (T14)</summary>
+
+Run on the Pi (as the `cztvhub` user, `PYTHONPATH=/opt/cztvhub/src`; read-only). The recorder notes every change of
+the present event in the broadcast's EIT present/following (`<state_dir>/eit-starts.jsonl`, only channels with
+"Nahrávat"); this prints per channel each programme with its EPG start, the start the EIT states, when it became
+present ("vidět"), the delay `vidět − EPG` and `EIT − EPG`, then the median, range and share within ±1 min per
+channel and in total. A programme already running when the recorder tuned in ("při naladění") and one without an EPG
+programme are listed but not counted. With the fake TVHeadend the channels switch 20 s, 2:30 and −0:30 after their
+EPG start and the fourth channel sends no EIT.
+
+Can go wrong:
+- **TVHeadend's `pass` stream profile decides what EIT reaches the gateway** (Configuration → Stream → Stream
+  Profiles → pass: the "Rewrite …" options, including "Rewrite EIT"). If EIT is left out, the report shows "žádné
+  EIT p/f do 5 min: v proudu není EIT …" for the channel (and the log `dvb: eit: no present/following on <channel
+  id> (none)`); EIT only of other services (service id rewritten) shows as `otherServices` with the service ids
+  seen; several services without a rewritten PAT as `unknownService`. Not checked on a real TVHeadend yet.
+- `EIT − EPG` always `+0:00` means the broadcaster states the scheduled start (TVHeadend's EPG comes from the same
+  EIT); only the delay `vidět − EPG` then tells the real start, and only as well as the broadcaster switches the
+  present event on time.
+- The file does not exist before the first change (exit 1 with "brána ještě nic nezměřila"). TVHeadend unreachable: channel ids instead of names, EPG from the gateway's
+  history only.
+- As another user than `cztvhub` it may not read `/var/lib/cztvhub`.
 
 </details>
 

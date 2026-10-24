@@ -315,6 +315,46 @@ current list once and keep it elsewhere as the default).
   touch it (`400` when the profile's `channelPrefs` is missing or invalid, `404` unknown profile). Every
   save/clear/copy is logged (`admin: defaults: saved | cleared | copied from profile <name>`).
 
+## Real programme starts from the broadcast (T14, phase 1: measure; `src/cztvhub/dvb/eit.py`)
+Commercial channels often start a programme minutes after its EPG time (ads), so "Od začátku" (start − 30 s) shows the
+end of the previous one. Many broadcasters announce the change in the stream itself: the DVB **EIT present/following**
+table (PID `0x12`, `table_id 0x4E`) names the event now running (`running_status` 4) and its start. Phase 1 only
+**measures** whether that is usable on the household's channels; nothing in playback changes yet.
+- **Where**: the recorder already pumps TVHeadend's MPEG-TS (`profile=pass`) through Python into ffmpeg; a small
+  parser reads the TS packets of PID `0x12` on the way (no copy of the stream, no extra tuner; section CRC checked,
+  defensive parsing). Only channels being recorded; nothing for live-only tuner sessions.
+- **Our service**: the stream may carry the EIT of every service of the multiplex (TVHeadend's pass profile without
+  "Rewrite EIT"), so only sections whose `service_id` is ours count: the one program of the (rewritten) PAT, or with
+  several programs the one whose PMT PID actually appears in the stream; otherwise none.
+- **What is kept**: per channel, every change of the **present** event (section 0; a change = another `event_id`,
+  start, duration or `running_status`, so "starts soon" (2) → "running" (4) of one event is two lines; an empty
+  present section writes nothing): `{"channel", "eventId", "title"?, "eitStart" (the start the broadcaster states;
+  `null` if undefined), "eitDuration" (s or `null`), "seenAt" (wall clock when it became present), "running",
+  "atTune"?}` in `<state_dir>/eit-starts.jsonl` (`channel` = TVHeadend channel uuid, times ISO UTC to the second).
+  `atTune: true` marks the first present event after the recorder (re)tuned when it differs from the last one noted:
+  its `seenAt` is the tune-in, not the change. The same event after a re-tune writes nothing. At most the recording
+  retention (`maxDays`) and 2 MB per channel, the oldest lines dropped (checked at most hourly or after 256 kB of new
+  lines; lines are appended whole, a cut last line is skipped). Event names are EPG data (like the EPG history), no
+  video, no audio. If a recorder run sees no present event of our service within 5 min, one log line per recorder
+  says so (`dvb: eit: no present/following on <channel> (<reason>)`) and one line `{"channel", "seenAt", "noEit":
+  "none" | "otherServices" | "unknownService", "services"?, "serviceId"?}` goes into the same file, so the report
+  tells that apart from "accurate" (`none` = no EIT p/f of any service, `otherServices` = only of other service ids,
+  `unknownService` = several services and the PAT does not tell ours). A parser exception stops sniffing for that run
+  only (logged once per recorder); ffmpeg always gets the bytes unchanged.
+- **Report** (`src/cztvhub/dvb/starts.py`): `cztvhub dvb-starts --config FILE [--hours 24] [--channel NAME]` matches
+  each present-event change with the EPG programme (TVHeadend + EPG history) by time and title and prints per channel:
+  programme, EPG start, EIT start, seen at, delay `seenAt − EPG start` (and `eitStart − EPG start`), then a summary
+  (median, range, share within ±1 min) per channel and in total. Consecutive lines of one event are one airing,
+  timed by its line with `running` 4 (else its first). Matching: the same title (case and spaces ignored) with the
+  nearest start within 3 h; else the programme airing at the EIT start or starting within 15 min of it (noted "v EPG:
+  <title>"); zero-length EPG events are no programmes. `atTune` and unmatched airings are listed but not counted.
+  Recorded channels without any line and `noEit` lines are listed with the reason. Read-only, runs on the Pi like
+  `dvb-diag`.
+- **Fake TVHeadend**: its live streams carry EIT p/f of service 1 (channel 1 also of a service 2), switching 20 s,
+  2:30 and −0:30 after the EPG start on channels 1-3 (names in ISO 6937, UTF-8 and ISO 8859-2), none on channel 4.
+- Phase 2 (only after the owner has looked at a day of the report): use the measured start for "Od začátku", the
+  timeline's programme ticks and ▲/▼ where the channel's EIT proved accurate.
+
 ## EPG history (`src/cztvhub/dvb/epgstore.py`)
 The gateway remembers the EPG events it sees (every 30 min the next 3 days, plus every `/dvb/epg` answer) in
 `<state dir>/epg-history.json`: titles, times, genre only. For the not-yet-started part of a fetched window
