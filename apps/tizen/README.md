@@ -6,9 +6,12 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
 
 - **Živě**: šest kanálů ČT s právě vysílaným pořadem, časem a průběhem; pod nimi skupina **Anténa**, je-li nastavená.
 - **TV průvodce**: mřížka kanálů a času (7 dní zpět, 2 dny dopředu), otevře se na „teď“, nahoře detail pořadu.
-  Běžící pořad: **Od začátku** (Zpět v čase / rostoucí záznam antény) nebo **Živě**. Odvysílaný pořad:
-  archiv iVysílání, do 3 h od začátku vždy ze „Zpět v čase“, u antény ze záznamu. Nedostupné pořady jsou ztlumené,
-  po výběru se ukáže důvod od ČT („ČT nemá práva pro internet“, u DRM odkaz na oficiální aplikaci iVysílání).
+  OK na pořadu otevře **stránku pořadu** přes celou obrazovku: obrázek, název, díl, kanál · čas · délka · žánr ·
+  rok, popis, stav a tlačítka. Běžící pořad: **Od začátku** (Zpět v čase / rostoucí záznam antény) a **Živě**.
+  Odvysílaný pořad: **Od začátku** z archivu iVysílání, do 3 h od začátku vždy ze „Zpět v čase“, u antény ze
+  záznamu. Budoucí a nedostupné pořady tlačítko nemají, stav řekne proč. S bránou, která má zapnuté podrobnosti
+  z TMDB, přibude plakát, rok, „Hodnocení TMDB 7,4 (1 234 hlasů)“, původní název a dole věta o TMDB. Zpět vrátí
+  průvodce na stejné místo. Nedostupné pořady jsou v mřížce ztlumené.
 - **Poslanecká sněmovna**: pět veřejných přímých přenosů Poslanecké sněmovny PČR (schůze, tiskové konference,
   výbory a semináře), jen živě: nic se nenahrává, žádné „Od začátku“ ani „Pokračovat“. Karta v Živě ukazuje
   červené **● ŽIVĚ**, ztlumené „Nevysílá se“ nebo „Zjišťuji…“; zjišťuje se jen při otevřeném Živě nebo průvodci,
@@ -76,7 +79,9 @@ stránky brána profily zapomene, takže přihlášená ukázka projde odhláše
 a ukládání profilu selže jako při nedostupné bráně (stav „Čeká na uložení“).
 Výchozí seznam kanálů domácnosti (`/dvb/defaults`) má ukázka v paměti (ČT24 první, ČT art skrytý, verze 1);
 `?demo&defaults=none` = bez výchozího seznamu. Novější verzi lze nastavit v konzoli (`CT.Demo.defaults`) a otevřít
-Nastavení. Ukázka si pamatuje stav v `localStorage` prohlížeče; čistý start = `localStorage.clear()`.
+Nastavení. Stránka pořadu dostane v ukázce podrobnosti z paměti: anténní pořady „Film: …“ mají vymyšlenou shodu
+(hodnocení, původní název, vygenerovaný plakát), ostatní pořady shodu nemají. Ukázka si pamatuje stav v
+`localStorage` prohlížeče; čistý start = `localStorage.clear()`.
 
 ## Instalace do televize (bez obchodu Samsung)
 

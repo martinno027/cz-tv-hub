@@ -26,6 +26,12 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
     /** The household default channel list (T11); `404` from a gateway without it. */
     fun defaults(): HouseholdDefaults = call("/dvb/defaults") { s, b -> DvbParser.parseDefaults(s, b) }
 
+    /** TMDb facts of a programme (T15); `404` when the gateway has no `[tmdb] key` or does not know the id. */
+    fun details(query: DetailsQuery): ProgrammeDetails = call(query.path()) { s, b -> DvbParser.parseDetails(s, b) }
+
+    /** A poster of [details] (needs [DvbConfig.authHeaders]); null for anything but a gateway image path. */
+    fun posterUrl(path: String): String? = path.takeIf(DvbParser::isPosterPath)?.let(config::url)
+
     /** Ad breaks of a finished recording (`[ads]` on the gateway); `404` when the feature is off. */
     fun breaks(recordingId: String): List<AdBreak> =
         call("/dvb/recording/$recordingId/breaks") { s, b -> DvbParser.parseBreaks(s, b) }

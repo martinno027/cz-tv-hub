@@ -1,0 +1,174 @@
+{
+ "_doc": "Programme page (spec/apps.md 'Programme page (T15)'). buttons: in order, from source (ct | dvb), state (future | airing | ended), startable (airing: can play from the start - CT timeshift buffer or an Anténa recording in state 'recording'), playable (ended: an Anténa recording 'completed'; a CT programme is always offered - playing it shows CT's own text when it cannot be played, as the decision rules do), resume (a 'Pokračovat' offer exists). Button ids: resume, startOver, live, openOfficialApp (CT, started; Samsung leaves it out). rating: the line for a TMDb rating (value, votes); null below 20 votes; one decimal (half up), decimal comma, thousands separated by a space. plural: the Czech word for n votes (CLDR cs: 1 one, 2-4 few, else other). Every page also has a 'Zpět' button after these (not listed here). resume only when the programme can be played from the start (airing) or is playable (ended).",
+ "buttons": [
+  {
+   "name": "CT airing with buffer",
+   "source": "ct",
+   "state": "airing",
+   "startable": true,
+   "resume": false,
+   "buttons": [
+    "startOver",
+    "live",
+    "openOfficialApp"
+   ]
+  },
+  {
+   "name": "CT airing with resume",
+   "source": "ct",
+   "state": "airing",
+   "startable": true,
+   "resume": true,
+   "buttons": [
+    "resume",
+    "startOver",
+    "live",
+    "openOfficialApp"
+   ]
+  },
+  {
+   "name": "Anténa airing, recording",
+   "source": "dvb",
+   "state": "airing",
+   "startable": true,
+   "resume": false,
+   "buttons": [
+    "startOver",
+    "live"
+   ]
+  },
+  {
+   "name": "Anténa airing, not recorded",
+   "source": "dvb",
+   "state": "airing",
+   "startable": false,
+   "resume": false,
+   "buttons": [
+    "live"
+   ]
+  },
+  {
+   "name": "airing, not startable, a saved position: no resume",
+   "source": "dvb",
+   "state": "airing",
+   "startable": false,
+   "resume": true,
+   "buttons": [
+    "live"
+   ]
+  },
+  {
+   "name": "CT ended, playable",
+   "source": "ct",
+   "state": "ended",
+   "playable": true,
+   "resume": false,
+   "buttons": [
+    "startOver",
+    "openOfficialApp"
+   ]
+  },
+  {
+   "name": "CT ended, not marked playable: still offered, CT's own text explains (DRM, licence)",
+   "source": "ct",
+   "state": "ended",
+   "playable": false,
+   "resume": false,
+   "buttons": [
+    "startOver",
+    "openOfficialApp"
+   ]
+  },
+  {
+   "name": "Anténa ended, recorded, resume",
+   "source": "dvb",
+   "state": "ended",
+   "playable": true,
+   "resume": true,
+   "buttons": [
+    "resume",
+    "startOver"
+   ]
+  },
+  {
+   "name": "Anténa ended, not recorded",
+   "source": "dvb",
+   "state": "ended",
+   "playable": false,
+   "resume": false,
+   "buttons": []
+  },
+  {
+   "name": "future CT",
+   "source": "ct",
+   "state": "future",
+   "resume": false,
+   "buttons": []
+  },
+  {
+   "name": "future Anténa",
+   "source": "dvb",
+   "state": "future",
+   "resume": false,
+   "buttons": []
+  }
+ ],
+ "rating": [
+  {
+   "value": 7.4,
+   "votes": 1234,
+   "line": "Hodnocení TMDB 7,4 (1 234 hlasů)"
+  },
+  {
+   "value": 8.0,
+   "votes": 22,
+   "line": "Hodnocení TMDB 8,0 (22 hlasů)"
+  },
+  {
+   "value": 6.26,
+   "votes": 21,
+   "line": "Hodnocení TMDB 6,3 (21 hlasů)"
+  },
+  {
+   "value": 5.0,
+   "votes": 104,
+   "line": "Hodnocení TMDB 5,0 (104 hlasů)"
+  },
+  {
+   "value": 9.1,
+   "votes": 19,
+   "line": null
+  },
+  {
+   "value": 7.0,
+   "votes": 1000000,
+   "line": "Hodnocení TMDB 7,0 (1 000 000 hlasů)"
+  }
+ ],
+ "plural": [
+  {
+   "n": 1,
+   "word": "hlas"
+  },
+  {
+   "n": 2,
+   "word": "hlasy"
+  },
+  {
+   "n": 4,
+   "word": "hlasy"
+  },
+  {
+   "n": 5,
+   "word": "hlasů"
+  },
+  {
+   "n": 22,
+   "word": "hlasů"
+  },
+  {
+   "n": 0,
+   "word": "hlasů"
+  }
+ ]
+}

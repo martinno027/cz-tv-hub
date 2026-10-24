@@ -45,6 +45,9 @@ of "done".
   the views the spec names. *Wrong:* a route that returns a whole recording or file listing.
 - Derived data stays as approved: thumbnails one still ≤ 480 px, memory only; ad breaks only timestamps and masks.
   *Wrong:* a cache on disk, a series of frames, a client-chosen seek for thumbnails.
+- Only title/year/type reach TMDb; `/dvb/details` takes a programme id, not free text; the poster proxy fetches only
+  TMDb image paths from its own lookups (`image.tmdb.org`, fixed sizes); the TMDb key never leaves the config.
+  *Wrong:* a details route that looks up any text a client sends, a poster route that fetches a client URL.
 - CT internet streams are only redirected. *Wrong:* the server fetching or caching CT video.
 
 ### Secrets

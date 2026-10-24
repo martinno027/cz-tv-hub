@@ -73,7 +73,7 @@
     dvbChannels: [],
     ctState: { onAir: null, error: null },
     dvbState: null,
-    dialog: null,
+    programme: null, // the programme page (CT.ProgrammePage), over the guide while open
     channelPrefs: null,
     profile: null, // "Profil" (CT.Profile.ProfileSync)
     household: null, // "Kanály" household default (CT.Household.HouseholdList)
@@ -111,6 +111,7 @@
       this.household = this.makeHousehold();
       if (!this.profile.signedIn()) this.showPrefs(this.household.effective(), true);
       this.player = new CT.Player(this);
+      this.programme = new CT.ProgrammePage(this);
       this.numberEntry = new CT.NumberEntry(function (n) { self.playNumber(n); });
       this.setDvbConfig(CT.Demo.enabled ? CT.Demo.dvbConfig() : CT.SettingsStore.config(), true);
       this.profile.sync(); // app start: send what is pending, else read another TV's change
@@ -256,10 +257,11 @@
       this.minute = minute;
       this.now = now;
       this.screens.guide.onMinute();
+      this.programme.refresh();
     },
 
     inContent: function () {
-      return this.zone === 'content' && !this.dialog;
+      return this.zone === 'content' && !this.programme.isOpen();
     },
 
     setDvbConfig: function (config, initial) {
@@ -309,18 +311,21 @@
     },
 
     /**
-     * One guide image as an object URL (ImageLoader's fetch): a CT image from CT's CDN (no key), or a recording's
-     * gateway thumbnail with the key header. Resolves {status, url, size, retryAfter}; url null unless an image came back.
+     * One image as an object URL (ImageLoader's fetch): a CT image from CT's CDN (no key), or with the key header
+     * a recording's gateway thumbnail or a TMDb poster through the gateway (`path`, programme page). Resolves
+     * {status, url, size, retryAfter}; url null unless an image came back.
      */
     fetchImage: function (request) {
       var gateway = request.kind === 'gw';
       var config = this.dvbConfig;
       if (gateway && !config) return Promise.resolve({ status: 0, url: null });
-      var call = gateway ? { url: config.url(CT.Thumbs.path(request.recordingId)), headers: config.authHeaders() } : { url: request.url };
+      var path = request.path || CT.Thumbs.path(request.recordingId);
+      var call = gateway ? { url: config.url(path), headers: config.authHeaders() } : { url: request.url };
+      var type = !gateway ? /^image\// : request.path ? /^image\/(jpeg|png)/ : /^image\/jpeg/;
       return this.blobTransport(call).then(function (r) {
         // Retry-After in seconds (the gateway sends 5 with a 503 when busy); a date or nothing = the default.
         if (r.status !== 200) return { status: r.status, url: null, retryAfter: /^\d+$/.test(r.retryAfter || '') ? Number(r.retryAfter) : 0 };
-        if (!r.blob || !(gateway ? /^image\/jpeg/ : /^image\//).test(r.type)) return { status: 415, url: null };
+        if (!r.blob || !type.test(r.type)) return { status: 415, url: null };
         return { status: 200, url: root.URL.createObjectURL(r.blob), size: r.blob.size };
       });
     },
@@ -486,9 +491,11 @@
         }
         return;
       }
-      if (this.dialog) {
-        if (key) event.preventDefault();
-        this.onDialogKey(key);
+      if (this.programme.isOpen()) {
+        if (key) {
+          event.preventDefault();
+          this.programme.onKey(key);
+        }
         return;
       }
       if (!key) return;
@@ -550,17 +557,26 @@
       return true;
     },
 
-    /** What selecting a guide cell does (CT or Anténa). */
-    select: function (entry) {
+    /**
+     * Selecting a guide cell: the programme page (CT and Anténa, any state); a Poslanecká sněmovna stream plays live
+     * at once (or tells that it is off). `day` = the guide's broadcast day of the entry.
+     */
+    select: function (entry, day) {
+      if (entry.source !== 'psp') return this.openProgramme(entry, day);
       var s = CT.Entries.select(entry, Date.now(), this.resumeStore);
       if (s.type === 'notice') return this.toast(s.text);
-      if (s.type === 'play') return this.play(s.request);
-      if (!s.fromStart && !s.resume) return this.play(s.live);
-      var buttons = [];
-      if (s.resume) buttons.push({ label: 'Pokračovat od ' + s.resumeLabel, request: s.resume });
-      if (s.fromStart) buttons.push({ label: 'Od začátku', request: s.fromStart });
-      if (s.live) buttons.push({ label: 'Živě', request: s.live });
-      this.openDialog(entry.title, buttons);
+      this.play(s.request);
+    },
+
+    openProgramme: function (entry, day) {
+      this.programme.open(entry, day);
+      this.applyFocus();
+    },
+
+    /** Back on the page: the guide again, with the focus it had. */
+    closeProgramme: function () {
+      this.programme.close();
+      this.applyFocus();
     },
 
     play: function (request) {
@@ -571,59 +587,8 @@
     /** `request` = what was playing last (after zapping: the channel switched to). */
     onPlayerClosed: function (request) {
       if (request && CT.LIVE_PREFIX[request.kind]) this.screens.live.focusKey(CT.LIVE_PREFIX[request.kind] + request.channelId);
+      this.programme.refresh(true); // a "Pokračovat" position may have been saved
       this.refresh();
-    },
-
-    openDialog: function (title, buttons) {
-      var box = $('dialog-buttons');
-      box.innerHTML = '';
-      buttons.forEach(function (b) {
-        var el = document.createElement('div');
-        el.className = 'button';
-        el.textContent = b.label;
-        box.appendChild(el);
-        b.el = el;
-      });
-      $('dialog-title').textContent = title;
-      $('dialog').classList.remove('hidden');
-      this.dialog = { buttons: buttons, focus: 0 };
-      this.applyDialogFocus();
-      this.applyFocus();
-    },
-
-    applyDialogFocus: function () {
-      var d = this.dialog;
-      d.buttons.forEach(function (b, i) { b.el.classList.toggle('focused', i === d.focus); });
-    },
-
-    closeDialog: function () {
-      this.dialog = null;
-      $('dialog').classList.add('hidden');
-      this.applyFocus();
-    },
-
-    onDialogKey: function (key) {
-      var d = this.dialog;
-      switch (key) {
-        case 'left':
-          d.focus = Math.max(0, d.focus - 1);
-          break;
-        case 'right':
-          d.focus = Math.min(d.buttons.length - 1, d.focus + 1);
-          break;
-        case 'enter': {
-          var request = d.buttons[d.focus].request;
-          this.closeDialog();
-          this.play(request);
-          return;
-        }
-        case 'back':
-          this.closeDialog();
-          return;
-        default:
-          break;
-      }
-      this.applyDialogFocus();
     },
 
     toast: function (text) {

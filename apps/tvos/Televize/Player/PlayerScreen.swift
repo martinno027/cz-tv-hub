@@ -41,7 +41,8 @@ struct PlayerScreen: View {
             .onDisappear {
                 model.isPlayerOnScreen = false
                 timeline.stop()
-                session.controller.stop()
+                session.controller.stop()  // saves "Pokračovat" first
+                model.playerClosed()
             }
     }
 
@@ -62,7 +63,8 @@ struct PlayerScreen: View {
             .onDisappear {
                 model.isPlayerOnScreen = false
                 session.zapper?.stop()
-                session.controller.stop()
+                session.controller.stop()  // saves "Pokračovat" first
+                model.playerClosed()
             }
     }
 }

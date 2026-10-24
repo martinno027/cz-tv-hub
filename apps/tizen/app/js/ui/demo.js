@@ -11,6 +11,8 @@
  * `?demo&profile=offline` = reading and saving a profile fail as if the gateway were down (login still works).
  * "Kanály" household default: /dvb/defaults answers from memory (ČT24 first, ČT art hidden, version 1);
  * `?demo&defaults=none` = no default (version 0). Change CT.Demo.defaults from the console and open Nastavení.
+ * Programme page: /dvb/details answers from memory, a synthetic match (rating, original title, a generated poster)
+ * for every Anténa "Film: …" programme and "no match" for everything else (CT programmes included).
  */
 (function (root) {
   'use strict';
@@ -103,6 +105,21 @@
     : { channelPrefs: { order: ['ct:CH_24', 'ct:CH_1'], hidden: ['ct:CH_6'], sourcesOff: [] }, version: 1,
       updated: '2026-10-24T08:00:00Z' };
   var loginFailures = {}; // name key → [times]
+  var epgTitles = {}; // Anténa event id → title, from the EPG answers the demo gave (for /dvb/details)
+  var ATTRIBUTION = 'This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise ' +
+    'approved by TMDB.';
+  var DEMO_MATCH = {
+    kind: 'movie', title: 'Testovací obrazec', originalTitle: 'The Test Pattern', year: 2019,
+    overview: 'Smyšlený popis z ukázky: místo pořadu jen barevné pruhy.', genres: ['Dokumentární', 'Komedie'],
+    runtimeMinutes: 58, rating: { value: 7.4, votes: 1234 }, poster: '/dvb/details/image/w342/demo-poster.jpg', tmdbId: 1
+  };
+
+  /** GET /dvb/details (spec/dvb-gateway.md "Programme details"): a match for Anténa films, else none. */
+  function details(url) {
+    var id = /[?&]source=dvb&id=([^&]+)/.exec(url);
+    var title = id ? epgTitles[decodeURIComponent(id[1])] : null;
+    return answer(200, { match: title && /^Film:/.test(title) ? DEMO_MATCH : null, attribution: ATTRIBUTION });
+  }
   var tokenCount = 0;
 
   function answer(status, body) {
@@ -169,6 +186,7 @@
     var url = request.url;
     if (/\/dvb\/profiles?(\/|$)/.test(url)) return profileApi(request);
     if (/\/dvb\/defaults$/.test(url)) return answer(200, defaults);
+    if (/\/dvb\/details\?/.test(url)) return details(url);
     if (url.indexOf('pspcr-ott-live.ssl.cdn.cra.cz') >= 0) {
       return new Promise(function (resolve) { setTimeout(function () { resolve(pspPlaylist(url)); }, 300); });
     }
@@ -193,6 +211,7 @@
       var dvbDay = /date=([\d-]+)/.exec(url)[1];
       return Promise.all([load('dvb/dvb_epg_today.json'), load('dvb/dvb_channels.json')]).then(function (r) {
         var events = shifted(r[0], DVB_DAY, dvbDay);
+        JSON.parse(events.body).events.forEach(function (e) { epgTitles[e.id] = e.title; });
         return EXTRA ? withExtraEvents(events, dvbDay, JSON.parse(r[1].body).channels.length) : events;
       });
     }
@@ -350,6 +369,7 @@
    * a request to CT's CDN; the fixtures' image hosts do not exist).
    */
   function blobTransport(request) {
+    if (/\/dvb\/details\/image\//.test(request.url)) return posterBlob();
     var m = /\/dvb\/recording\/([^/]+)\/thumb\.jpg$/.exec(request.url);
     var id = m ? decodeURIComponent(m[1]) : request.url;
     var canvas = document.createElement('canvas');
@@ -368,6 +388,28 @@
     g.fillStyle = '#fff';
     g.font = 'bold 28px sans-serif';
     g.fillText(m ? 'Ukázkový náhled' : 'Ukázkový obrázek ČT', 20, 245);
+    return new Promise(function (resolve) {
+      setTimeout(function () {
+        canvas.toBlob(function (blob) { resolve({ status: 200, blob: blob, type: 'image/jpeg' }); }, 'image/jpeg', 0.8);
+      }, 150);
+    });
+  }
+
+  /** A generated portrait "poster" for the demo match (no TMDb image is ever fetched in the demo). */
+  function posterBlob() {
+    var canvas = document.createElement('canvas');
+    canvas.width = 342;
+    canvas.height = 513;
+    var g = canvas.getContext('2d');
+    ['#c0c0c0', '#c0c000', '#00c0c0', '#00c000', '#c000c0', '#c00000', '#0000c0'].forEach(function (c, i) {
+      g.fillStyle = c;
+      g.fillRect(0, i * 60, 342, 61);
+    });
+    g.fillStyle = '#1b2a3d';
+    g.fillRect(0, 420, 342, 93);
+    g.fillStyle = '#fff';
+    g.font = 'bold 28px sans-serif';
+    g.fillText('Ukázkový plakát', 24, 476);
     return new Promise(function (resolve) {
       setTimeout(function () {
         canvas.toBlob(function (blob) { resolve({ status: 200, blob: blob, type: 'image/jpeg' }); }, 'image/jpeg', 0.8);

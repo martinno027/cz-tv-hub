@@ -629,7 +629,7 @@
           var other = CT.GuideLayout.neighbourDay(this.days, this.day, key === 'left' ? -1 : 1);
           if (other) {
             this.liveMode = false;
-            this.selectDay(other, key === 'left' ? 'end' : 'start');
+            this.selectDay(other, { edge: key === 'left' ? 'end' : 'start' });
             return true;
           }
           break;
@@ -664,7 +664,7 @@
         break;
       }
       case 'enter':
-        if (slot.item) this.app.select(slot.item);
+        if (slot.item) this.app.select(slot.item, this.day);
         break;
       default:
         break;

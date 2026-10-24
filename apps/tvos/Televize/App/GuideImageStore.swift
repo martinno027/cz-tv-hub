@@ -4,8 +4,9 @@ import Observation
 import UIKit
 
 /// Images of the guide detail: ČT images and "Anténa thumbnails" (spec/apps.md "Image prefetch", spec/dvb-gateway.md
-/// "Thumbnails", approved 2026-10-23), prefetched around the guide's focus and kept in memory only (ephemeral
-/// sessions without URLCache, an LRU here; never on disk).
+/// "Thumbnails", approved 2026-10-23), prefetched around the guide's focus, and the programme page's TMDb posters
+/// (through the gateway, spec/dvb-gateway.md "Programme details"); kept in memory only (ephemeral sessions without
+/// URLCache, an LRU here; never on disk).
 @MainActor
 @Observable
 final class GuideImageStore {
@@ -13,11 +14,13 @@ final class GuideImageStore {
     enum Source: Hashable, Sendable {
         case ct(URL)
         case thumbnail(recordingID: String, final: Bool)
+        /// A gateway path from `/dvb/details` (`/dvb/details/image/…`), loaded with the app key.
+        case poster(path: String)
 
         var lane: ImageLane {
             switch self {
             case .ct: return .ct
-            case .thumbnail: return .gateway
+            case .thumbnail, .poster: return .gateway
             }
         }
 
@@ -25,6 +28,7 @@ final class GuideImageStore {
             switch self {
             case .ct(let url): return "ct|\(url.absoluteString)"
             case .thumbnail(let id, _): return "thumb|\(id)"
+            case .poster(let path): return "poster|\(path)"
             }
         }
     }
@@ -33,8 +37,9 @@ final class GuideImageStore {
     /// The downloaded JPEG bytes around the focus (spec: about 300, at most 48 MB).
     private static let capacity = 300
     private static let byteBudget = 48 * 1024 * 1024
-    /// Decoded only for the detail on screen (and the one just left); 300 decoded images would blow the heap.
-    private static let decodedCapacity = 2
+    /// Decoded only for the detail on screen, the one just left and the programme page's poster; 300 decoded
+    /// images would blow the heap.
+    private static let decodedCapacity = 3
     /// Detail image: 360 × 203 pt, 2× on a 4K TV.
     private static let decodedSize = CGSize(width: 720, height: 406)
     private static let growingMaxAge: TimeInterval = 60
@@ -82,6 +87,8 @@ final class GuideImageStore {
     /// New (or no) gateway: forget its thumbnails and ask it again.
     func setGateway(_ config: GatewayConfig?) {
         clearThumbnails()
+        data.removeAll { $0.hasPrefix("poster|") }
+        decoded.removeAll { $0.hasPrefix("poster|") }
         gatewayAllows = false
         statusCheckedAt = nil
         client = config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly()) }
@@ -164,6 +171,9 @@ final class GuideImageStore {
         case .thumbnail(let id, _):
             guard let client else { return }
             result = (try? await client.thumbnail(recordingID: id)) ?? .failed
+        case .poster(let path):
+            guard let client else { return }
+            if let body = try? await client.detailsImage(path: path) { result = .image(body) } else { result = .failed }
         }
         guard isAllowed(source) else { return }  // switched off meanwhile
         switch result {
@@ -206,8 +216,11 @@ final class GuideImageStore {
     }
 
     private func isAllowed(_ source: Source) -> Bool {
-        if case .thumbnail = source { return client != nil && gatewayAllows && tvAllows }
-        return true
+        switch source {
+        case .ct: return true
+        case .thumbnail: return client != nil && gatewayAllows && tvAllows
+        case .poster: return client != nil
+        }
     }
 
     private func isMissing(_ source: Source) -> Bool {

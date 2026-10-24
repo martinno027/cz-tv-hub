@@ -3,9 +3,12 @@ package cz.cztvhub.tv.ui
 import cz.cztvhub.core.Action
 import cz.cztvhub.core.Channel
 import cz.cztvhub.core.Decisions
-import cz.cztvhub.core.Messages
+import cz.cztvhub.core.PageButton
+import cz.cztvhub.core.PageSource
+import cz.cztvhub.core.PageState
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.Programme
+import cz.cztvhub.core.ProgrammePage
 import cz.cztvhub.core.PspMessages
 import cz.cztvhub.core.PspState
 import cz.cztvhub.core.PspStream
@@ -15,7 +18,6 @@ import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
-import cz.cztvhub.core.dvb.DvbMessages
 import java.time.Duration
 import java.time.Instant
 
@@ -104,87 +106,98 @@ fun Entry.look(now: Instant, psp: PspState = PspState.UNKNOWN): EntryLook = when
     }
 }
 
-/** What selecting a cell does. */
+/** What selecting a Poslanecká sněmovna cell does (programmes open their page, [page]). */
 sealed interface Selection {
     data class Notice(val text: String) : Selection
     data class Play(val request: PlayRequest) : Selection
-
-    /**
-     * Airing: offer [live], and [fromStart] when the source can start over. With a remembered position
-     * ("Pokračovat od [resumeLabel]") [resume] comes first; an ended programme then has no [live].
-     */
-    data class Choice(
-        val entry: Entry,
-        val live: PlayRequest?,
-        val fromStart: PlayRequest?,
-        val resume: PlayRequest? = null,
-        val resumeLabel: String? = null,
-    ) : Selection
 }
 
 /** Remembered progress (seconds) to offer for a resume key (`ct:<idec>`, `dvb:<id>`), or null. */
 typealias ResumeOffers = (key: String) -> Double?
 
-/** [psp] = the stream's state, for a [PspEntry] only (live only: no resume, no start-over). */
-fun Entry.select(now: Instant, offers: ResumeOffers = { null }, psp: PspState = PspState.UNKNOWN): Selection = when (this) {
+/** A button of the programme page; [request] is what it plays (null for "Otevřít v iVysílání"). */
+data class PageAction(val button: PageButton, val request: PlayRequest?)
+
+/**
+ * The programme page of a CT or Anténa programme (spec/apps.md "Programme page (T15)"): its buttons in order
+ * ([ProgrammePage.buttons]) with what each plays; [resumeLabel] for "Pokračovat od …".
+ */
+data class ProgrammePageModel(val entry: Entry, val actions: List<PageAction>, val resumeLabel: String? = null)
+
+/** The page of a CT or Anténa programme, decided at [now]; null for a Poslanecká sněmovna stream (no page). */
+fun Entry.page(now: Instant, offers: ResumeOffers = { null }): ProgrammePageModel? = when (this) {
     is CtEntry -> {
-        val key = ResumeRules.ctKey(programme.idec)
-        when {
-            Decisions.decide(programme, now).action == Action.FUTURE -> Selection.Notice(Messages.FUTURE)
-            isAiring(now) -> {
-                val fromStart = PlayRequest.Startover(channel.id, programme.title, programme.start, programme.idec, end)
-                val offer = offers(key)
-                Selection.Choice(
-                    this,
-                    live = PlayRequest.Live(channel.id, channel.name),
-                    fromStart = fromStart,
-                    resume = offer?.let { fromStart.copy(resumeSeconds = it) },
-                    resumeLabel = offer?.let(ResumeRules::label),
-                )
-            }
-            else -> {
-                val play = PlayRequest.Programme(channel.id, title, programme.idec, start, end, programme.isPlayableNow)
-                val offer = offers(key)
-                if (offer == null) {
-                    Selection.Play(play)
-                } else {
-                    Selection.Choice(this, null, play, play.copy(resumeSeconds = offer), ResumeRules.label(offer))
+        val action = Decisions.decide(programme, now).action
+        val airing = isAiring(now)
+        val state = when {
+            action == Action.FUTURE -> PageState.FUTURE
+            airing -> PageState.AIRING
+            else -> PageState.ENDED
+        }
+        // An airing CT programme is always offered from the start; a channel without a buffer says so in the player.
+        val fromStart = if (airing) {
+            PlayRequest.Startover(channel.id, programme.title, programme.start, programme.idec, end)
+        } else {
+            PlayRequest.Programme(channel.id, title, programme.idec, start, end, programme.isPlayableNow)
+        }
+        val offer = offers(ResumeRules.ctKey(programme.idec))
+        val buttons = ProgrammePage.buttons(
+            PageSource.CT, state, startable = true,
+            playable = action == Action.VOD || action == Action.STARTOVER, resume = offer != null,
+        ) // an ended CT programme is offered even when not marked playable: the player shows CT's text
+        model(buttons, offer) { button ->
+            when (button) {
+                PageButton.RESUME -> when (fromStart) {
+                    is PlayRequest.Startover -> fromStart.copy(resumeSeconds = offer)
+                    is PlayRequest.Programme -> fromStart.copy(resumeSeconds = offer)
+                    else -> null
                 }
+                PageButton.START_OVER -> fromStart
+                PageButton.LIVE -> PlayRequest.Live(channel.id, channel.name)
+                PageButton.OPEN_OFFICIAL_APP -> null
             }
         }
     }
     is DvbEntry -> {
-        val live = PlayRequest.DvbLive(channel.id, channel.name)
+        val action = DvbDecisions.decide(event, now)
+        val state = when (action) {
+            DvbAction.FUTURE -> PageState.FUTURE
+            DvbAction.LIVE, DvbAction.LIVE_OR_STARTOVER -> PageState.AIRING
+            DvbAction.RECORDING, DvbAction.NOT_RECORDED -> PageState.ENDED
+        }
         val recordingId = event.recording?.id
         val length = Duration.between(start, end).toMillis() / 1000.0
         val offer = recordingId?.let { offers(ResumeRules.dvbKey(it)) }
-        when (DvbDecisions.decide(event, now)) {
-            DvbAction.FUTURE -> Selection.Notice(Messages.FUTURE)
-            DvbAction.LIVE -> Selection.Choice(this, live, fromStart = null)
-            DvbAction.LIVE_OR_STARTOVER -> {
-                val fromStart = PlayRequest.DvbRecorded(channel.id, title, recordingId!!, fromStart = true, lengthSeconds = length)
-                Selection.Choice(
-                    this,
-                    live,
-                    fromStart = fromStart,
-                    resume = offer?.let { fromStart.copy(resumeSeconds = it) },
-                    resumeLabel = offer?.let(ResumeRules::label),
-                )
+        val buttons = ProgrammePage.buttons(
+            PageSource.DVB, state, startable = action == DvbAction.LIVE_OR_STARTOVER,
+            playable = action == DvbAction.RECORDING, resume = offer != null,
+        )
+        // A growing recording is asked for "from the start" explicitly (players start it at its live edge).
+        val fromStart = recordingId?.let {
+            PlayRequest.DvbRecorded(channel.id, title, it, fromStart = state == PageState.AIRING, lengthSeconds = length)
+        }
+        model(buttons, offer) { button ->
+            when (button) {
+                PageButton.RESUME -> fromStart?.copy(resumeSeconds = offer)
+                PageButton.START_OVER -> fromStart
+                PageButton.LIVE -> PlayRequest.DvbLive(channel.id, channel.name)
+                PageButton.OPEN_OFFICIAL_APP -> null
             }
-            DvbAction.RECORDING -> {
-                val play = PlayRequest.DvbRecorded(channel.id, title, recordingId!!, fromStart = false, lengthSeconds = length)
-                if (offer == null) {
-                    Selection.Play(play)
-                } else {
-                    Selection.Choice(this, null, play, play.copy(resumeSeconds = offer), ResumeRules.label(offer))
-                }
-            }
-            DvbAction.NOT_RECORDED -> Selection.Notice(DvbMessages.NOT_RECORDED)
         }
     }
-    is PspEntry -> when {
-        !isAiring(now) -> Selection.Notice(PspMessages.LIVE_ONLY)
-        psp == PspState.OFF -> Selection.Notice(PspMessages.NOT_ON)
-        else -> Selection.Play(PlayRequest.PspLive(stream.id, stream.name))
-    }
+    is PspEntry -> null
+}
+
+private fun Entry.model(buttons: List<PageButton>, offer: Double?, request: (PageButton) -> PlayRequest?) =
+    ProgrammePageModel(
+        this,
+        buttons.map { PageAction(it, request(it)) },
+        offer?.takeIf { PageButton.RESUME in buttons }?.let(ResumeRules::label),
+    )
+
+/** Live only: no resume, no start-over. */
+fun PspEntry.select(now: Instant, psp: PspState = PspState.UNKNOWN): Selection = when {
+    !isAiring(now) -> Selection.Notice(PspMessages.LIVE_ONLY)
+    psp == PspState.OFF -> Selection.Notice(PspMessages.NOT_ON)
+    else -> Selection.Play(PlayRequest.PspLive(stream.id, stream.name))
 }

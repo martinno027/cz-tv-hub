@@ -1,0 +1,23 @@
+{
+ "status": 200,
+ "body": {
+  "match": {
+   "kind": "movie",
+   "title": "Hněv Titánů",
+   "originalTitle": "Wrath of the Titans",
+   "year": 2012,
+   "overview": "Smyšlený popis filmu.",
+   "genres": [
+    "Akční"
+   ],
+   "runtimeMinutes": 99,
+   "rating": {
+    "value": 5.8,
+    "votes": 7311
+   },
+   "poster": "/dvb/details/image/w342/titanyPoster01.jpg",
+   "tmdbId": 4401
+  },
+  "attribution": "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB."
+ }
+}

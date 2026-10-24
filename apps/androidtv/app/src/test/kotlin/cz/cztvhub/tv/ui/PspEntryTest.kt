@@ -37,8 +37,8 @@ class PspEntryTest {
         // Not checked yet: try to play.
         assertEquals(play, today.select(now, psp = PspState.UNKNOWN))
         assertEquals(Selection.Notice(PspMessages.NOT_ON), today.select(now, psp = PspState.OFF))
-        // Live only: never a "Pokračovat" offer.
-        assertEquals(play, today.select(now, { 120.0 }, PspState.LIVE))
+        // Live only: no programme page, so never a "Pokračovat" offer.
+        assertNull(today.page(now) { 120.0 })
     }
 
     @Test fun otherDaysAreLiveOnly() {

@@ -58,12 +58,23 @@ class AdminConfig:
 
 
 @dataclass
+class TmdbConfig:
+    """Programme details from TMDb (spec/dvb-gateway.md "Programme details"); off while the key is empty."""
+    key: str = field(default="", repr=False)  # own TMDb API key (v3) or read access token (v4); never logged
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.key)
+
+
+@dataclass
 class Config:
     host: str = "0.0.0.0"
     port: int = 8098
     dvb: DvbConfig = field(default_factory=DvbConfig)
     ads: AdsConfig = field(default_factory=AdsConfig)
     admin: AdminConfig = field(default_factory=AdminConfig)
+    tmdb: TmdbConfig = field(default_factory=TmdbConfig)
     tvheadend: TvheadendConfig = field(default_factory=TvheadendConfig)
 
 
@@ -141,6 +152,9 @@ def parse_config(text: str) -> Config:
 
     if parser.has_section("admin"):
         cfg.admin.password = parser["admin"].get("password", "").strip()
+
+    if parser.has_section("tmdb"):
+        cfg.tmdb.key = parser["tmdb"].get("key", "").strip()
 
     if cfg.dvb.enabled and len(cfg.dvb.key) < MIN_KEY_LENGTH:
         raise ConfigError(f"[dvb] key must be at least {MIN_KEY_LENGTH} characters when DVB is enabled")

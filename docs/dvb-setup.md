@@ -304,6 +304,19 @@ u svého profilu v záložce **Profily** tlačítkem **Použít jako výchozí**
 nechá; **Obnovit výchozí pořadí** v Nastavení → Kanály ji vrátí na výchozí domácnosti. **Zrušit výchozí** vrátí
 původní pořadí aplikace.
 
+**Podrobnosti pořadů z TMDB** (rok, plakát, hodnocení na stránce pořadu; nepovinné): zaregistrujte si zdarma účet
+na themoviedb.org, v Nastavení → API požádejte o klíč pro nekomerční použití a vložte ho do
+`/etc/cztvhub/cztvhub.conf`:
+
+```ini
+[tmdb]
+key = <váš klíč>
+```
+
+Pak `sudo systemctl restart cztvhub`. Raspberry se TMDB ptá jen na pořad, který si v televizi otevřete (název, rok,
+film/seriál), výsledky si pamatuje nejvýš 30 dní a televize s TMDB nemluví nikdy přímo. Hodnocení je TMDB, ne ČSFD
+ani IMDb. Bez klíče stránka pořadu funguje, jen bez těchto údajů; smazáním klíče se smažou i zapamatované výsledky.
+
 ## Řešení potíží
 
 - `curl -H "Authorization: Bearer <klíč>" http://127.0.0.1:8098/dvb/status` na Raspberry ukáže tunery,

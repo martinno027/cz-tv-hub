@@ -315,6 +315,47 @@ current list once and keep it elsewhere as the default).
   touch it (`400` when the profile's `channelPrefs` is missing or invalid, `404` unknown profile). Every
   save/clear/copy is logged (`admin: defaults: saved | cleared | copied from profile <name>`).
 
+## Programme details (T15, TMDb, approved by the user on 2026-10-24; `src/cztvhub/dvb/details.py`)
+Extra facts for the apps' programme page: year, a poster, TMDb's rating, the original title. Off without
+`[tmdb] key` in the config (the household's own free key; never in the template as a value, never logged).
+- `GET /dvb/details?source=dvb&id=<event id from /dvb/epg>` or `GET /dvb/details?source=ct&channel=<CT slug>&date=
+  <YYYY-MM-DD broadcast day>&idec=<idec>` (app key). **A programme id, never free text**: the gateway finds the
+  programme in its own EPG (TVHeadend + EPG history) or in the CT schedule of that day (`api.py`, cached 10 min, the
+  `check`-free path of `serve`), and only then asks TMDb. Unknown id → `404`; `[tmdb] key` missing → `404 {"error":
+  "Podrobnosti nejsou zapnuté"}` (the apps then show the page without the TMDb lines).
+- **Lookup**: title cleaned of what EPGs append (`(14)`, roman series numbers `VI`, `- díl 3`, trailing `II`/`(R)`/
+  `HD`, a leading `Film:`), a year from the description when it states one (`(USA, 2010)`, `… 2010)`), the kind
+  guessed (episode line or a series genre = `tv`, else `movie`, falling back to the other). TMDb `search/movie` or
+  `search/tv` with `language=cs-CZ`, then `.../{id}` for details. **A match only when** the cleaned title equals the
+  result's Czech or original title (casefold, no diacritics, letters and digits only) and, when we have a year, it is
+  within ±1; otherwise `{"match": null}` (no rating is better than a wrong one). At most one TMDb request at a time,
+  at most 30 per minute; TMDb errors → `{"match": null, "error": "…"}` with 200, nothing cached.
+- **Answer**: `{"match": null | {"kind": "movie"|"tv", "title", "originalTitle", "year", "overview"?, "genres":
+  [..], "runtimeMinutes"?, "rating": {"value": 7.4, "votes": 1234} | null, "poster": "/dvb/details/image/w342/<file>"
+  | null, "tmdbId"}, "attribution": "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or
+  otherwise approved by TMDB."}`; a rating only with ≥ 20 votes.
+- **Posters**: `GET /dvb/details/image/w342/<file>.(jpg|png)` (app key) fetches **only** a path the gateway got from its
+  own lookup, from `https://image.tmdb.org/t/p/w342/<file>` (fixed host and size, ≤ 1 MB), kept in memory (LRU 40 MB).
+  The client never sends a URL.
+- **Cache**: `<state_dir>/tmdb-cache.json` (0600) programme key → match or "no match", **30 days** (TMDb terms 1.C:
+  at most 6 months), at most 5000 entries; deleted when `[tmdb] key` goes.
+- **Details of the implementation** (T15):
+  - Errors: `400` missing/invalid `source`, `id` (`[A-Za-z0-9:_-]{1,128}`), `date` or `idec`, or a CT `date`
+    outside the guide's range (7 days back, 2 ahead); `404` unknown programme or CT channel, or a programme of a
+    channel hidden on `/admin`; `502` TVHeadend or the CT schedule unreachable. Posters: `404` any file not from a
+    current match, `502` TMDb failed (also > 1 MB or not JPEG/PNG), `503` + `Retry-After: 5` over the TMDb limit;
+    `200` with `Cache-Control: private, no-store`. The worker key gets `403` on all of them.
+  - The programme key is the guessed kind, the year and the cleaned title, so all episodes of a series share one
+    entry. TMDb gets only the cleaned title (`query`, `language=cs-CZ`, `include_adult=false`); the year and kind
+    only decide which result counts. A roman number is a series number only for `tv` ("Kobra 11 IV" → "Kobra 11");
+    for a film it stays ("Rocky II"). Several results equally good (same title, no year, or the same year
+    difference) are no match. The DVB subtitle is not an episode line (TVHeadend fills it with genre/summary text);
+    an episode number in the title (`(14)`, `(3/12)`, `díl 3`), the CT episode title, DVB genre 0x15 or a CT genre
+    containing "seriál" make it `tv`.
+  - Over 30 requests per minute (posters count too) a lookup answers at once with the `error`, it does not wait;
+    a lookup waits at most 10 s for the one request slot. Redirects from TMDb are not followed.
+  - A poster is served only while the match it came from is in the cache (≤ 30 days), also from memory.
+
 ## Real programme starts from the broadcast (T14, phase 1: measure; `src/cztvhub/dvb/eit.py`)
 Commercial channels often start a programme minutes after its EPG time (ads), so "Od začátku" (start − 30 s) shows the
 end of the previous one. Many broadcasters announce the change in the stream itself: the DVB **EIT present/following**

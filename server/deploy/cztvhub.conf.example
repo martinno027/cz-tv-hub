@@ -28,6 +28,13 @@ breaks_dir = /var/lib/cztvhub/breaks
 ; record and receive. Empty = off. Needs [dvb] enabled; 12+ chars.
 password = @ADMIN_PASSWORD@
 
+[tmdb]
+; Podrobnosti pořadů v aplikacích (rok, plakát, hodnocení TMDB). Vlastní bezplatný klíč: účet na themoviedb.org,
+; Nastavení → API (nekomerční použití); "API Key" i "API Read Access Token" fungují. Prázdné = vypnuto.
+; Programme details in the apps (year, poster, TMDB rating): your own free key from themoviedb.org, Settings → API.
+; Empty = off; removing the key deletes the cached details.
+key =
+
 [tvheadend]
 url = http://127.0.0.1:9981
 user = cztvhub

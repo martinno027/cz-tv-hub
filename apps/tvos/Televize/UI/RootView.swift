@@ -16,7 +16,6 @@ struct RootView: View {
     }
 
     var body: some View {
-        @Bindable var model = model
         TabView(selection: $tab) {
             LiveView()
                 .tabItem { Text("Živě") }
@@ -55,36 +54,8 @@ struct RootView: View {
                 try? await Task.sleep(for: .seconds(600))
             }
         }
-        .overlay {
-            if model.isResolving {
-                ProgressView()
-                    .scaleEffect(1.6)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.black.opacity(0.4))
-            }
-        }
-        .fullScreenCover(item: $model.session, onDismiss: {
-            model.alertMessage = model.messageAfterPlayer
-            model.messageAfterPlayer = nil
-        }) { session in
-            PlayerScreen(session: session)
-        }
-        .fullScreenCover(isPresented: Binding(get: { model.drmError != nil }, set: { if !$0 { model.drmError = nil } })) {
-            if let error = model.drmError {
-                DRMErrorView(error: error, onBack: { model.drmError = nil }) {
-                    model.drmError = nil
-                    OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
-                }
-            }
-        }
-        .alert(
-            model.alertMessage ?? "",
-            isPresented: Binding(get: { model.alertMessage != nil }, set: {
-                if !$0 { model.alertMessage = nil }
-            })
-        ) {
-            Button("OK", role: .cancel) {}
-        }
+        // While the programme page is open it presents these itself (nothing can be presented from under it).
+        .modifier(PlaybackPresentations(active: !model.isProgrammePageOpen))
         #if DEBUG
         .task {
             let arguments = UserDefaults.standard
@@ -115,5 +86,46 @@ struct RootView: View {
             }
         }
         #endif
+    }
+}
+
+/// The player, the DRM notice, the messages and the spinner while a stream is resolved. RootView presents them, or the
+/// programme page while it is open, so the page stays under the player (spec/apps.md "Programme page (T15)").
+struct PlaybackPresentations: ViewModifier {
+    let active: Bool
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if active, model.isResolving {
+                    ProgressView()
+                        .scaleEffect(1.6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(.black.opacity(0.4))
+                }
+            }
+            .fullScreenCover(item: Binding(get: { active ? model.session : nil }, set: { model.session = $0 }), onDismiss: {
+                model.alertMessage = model.messageAfterPlayer
+                model.messageAfterPlayer = nil
+            }) { session in
+                PlayerScreen(session: session)
+            }
+            .fullScreenCover(isPresented: Binding(get: { active && model.drmError != nil }, set: { if !$0 { model.drmError = nil } })) {
+                if let error = model.drmError {
+                    DRMErrorView(error: error, onBack: { model.drmError = nil }) {
+                        model.drmError = nil
+                        OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
+                    }
+                }
+            }
+            .alert(
+                model.alertMessage ?? "",
+                isPresented: Binding(get: { active && model.alertMessage != nil }, set: {
+                    if !$0 { model.alertMessage = nil }
+                })
+            ) {
+                Button("OK", role: .cancel) {}
+            }
     }
 }
