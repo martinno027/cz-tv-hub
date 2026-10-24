@@ -376,6 +376,59 @@ restarts included) until **Odhlásit**, or until the gateway says the session is
 - Golden cases: `spec/fixtures/profile_cases.json` (`names`, `passwords`, `document`, `sync`), tested in all three apps
   and, for names/passwords, in the gateway.
 
+## "Tailscale v aplikaci" (T12: the tailnet without the Tailscale app, Apple TV and Android TV)
+Away from home the gateway is reached over the owner's Tailscale tailnet. Instead of the separate Tailscale app (a
+VPN the viewer has to start), Apple TV and Android TV carry Tailscale inside the app: `apps/tailnet` (Go, Tailscale's
+`tsnet`, userspace, no VPN profile, no system permission) runs a tailnet node and a **bridge on `127.0.0.1`** that
+forwards plain HTTP to the gateway over the tailnet. With the switch on, **the app's gateway base URL is
+`http://127.0.0.1:<port>`** and everything (API, playlists, segments, thumbnails, profile) goes through it unchanged:
+the key is still sent on every request, the gateway sees an ordinary tailnet client. **Samsung has no Tailscale in the
+app** (Tizen web apps cannot run it): it reaches the gateway on the LAN as before.
+- **Nastavení → Server**, below the key: switch **"Připojovat přes Tailscale"** (default off; Android TV and Apple TV
+  only), with the hint "Mimo domov: zadejte jako adresu jméno Raspberry v Tailscale (např. raspberrypi)." With the
+  switch on, a status line (golden cases `spec/fixtures/tailnet_cases.json` "status"), then as the state asks:
+  - **QR code** of the login URL (`loginURL`) with the line "Naskenujte QR kód telefonem a přihlaste se do Tailscale."
+    and the URL as small text under it. The matrix comes from the bridge (`QRMatrix`, rows of `1`/`0` incl. the quiet
+    zone), drawn by the app as black modules on white, at least 6 px per module, placed so it is fully visible without
+    scrolling (it takes no focus; Apple TV puts it beside the controls).
+  - **"Přihlásit klíčem"**: a masked text field for a Tailscale auth key (`tskey-auth-…`); `Přihlásit` restarts the node
+    with that key. The key is used once and never stored (the node's state replaces it).
+  - **"Odhlásit z Tailscale"** (`logout` in the golden cases): logs the node out, deletes the saved state, turns the
+    switch off. The next switch-on needs a new login.
+- **Status line** (golden cases, the same in both apps): off → "Vypnuto"; start failed →
+  "Tailscale se nepodařilo spustit: <error>"; `Running` → "Připojeno jako <self> (<ip>)" (without the IP part when
+  empty); `NeedsLogin` with a `loginURL` → the QR line above; `NeedsMachineAuth` → "Televize čeká na schválení v
+  administraci Tailscale."; anything else → "Připojuji se k Tailscale…". `usesBridge` = switch on and the node started
+  (also before `Running`: the bridge then answers 502 `{"error": "Brána není přes Tailscale dostupná."}`, shown like any
+  gateway error).
+- **Target**: the gateway address from Nastavení → Server as `host:port` (golden cases "target", the same parsing as
+  the gateway address: default port 8098, scheme/path dropped). Changing the address or key with "Uložit a ověřit"
+  restarts the bridge to the new target; the check runs through the bridge. Switch on without a gateway address: the
+  node is not started, the line says "Tailscale se nepodařilo spustit: chybí adresa brány." and there is no bridge.
+- **"Odhlásit z Tailscale" is offered** when the node has an identity (`info.self` non-empty), whatever its state.
+- "Uložit a ověřit" with a changed address restarts the node and waits up to 20 s for `Running` before checking; a
+  failed check moves the bridge back to the saved address. Anything stored per gateway (the household default list's
+  cache) is keyed by the **saved** address, never by `127.0.0.1:<port>` (the port changes on every start).
+- The node state is also saved when the app goes to the background (polling stops once `Running`).
+- **Lifecycle**: with the switch on the node starts at app start before the first gateway request (`Start` returns at
+  once; login and connection go on in the background) and runs while the app runs; switch off stops it (the saved state
+  is kept, so switching on again needs no login; "Odebrat bránu" leaves Tailscale as it is). The status is polled every 2 s while Nastavení → Server is open, else
+  every 30 s until `Running`.
+- **Node state**: the node's keys live **only in the platform's secure storage** (Keychain / encrypted prefs), never in
+  a plain file: the app passes the saved state to `Start` and saves `SavedState()` whenever `Info().stateVersion`
+  differs from the last saved one. Machine name: `televize-appletv` / `televize-androidtv` (Tailscale adds a suffix
+  when it is taken).
+- **No third-party traffic beyond Tailscale itself**: Tailscale's log upload is compiled out (`ts_omit_logtail`) and
+  disabled at run time; the node talks only to Tailscale's coordination/DERP servers and the tailnet.
+- **Access**: the tailnet's ACLs and the gateway key decide, as for any tailnet client (`docs/legal-notes.md`); the
+  gateway is unchanged. The bridge listens on `127.0.0.1` only (other apps on the same TV could reach it, but still
+  need the key).
+- **Build**: `python3 apps/tailnet/build.py android|tvos` (Go; gomobile AAR for Android TV, a C library built with
+  `GOOS=ios` against the tvOS SDKs for Apple TV; Go has no official tvOS target). The apps' builds call it and it does
+  nothing when up to date. Size: the Android TV APK grows by about 42 MB (arm64 + armv7 `libgojni.so`, stored
+  uncompressed), the Apple TV app by about 21 MB. The AAR's Java package is `cz.cztvhub.bridge.tailnet`, outside the
+  app's own package (gomobile's keep rule covers its whole `-javapkg`).
+
 ## "Poslanecká sněmovna" (live streams of the Chamber of Deputies, T06, approved 2026-10-24)
 A third source, **on by default**, with five live-only channels the Chamber publishes on psp.cz ("Živé vysílání").
 Catalogue (`spec/fixtures/psp_cases.json` "streams", the same in every app; no other URLs, no mirrors):

@@ -35,6 +35,9 @@ of "done".
 - The server is meant for the home LAN and the household's own tailnet only; TVHeadend listens on 127.0.0.1.
   *Wrong:* docs or scripts that forward a port, enable Tailscale Funnel or share the node; TVHeadend on `*:9981`.
 - mDNS on the LAN interface only. *Wrong:* the service advertised on `tailscale0`.
+- Tailscale inside the apps (`apps/tailnet`): the bridge listens on `127.0.0.1` only and forwards only to the
+  gateway `host:port` from the app's settings; Tailscale's log upload is compiled out (`ts_omit_logtail`) and disabled.
+  *Wrong:* the bridge on `0.0.0.0`, a target taken from the request, or logs leaving the TV.
 
 ### What leaves the Pi
 
@@ -51,6 +54,9 @@ of "done".
 
 - Keys and passwords only in `/etc/cztvhub/cztvhub.conf` (0600, user `cztvhub`) and the platform keychains / encrypted
   prefs on the TVs. *Wrong:* a key in a log line, a URL, a playlist, a committed file or a screenshot in the repo.
+- The apps' Tailscale node state (its private keys) only in the Keychain / encrypted prefs, passed to the bridge in
+  memory; a Tailscale auth key typed on the TV is used once and never stored. *Wrong:* `tailscaled.state` or the key
+  in a plain file, preferences or a log line.
 - Profile passwords only as PBKDF2-SHA256 (200 000 iterations, salt per profile) and session tokens only as SHA-256
   in `profiles.json` (0600, atomic writes); the TVs keep only the profile name and token in secure storage, never the
   password. *Wrong:* a password or token in a log line, in `profiles.json` in clear, or in the TV's plain preferences.

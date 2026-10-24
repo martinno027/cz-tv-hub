@@ -2,6 +2,7 @@ package cz.cztvhub.tv
 
 import android.content.Context
 import cz.cztvhub.core.ChannelPrefs
+import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.profile.ProfileClient
 import cz.cztvhub.core.profile.ProfileCoordinator
 import cz.cztvhub.core.profile.ProfileHost
@@ -33,6 +34,8 @@ class ProfileManager(
     private val dvbSettings: DvbSettings,
     private val channelPrefs: ChannelPrefsStore,
     private val thumbnails: ThumbnailPrefs,
+    /** The gateway as reached now (directly or over the Tailscale bridge). */
+    private val gateway: () -> DvbConfig?,
 ) {
     private val prefs = context.getSharedPreferences("profile_sync", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -40,7 +43,7 @@ class ProfileManager(
     private val host: ProfileHost = object : ProfileHost {
         override fun login() = dvbSettings.profile.value
         override fun saveLogin(login: ProfileLogin?) = if (login == null) dvbSettings.clearProfile() else dvbSettings.saveProfile(login)
-        override fun client() = dvbSettings.config.value?.let { ProfileClient(it) }
+        override fun client() = gateway()?.let { ProfileClient(it) }
         override fun currentPrefs(): ChannelPrefs = channelPrefs.value.value
         override fun currentThumbnails() = thumbnails.on.value
 

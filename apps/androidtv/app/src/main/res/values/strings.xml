@@ -78,6 +78,12 @@
     <string name="settings_bad_key">Klíč musí mít alespoň 32 znaků</string>
     <string name="settings_ok">Připojeno: %1$d kanálů, záznamy %2$d dny</string>
     <string name="settings_configured">Nastaveno: %1$s</string>
+    <string name="tailnet_switch">Připojovat přes Tailscale</string>
+    <string name="tailnet_hint">Mimo domov: zadejte jako adresu jméno Raspberry v Tailscale (např. raspberrypi).</string>
+    <string name="tailnet_key">Přihlásit klíčem</string>
+    <string name="tailnet_key_hint">tskey-auth-…</string>
+    <string name="tailnet_login">Přihlásit</string>
+    <string name="tailnet_logout">Odhlásit z Tailscale</string>
     <string name="antenna_unavailable">Anténa není dostupná: %1$s</string>
     <string name="not_recorded">Pořad nebyl nahrán</string>
     <string name="state_recording">Přehrát záznam</string>

@@ -61,14 +61,23 @@ final class AppModel {
     /// Digits typed on Živě and the guide: start that channel live.
     @ObservationIgnored private(set) var numberEntry: NumberEntry!
 
-    /// "Anténa" (DVB-T2 gateway). Nil when not configured: the Anténa group is hidden.
+    /// "Anténa" (DVB-T2 gateway) as everything talks to it: the saved one, or the Tailscale bridge to it. Nil when not
+    /// configured (the Anténa group is hidden), or while the bridge starts.
     private(set) var gateway: GatewayConfig?
+    /// The gateway as saved in Nastavení → Server (the address typed there).
+    private(set) var savedGateway: GatewayConfig?
     private(set) var antenna: AntennaStore?
     /// `/dvb/details` for the programme page (memory-only transport), and its answers for a while.
     @ObservationIgnored private var detailsClient: DVBClient?
     @ObservationIgnored private var detailsCache: [ProgrammeDetailsQuery: (fetchedAt: Date, details: ProgrammeDetails?)] = [:]
     private static let detailsMaxAge: TimeInterval = 10 * 60
     private static let detailsMaxEntries = 200
+    /// "Připojovat přes Tailscale" (spec/apps.md "Tailscale v aplikaci").
+    let tailnet = TailnetController()
+    /// App start with Tailscale on: the bridge starts before the first gateway request.
+    @ObservationIgnored private var bridgeStart: Task<Void, Never>?
+    @ObservationIgnored private var gatewayApplied = false
+    @ObservationIgnored private var startingBridge = false
 
     init(client: CTClient = CTClient()) {
         schedules = ScheduleStore(client: client)
@@ -85,6 +94,7 @@ final class AppModel {
             tvOwn: profile.isSignedIn ? profile.state.local?.channelPrefs ?? ChannelPrefs() : channelPrefs.prefs
         )
         wireProfile()
+        tailnet.onBridgeChange = { [weak self] in self?.applyGateway() }
         setGateway(GatewayStore.load(), persist: false)
         numberEntry = NumberEntry { [weak self] number in self?.playLive(number: number) }
     }
@@ -109,6 +119,7 @@ final class AppModel {
     /// App start (and the app back in front): a newer household default is applied, pending profile changes are sent,
     /// a newer profile version applied; a failed send is tried again every 60 s.
     func runProfileSync() async {
+        await bridgeStart?.value
         await refreshFromGateway()
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(ProfileSyncController.retryInterval))
@@ -207,22 +218,63 @@ final class AppModel {
         open(liveTitle: start.liveTitle, offAir: start.offAir, zapFrom: channel, start.resolve)
     }
 
-    /// Applies (and by default stores in the Keychain) a gateway configuration; nil removes it.
+    /// Applies (and by default stores in the Keychain) a gateway configuration; nil removes it. With Tailscale on, the
+    /// bridge moves to the new address first ("Odebrat bránu" leaves Tailscale as it is).
     func setGateway(_ config: GatewayConfig?, persist: Bool = true) {
         if persist {
             if let config { GatewayStore.save(config) } else { GatewayStore.delete() }
         }
+        savedGateway = config
+        if tailnet.enabled, let config {
+            let tailnet = tailnet
+            let start = Task { _ = await tailnet.start(target: TailnetRules.target(address: config.address)) }
+            if !gatewayApplied {
+                bridgeStart = start
+                startingBridge = true
+            }
+            Task {
+                await start.value
+                startingBridge = false
+                applyGateway()
+                // A gateway saved in Nastavení → Server: its household default without leaving Nastavení first.
+                if persist { await household.refresh() }
+            }
+        } else {
+            // App start with the switch on but no gateway yet: the status says what is missing.
+            if tailnet.enabled, !gatewayApplied { Task { await tailnet.start(target: nil) } }
+            applyGateway()
+            if persist, config != nil { Task { await household.refresh() } }
+        }
+    }
+
+    /// The gateway as the app reaches it: through the Tailscale bridge while it is in use, else directly.
+    func effectiveGateway(_ saved: GatewayConfig?) -> GatewayConfig? {
+        guard let saved else { return nil }
+        return tailnet.bridgeURL.map { GatewayConfig(baseURL: $0, key: saved.key) } ?? saved
+    }
+
+    /// Points everything that talks to the gateway (API, players, thumbnails, profile) at `effectiveGateway`.
+    private func applyGateway() {
+        let config = effectiveGateway(savedGateway)
+        // App start with Tailscale on: no gateway request before the bridge has started.
+        guard !startingBridge, !gatewayApplied || config != gateway else { return }
+        gatewayApplied = true
         // Odebrat bránu while signed in signs out locally first (spec/apps.md "Profil").
         let client = config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly()) }
         profile.setAPI(client)
-        household.setAPI(client, gateway: config?.baseURL)
-        // A gateway saved in Nastavení → Server: its household default without leaving Nastavení first.
-        if persist, config != nil { Task { await household.refresh() } }
+        // The household default belongs to the gateway as saved, not to the bridge's port (new on every start).
+        household.setAPI(client, gateway: savedGateway?.baseURL)
         gateway = config
         antenna = config.map { AntennaStore(client: DVBClient(config: $0)) }
         detailsClient = client
         detailsCache = [:]
         images.setGateway(config)
+    }
+
+    /// "Připojovat přes Tailscale" on or off; `address` is the gateway address on screen.
+    func setTailnet(_ on: Bool, address: String) async {
+        await tailnet.setEnabled(on, target: TailnetRules.target(address: address))
+        applyGateway()
     }
 
     /// Resolves the stream on the device right now, then opens the player. Every outcome is

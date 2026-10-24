@@ -216,7 +216,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
-            app.dvbSettings.config.collect {
+            app.gateway.collect {
                 _dvbPlans.value = emptyMap()
                 _dvb.value = if (it == null) null else DvbState()
                 refreshDvb()

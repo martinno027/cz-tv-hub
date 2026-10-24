@@ -275,6 +275,21 @@ V nastavení aplikace zadejte:
 
 Bez nastavení je skupina „Anténa“ skrytá.
 
+**Tailscale přímo v aplikaci (Apple TV, Android TV)**: aplikace umí být v Tailscale sama, bez aplikace Tailscale
+a bez VPN. Samsung to neumí (připojuje se jen v domácí síti).
+1. V administraci Tailscale (Access controls) povolte přístup k Raspberry i účtu nebo tagu, pod kterým se televize
+   přihlásí (viz příklad v kapitole 5).
+2. V aplikaci v Nastavení → Server zadejte jako **Adresu** jméno Raspberry v Tailscale (např. `raspberrypi`) a
+   **Klíč** jako výše.
+3. Zapněte **Připojovat přes Tailscale**. Objeví se QR kód: naskenujte ho telefonem a přihlaste se do Tailscale.
+   Za chvíli se zobrazí „Připojeno jako televize-appletv (100.…)“. Tak poznáte, že to funguje; pak **Uložit a
+   ověřit**.
+   - Bez telefonu: v administraci Tailscale vytvořte v Settings → Keys jednorázový **auth key** a zadejte ho
+     v **Přihlásit klíčem**. Televize si klíč neukládá.
+   - „Televize čeká na schválení v administraci Tailscale“: v administraci Tailscale televizi schvalte (Machines).
+4. Přihlášení vydrží i po restartu aplikace. **Odhlásit z Tailscale** televizi z tailnetu odhlásí; vypnutím
+   přepínače se jen odpojí.
+
 **Profily** (Nastavení → Profil): každý člen domácnosti si může na Raspberry uložit své nastavení kanálů (pořadí,
 skryté kanály, zapnuté zdroje) a přepínač náhledů pod jménem a heslem a načíst ho na kterékoli televizi
 přihlášením. Přihlášená televize ukládá každou změnu hned do profilu a zůstane přihlášená, dokud ji někdo

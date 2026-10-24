@@ -4,7 +4,8 @@ One ffmpeg per channel reads TVHeadend's local stream (``/stream/channel/<uuid>?
 CT internet streams), copies the video and writes fMP4 segments with **every** audio track muxed (AAC, AC-3 and
 E-AC-3 copied, others such as MPEG audio converted to AAC). A mover thread follows ffmpeg's short rolling playlist
 and moves each finished segment into its 10-minute block of the store (buffer.py) with its wall-clock start
-(``#EXT-X-PROGRAM-DATE-TIME``). If the source or ffmpeg ends, a new run starts after a pause.
+(``#EXT-X-PROGRAM-DATE-TIME``). If the source or ffmpeg ends, a new run starts after a pause. On the way into
+ffmpeg the pump shows each chunk to an EIT sniffer (eit.py, T14: real programme starts), which never changes it.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .buffer import BufferStore
+from .eit import EitSniffer, EitStore, PresentTracker
 from .tvheadend import TunerBusy, TvhError
 
 SEGMENT_SECONDS = 2  # cut at the first keyframe after 2 s (ČT's GOP ~1.3 s → ~2.6 s segments)
@@ -142,7 +144,8 @@ class ChannelRecorder:
     def __init__(self, channel: str, store: BufferStore, open_source: Callable[[], Any],
                  ffmpeg: str = "ffmpeg", prober: Callable[[bytes], list[dict]] | None = None,
                  popen: Callable[..., Any] = subprocess.Popen, log: Callable[[str], None] = print,
-                 retry_seconds: float = RETRY_SECONDS, busy_retry_seconds: float = BUSY_RETRY_SECONDS):
+                 retry_seconds: float = RETRY_SECONDS, busy_retry_seconds: float = BUSY_RETRY_SECONDS,
+                 eit: EitStore | None = None):
         self.channel, self.store, self.open_source = channel, store, open_source
         self.ffmpeg, self.popen, self.log = ffmpeg, popen, log
         self.prober = prober or (lambda data: probe_streams(data))
@@ -155,6 +158,8 @@ class ChannelRecorder:
         self._thread: threading.Thread | None = None
         self._process: Any = None
         self._source: Any = None
+        self._eit = PresentTracker(channel, eit.append, log) if eit is not None else None
+        self._eit_failed = False
 
     # -- lifecycle -------------------------------------------------------------------------
     def start(self) -> None:
@@ -240,7 +245,8 @@ class ChannelRecorder:
         self._process = self.popen(build_command(work, streams, self.ffmpeg), stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL)
         self.run, self.started_at, self.state = run, time.time(), "nahrává"
-        pump = threading.Thread(target=self._pump, args=(source, read, bytes(head)), daemon=True,
+        sniffer = EitSniffer(self._eit) if self._eit is not None else None
+        pump = threading.Thread(target=self._pump, args=(source, read, bytes(head), sniffer), daemon=True,
                                 name=f"rec-pump-{self.channel[:8]}")
         pump.start()
         saved = False
@@ -271,15 +277,18 @@ class ChannelRecorder:
         except OSError:
             return False
 
-    def _pump(self, source: Any, read: Callable[[int], bytes], head: bytes) -> None:
+    def _pump(self, source: Any, read: Callable[[int], bytes], head: bytes, sniffer: EitSniffer | None = None) -> None:
         stdin = self._process.stdin
         try:
             stdin.write(head)
+            sniffer = self._sniff(sniffer, head)
             while not self._stop.is_set():
                 chunk = read(CHUNK)
                 if not chunk:
                     break
                 stdin.write(chunk)
+                if sniffer is not None:
+                    sniffer = self._sniff(sniffer, chunk)
         except Exception:
             pass  # ffmpeg or the source went away; the run loop notices
         finally:
@@ -287,6 +296,19 @@ class ChannelRecorder:
                 stdin.close()
             except Exception:
                 pass
+
+    def _sniff(self, sniffer: EitSniffer | None, chunk: bytes) -> EitSniffer | None:
+        """EIT measurement only looks; whatever goes wrong in it, recording goes on (without it for this run)."""
+        if sniffer is None:
+            return None
+        try:
+            sniffer.feed(chunk)
+            return sniffer
+        except Exception as exc:
+            if not self._eit_failed:
+                self._eit_failed = True
+                self.log(f"dvb: eit: {self.channel}: parser stopped for this run: {exc!r}")
+            return None
 
     def _move(self, work: Path, run: str, moved: set[str]) -> None:
         try:
@@ -311,10 +333,10 @@ class RecorderManager:
 
     def __init__(self, store: BufferStore, open_source: Callable[[str], Any], ffmpeg: str = "ffmpeg",
                  ffprobe: str = "ffprobe", log: Callable[[str], None] = print,
-                 factory: Callable[[str], ChannelRecorder] | None = None):
+                 factory: Callable[[str], ChannelRecorder] | None = None, eit: EitStore | None = None):
         self.store, self.log = store, log
         self._factory = factory or (lambda ch: ChannelRecorder(
-            ch, store, lambda: open_source(ch), ffmpeg, lambda data: probe_streams(data, ffprobe), log=log))
+            ch, store, lambda: open_source(ch), ffmpeg, lambda data: probe_streams(data, ffprobe), log=log, eit=eit))
         self._lock = threading.Lock()
         self._recorders: dict[str, ChannelRecorder] = {}
         self.paused = False

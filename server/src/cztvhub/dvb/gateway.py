@@ -25,6 +25,7 @@ from . import breaks as ads
 from . import details as tmdb
 from .archive import Archive, ArchiveError, parse_recording_id
 from .buffer import BufferStore
+from .eit import EitStore
 from .recorder import RecorderManager
 from . import epg
 from . import fmp4
@@ -123,9 +124,12 @@ class DvbGateway:
         self.history = EpgHistory(self.dvb.state_dir)
         self.profiles = profiles or ProfileStore(self.dvb.state_dir, log=log)
         self.defaults = defaults or DefaultsStore(self.dvb.state_dir, log=log)
+        # real programme starts from the broadcast's EIT (T14 phase 1: measured only), kept as long as recordings
+        self.eit = EitStore(self.dvb.state_dir, lambda: self.archive.max_days(), log=log)
         if archive is None:
             store = BufferStore(self.dvb.buffer_dir)
-            recorders = RecorderManager(store, self._recording_source, self.dvb.ffmpeg, self.dvb.ffprobe, log=log)
+            recorders = RecorderManager(store, self._recording_source, self.dvb.ffmpeg, self.dvb.ffprobe, log=log,
+                                        eit=self.eit)
             archive = Archive(store, recorders, self.settings, self.thumbs, self.dvb.retention_days, now=now,
                               log=log, offered=self._offered_ids, is_programme=self._is_programme,
                               max_recordings=self.dvb.max_recordings,
