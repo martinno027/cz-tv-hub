@@ -1,7 +1,7 @@
 # Televize pro Android TV
 
 Nativní aplikace pro **Android TV / Google TV**: sledování **oficiálních streamů České televize**
-(ČT1, ČT2, ČT24, ČT sport, ČT :D, ČT art) bez Kodi.
+(ČT1, ČT2, ČT24, ČT sport, ČT :D, ČT art) bez Kodi, k tomu volitelně anténa a přímé přenosy Poslanecké sněmovny.
 
 - **Živě**: šest kanálů s právě vysílaným pořadem, časem a průběhem. Výběr spustí živé vysílání.
 - **TV průvodce**: mřížka kanálů a času (7 dní zpět, 2 dny dopředu), otevře se na „teď“.
@@ -15,6 +15,12 @@ Nativní aplikace pro **Android TV / Google TV**: sledování **oficiálních st
   Druhá skupina v Živě a další řádky v průvodci: živě, „Od začátku“ u právě nahrávaného pořadu,
   přehrání odvysílaného pořadu ze záznamu; nenahrané pořady jsou ztlumené („Pořad nebyl nahrán“).
   Bez nastavení se Anténa nezobrazuje.
+- **Poslanecká sněmovna**: pět veřejných přímých přenosů Poslanecké sněmovny PČR z psp.cz (Schůze PS, Tiskové
+  konference, Výbory a semináře 1–3), přehrávaných přímo z CDN sněmovny tak, jak je zveřejnila. Jen živě: nic se
+  nenahrává, žádné „Od začátku“ ani „Pokračovat“. Karta v Živě ukazuje červené **● ŽIVĚ**, ztlumené „Nevysílá se“,
+  nebo „Zjišťuji…“, dokud stav není známý; v průvodci má každý přenos jeden řádek přes celý den. Zjišťuje se jen při
+  otevřeném Živě nebo průvodci, každý přenos nejvýš jednou za minutu. Zapnuté je výchozí, vypíná se v
+  Nastavení → Kanály.
 
 - **Pokračovat**: televize si pamatuje, kde jste pořad přestali sledovat (jen v zařízení), a v průvodci nabídne
   „Pokračovat od 23:10“. Dosledované pořady zapomene.
@@ -94,7 +100,9 @@ Aplikace se objeví na domovské obrazovce jako **Televize**.
 - Opětovné vyžádání streamu po vypršení odkazu (např. HTTP 403 během dlouhého sledování) je
   implementované, ale v emulátoru neověřené.
 - API ČT je neoficiální a může se kdykoli změnit.
+- Přenosy Poslanecké sněmovny zatím neověřené během skutečného vysílání (přehrání, červené „● ŽIVĚ“) ani hláška
+  při 404 z ExoPlayeru, když přenos skončí právě při spuštění.
 
 ## Upozornění
 
-Neoficiální projekt, není spojen s Českou televizí. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.
+Neoficiální projekt, není spojen s Českou televizí ani s Poslaneckou sněmovnou PČR. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.

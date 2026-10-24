@@ -187,12 +187,18 @@
 
   /**
    * One row per channel, CT internet and "Anténa" mixed in this TV's order without hidden channels or
-   * switched-off sources ("Kanály" in Nastavení); empty rows show as "Mimo vysílání".
+   * switched-off sources ("Kanály" in Nastavení); empty rows show as "Mimo vysílání". A Poslanecká sněmovna stream
+   * is one cell over the whole day: "Přímý přenos" / "Nevysílá se" (its live check) on the day containing now.
    */
   GuideScreen.prototype.build = function (ct, dvb) {
+    var self = this;
     this.ctPlan = ct && ct.plan || null; // for the ČT images of Anténa ČT channels
+    var dayBounds = CT.Days.bounds(this.day);
     var rows = this.app.channelList(dvb ? dvb.channels : []).map(function (item, i) {
       var ch = item.channel;
+      if (item.source === 'psp') {
+        return { name: ch.name, number: i + 1, source: 'psp', entries: [self.pspEntry(ch, dayBounds)] };
+      }
       if (item.source === 'dvb') {
         var events = dvb.plan[ch.id] || [];
         return { name: ch.name, number: i + 1, source: 'dvb', entries: events.map(function (e) { return CT.Entries.dvb(ch, e); }) };
@@ -214,12 +220,12 @@
       return;
     }
     var ctError = this.app.sourceOn('ct') ? ct.error : null;
-    $('grid-message').textContent = ctError || (all.length ? '' : 'Pro tento den není program');
+    var programmes = all.filter(function (e) { return e.source !== 'psp'; }).length;
+    $('grid-message').textContent = ctError || (programmes ? '' : 'Pro tento den není program');
 
     // Exactly the broadcast day 05:00–05:00 Prague; programmes crossing 05:00 are clipped.
-    var bounds = CT.Days.bounds(this.day);
-    var axisStart = bounds[0];
-    var axisEnd = bounds[1];
+    var axisStart = dayBounds[0];
+    var axisEnd = dayBounds[1];
     this.axisStart = axisStart;
     this.axisEnd = axisEnd;
 
@@ -339,12 +345,50 @@
     row.range = range;
   };
 
+  /** The whole-day cell of a Chamber stream for this grid (state of its live check, only on the day of now). */
+  GuideScreen.prototype.pspEntry = function (channel, dayBounds) {
+    return CT.Entries.psp(channel, this.app.pspState(channel.id), this.isLiveGrid(), dayBounds[0], dayBounds[1]);
+  };
+
+  /**
+   * The live check of a stream changed (or went stale): new entries for the Chamber rows whose state differs, their
+   * cells relabelled in place, the detail redrawn when it shows one of them.
+   */
+  GuideScreen.prototype.refreshPsp = function () {
+    var self = this;
+    if (!this.rows.length) return;
+    var bounds = [this.axisStart, this.axisEnd];
+    this.rows.forEach(function (row) {
+      if (row.source !== 'psp' || !row.slots.length || !row.slots[0].item) return;
+      var slot = row.slots[0];
+      var entry = self.pspEntry(slot.item.channel, bounds);
+      if (entry.item.state === slot.item.state && entry.item.today === slot.item.today) return;
+      var wasShown = self.detailEntry === slot.item;
+      slot.item = entry;
+      if (slot.el) {
+        var old = slot.el;
+        var fresh = self.cell(slot);
+        if (old.classList.contains('focused')) fresh.classList.add('focused');
+        if (self.focusEl === old) self.focusEl = fresh;
+        row.track.replaceChild(fresh, old);
+        self.shiftLabel(slot, self.scrollX);
+      }
+      if (wasShown) self.showDetail(entry);
+    });
+  };
+
   GuideScreen.prototype.cell = function (slot) {
     var cell = el('div', 'cell');
     cell.style.left = px(slot.start - this.axisStart) + 'px';
     cell.style.width = Math.max(1, px(slot.end - slot.start) - 4) + 'px';
     var label = el('div', 'cell-label');
-    if (slot.item) {
+    if (slot.item && slot.item.source === 'psp') {
+      slot.look = CT.Entries.look(slot.item, this.app.now);
+      cell.className = 'cell cell-psp look-' + slot.look;
+      cell.setAttribute('data-psp', '');
+      if (slot.item.item.state === 'live' && slot.item.item.today) label.appendChild(el('span', 'live-badge', '● ŽIVĚ'));
+      label.appendChild(el('span', 'cell-title', slot.item.title));
+    } else if (slot.item) {
       slot.look = CT.Entries.look(slot.item, this.app.now);
       cell.className = 'cell look-' + slot.look;
       label.appendChild(el('span', 'cell-time', CT.Days.time(slot.item.start)));
@@ -461,26 +505,28 @@
         row.nameEl.style.transform = 'translateX(' + viewStart + 'px)';
         row.nameX = viewStart;
       }
-      for (var i = row.range[0]; i < row.range[1]; i++) {
-        var s = row.slots[i];
-        var l = px(s.start - this.axisStart);
-        var w = px(s.end - s.start);
-        var shift = l < viewStart ? Math.min(viewStart - l, Math.max(0, w - 160)) : 0;
-        if (shift !== s.shift) {
-          s.label.style.transform = shift ? 'translateX(' + shift + 'px)' : '';
-          s.shift = shift;
-        }
-      }
+      for (var i = row.range[0]; i < row.range[1]; i++) this.shiftLabel(row.slots[i], viewStart);
     }, this);
   };
 
-  /** Shows the image of the detail panel: a URL, the antenna placeholder, or nothing. */
+  /** A cell that began left of the view keeps its title readable at the view's left edge. */
+  GuideScreen.prototype.shiftLabel = function (s, viewStart) {
+    var l = px(s.start - this.axisStart);
+    var w = px(s.end - s.start);
+    var shift = l < viewStart ? Math.min(viewStart - l, Math.max(0, w - 160)) : 0;
+    if (shift !== s.shift) {
+      s.label.style.transform = shift ? 'translateX(' + shift + 'px)' : '';
+      s.shift = shift;
+    }
+  };
+
+  /** Shows the image of the detail panel: a URL, a source placeholder ('dvb' antenna, 'psp' building), or nothing. */
   function setDetailImage(url, placeholder) {
     var image = $('detail-image');
     image.style.backgroundImage = url ? 'url("' + url.replace(/"/g, '%22') + '")' : '';
     image.classList.toggle('placeholder', !url && !!placeholder);
     image.innerHTML = '';
-    if (!url && placeholder) image.appendChild(CT.sourceIcon('dvb'));
+    if (!url && placeholder) image.appendChild(CT.sourceIcon(placeholder));
     image.style.visibility = url || placeholder ? 'visible' : 'hidden';
   }
 
@@ -502,6 +548,7 @@
    * spec/apps.md "ČT images for Anténa ČT channels"), else the gateway thumbnail while thumbnails are on.
    */
   GuideScreen.prototype.imageOf = function (entry) {
+    if (entry.source === 'psp') return null; // no images or thumbnails for the Chamber's streams
     var url = entry.source === 'dvb' ? this.ctImage(entry) : /^https:\/\//.test(entry.imageUrl) ? entry.imageUrl : '';
     if (url) return { key: 'ct:' + url, kind: 'ct', final: true, url: url };
     var recordingId = entry.source === 'dvb' ? CT.Thumbs.wanted(this.app.dvbThumbs, CT.ThumbsSwitch.on(), entry) : null;
@@ -530,6 +577,16 @@
       setDetailImage('', false);
       return;
     }
+    if (entry.source === 'psp') {
+      // No programme data: the channel, where it comes from, and whether it is on now.
+      $('detail-title').textContent = entry.channel.name;
+      $('detail-episode').textContent = '';
+      $('detail-meta').textContent = 'Zdroj: ' + CT.Psp.SOURCE_LABEL;
+      $('detail-status').textContent = entry.title;
+      $('detail-description').textContent = entry.item.today ? '' : CT.Psp.ONLY_LIVE_MESSAGE;
+      setDetailImage('', 'psp');
+      return;
+    }
     $('detail-title').textContent = entry.title;
     $('detail-episode').textContent = entry.subtitle || '';
     var meta = [entry.channel.name,
@@ -540,7 +597,7 @@
     $('detail-status').textContent = look === 'dimmed' ? (entry.source === 'dvb' ? CT.DvbMessages.NOT_RECORDED : 'Nedostupné') : '';
     $('detail-description').textContent = entry.description || '';
     // Anténa without a CT image: the antenna placeholder until (unless) the gateway thumbnail is there.
-    var placeholder = entry.source === 'dvb';
+    var placeholder = entry.source === 'dvb' ? 'dvb' : '';
     var request = this.imageOf(entry);
     setDetailImage('', placeholder);
     if (!request) return;

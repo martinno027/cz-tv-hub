@@ -1,7 +1,7 @@
 import CTCore
 import SwiftUI
 
-/// "Živě": one mixed list of CT internet and Anténa channels with what is on air now, in this TV's
+/// "Živě": one mixed list of CT internet, Anténa and Poslanecká sněmovna channels with what is on air now, in this TV's
 /// order (Nastavení → Kanály: hidden channels and switched-off sources left out). Select → live playback.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
@@ -42,6 +42,14 @@ struct LiveView: View {
                 .padding(.vertical, 40)
             }
             #if DEBUG
+            // `-liveScroll psp` scrolls to the first Poslanecká sněmovna card, for simulator screenshots.
+            .task {
+                if UserDefaults.standard.string(forKey: "liveScroll") == "psp",
+                   let first = channels.first(where: { $0.source == .psp }) {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    proxy.scrollTo(first.key, anchor: .top)
+                }
+            }
             // `-liveScroll antenna` scrolls to the first Anténa card, for simulator screenshots.
             .onChange(of: antennaChannels.count) { _, count in
                 if count > 0, UserDefaults.standard.string(forKey: "liveScroll") == "antenna",
@@ -52,6 +60,8 @@ struct LiveView: View {
             #endif
             }
         }
+        // "Is it on now?" of the Chamber's streams shown here, only while this screen is on screen.
+        .watchesParliament(channels.compactMap(\.parliamentStream))
         .task(id: model.gateway) {
             // Schedules are cached, so this only hits the network when today's plan is stale.
             while !Task.isCancelled {
@@ -75,6 +85,9 @@ struct LiveView: View {
                 let event = antennaOnAir[dvb.id]
                 ChannelCard(number: number, name: dvb.name, source: .dvb, title: event?.title,
                             start: event?.start, end: event?.end, now: now)
+            case .parliament(let stream):
+                ChannelCard(number: number, name: stream.name, source: .psp, title: nil, start: nil, end: nil, now: now,
+                            parliament: model.parliament.state(of: stream.key))
             }
         }
         .buttonStyle(.card)
@@ -105,22 +118,39 @@ private struct ChannelCard: View {
     let start: Date?
     let end: Date?
     let now: Date
+    /// Poslanecká sněmovna: whether the stream is on (badge) or not (dimmed card).
+    var parliament: PSPLiveState? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Text("\(number)")
                     .font(.title3.weight(.semibold).monospacedDigit())
                     .foregroundStyle(.secondary)
+                // Chamber stream names wrap ("Výbory a semináře 1/2/3" must stay distinguishable)
                 Text(name)
                     .font(.title2.weight(.bold))
-                    .lineLimit(1)
+                    .lineLimit(parliament == nil ? 1 : 2)
+                    .fixedSize(horizontal: false, vertical: parliament != nil)
                 Spacer(minLength: 0)
                 SourceIcon(source: source)
                     .font(.system(size: 26))
                     .foregroundStyle(.secondary)
             }
-            if let title, let start, let end, end > now {
+            if let parliament {
+                Spacer(minLength: 0)
+                switch parliament {
+                case .live:
+                    HStack(spacing: 16) {
+                        LiveBadge()
+                        Text(PSPStreams.liveText).font(.headline)
+                    }
+                case .off:
+                    Text(PSPStreams.offText).font(.headline).foregroundStyle(.secondary)
+                case .unknown:
+                    Text(PSPStreams.unknownText).font(.headline).foregroundStyle(.secondary)
+                }
+            } else if let title, let start, let end, end > now {
                 Text(title)
                     .font(.headline)
                     .lineLimit(2)
@@ -144,5 +174,6 @@ private struct ChannelCard: View {
         }
         .padding(28)
         .frame(width: 500, height: 280, alignment: .topLeading)
+        .opacity(parliament == .off ? 0.45 : 1)
     }
 }

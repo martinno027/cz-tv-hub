@@ -21,6 +21,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
@@ -34,6 +36,7 @@ import androidx.tv.material3.Text
 import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.PlayRequest
+import cz.cztvhub.core.PspState
 import cz.cztvhub.core.Timed
 import cz.cztvhub.tv.R
 import java.time.Duration
@@ -43,8 +46,8 @@ import java.time.Instant
 private data class CardItem(val title: String, val span: Timed)
 
 /**
- * "Živě": one list mixing CT internet and Anténa channels in the viewer's order ("Kanály", spec/apps.md), each
- * card with its source icon and the programme on air now.
+ * "Živě": one list mixing CT internet, Anténa and Poslanecká sněmovna channels in the viewer's order ("Kanály",
+ * spec/apps.md), each card with its source icon and the programme on air now (a stream: whether it is on).
  */
 @Composable
 fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
@@ -57,6 +60,9 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val antenna = dvb
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
     val channels = ChannelOrder.visible(prefs, antenna?.channels.orEmpty())
+    val psp by viewModel.psp.collectAsStateWithLifecycle()
+    val notOn = stringResource(R.string.psp_not_on)
+    PspPolling(viewModel)
     // Anténa switched on but the gateway has not answered yet: not "everything hidden".
     val antennaPending = antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
         antenna.channels.isEmpty() && antenna.error == null
@@ -82,12 +88,22 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                     val modifier = if (rowIndex == 0 && index == 0) base.focusRequester(firstCard) else base
                     val ct = channel.ct
                     val dvbChannel = channel.dvb
-                    if (ct != null) {
+                    val stream = channel.psp
+                    if (stream != null) {
+                        val state = psp[stream.id] ?: PspState.UNKNOWN
+                        PspCard(
+                            name = stream.name,
+                            number = number,
+                            state = state,
+                            modifier = modifier,
+                            onClick = { selectPsp(viewModel, stream, onPlay) { viewModel.showNotice(notOn) } },
+                        )
+                    } else if (ct != null) {
                         val info = current[ct.id]
                         ChannelCard(
                             name = ct.name,
                             number = number,
-                            antenna = false,
+                            source = ChannelSource.CT,
                             current = info?.current?.let { CardItem(it.title, it) },
                             next = info?.next?.let { CardItem(it.title, it) },
                             emptyText = stringResource(if (loading) R.string.loading else R.string.no_programme_info),
@@ -100,7 +116,7 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                         ChannelCard(
                             name = dvbChannel.name,
                             number = number,
-                            antenna = true,
+                            source = ChannelSource.DVB,
                             current = info?.current?.let { CardItem(it.title, it) },
                             next = info?.next?.let { CardItem(it.title, it) },
                             emptyText = stringResource(R.string.no_programme_info),
@@ -132,7 +148,7 @@ private fun CardRow(content: @Composable RowScope.() -> Unit) {
 private fun ChannelCard(
     name: String,
     number: Int,
-    antenna: Boolean,
+    source: ChannelSource,
     current: CardItem?,
     next: CardItem?,
     emptyText: String,
@@ -155,7 +171,7 @@ private fun ChannelCard(
         Column(Modifier.fillMaxSize().padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 ChannelNumber(number, style = MaterialTheme.typography.titleLarge)
-                SourceIcon(antenna, size = 26.dp)
+                SourceIcon(source, size = 26.dp)
                 Text(name, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(8.dp))
@@ -174,6 +190,53 @@ private fun ChannelCard(
                 Spacer(Modifier.height(6.dp))
                 NextUp(it)
             }
+        }
+    }
+}
+
+/**
+ * A Poslanecká sněmovna stream: on → a red "● ŽIVĚ" badge and "Přímý přenos"; off → dimmed, "Nevysílá se";
+ * not checked yet → "Zjišťuji…" (spec/apps.md).
+ */
+@Composable
+private fun PspCard(name: String, number: Int, state: PspState, modifier: Modifier, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(16.dp)),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.04f),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = if (state == PspState.OFF) Palette.surfaceDim else Palette.surface,
+            contentColor = Palette.text,
+            focusedContainerColor = Palette.focused,
+            focusedContentColor = Palette.onFocused,
+        ),
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .alpha(if (state == PspState.OFF) 0.5f else 1f)
+                .padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ChannelNumber(number, style = MaterialTheme.typography.titleLarge)
+                SourceIcon(ChannelSource.PSP, size = 26.dp)
+                // Two lines: the three "Výbory a semináře N" must stay distinguishable (spec/apps.md "Labels").
+                Text(name, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(8.dp))
+            if (state == PspState.LIVE) {
+                Text(
+                    stringResource(R.string.psp_live_badge),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    modifier = Modifier
+                        .background(Palette.liveBadge, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+            Text(stringResource(pspStateText(state)), style = MaterialTheme.typography.titleLarge, maxLines = 1)
         }
     }
 }

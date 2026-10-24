@@ -13,17 +13,20 @@ data class ZapChannel(val key: String, val name: String) {
     fun liveRequest(): PlayRequest? = when {
         key.startsWith(CT_PREFIX) -> PlayRequest.Live(key.removePrefix(CT_PREFIX), name)
         key.startsWith(DVB_PREFIX) -> PlayRequest.DvbLive(key.removePrefix(DVB_PREFIX), name)
+        key.startsWith(PSP_PREFIX) -> PlayRequest.PspLive(key.removePrefix(PSP_PREFIX), name)
         else -> null
     }
 
     companion object {
         private val CT_PREFIX = ChannelPrefs.ctKey("")
         private val DVB_PREFIX = ChannelPrefs.dvbKey("")
+        private val PSP_PREFIX = ChannelPrefs.pspKey("")
 
         /** The "Kanály" key of a live request; null for anything else. */
         fun keyOf(request: PlayRequest): String? = when (request) {
             is PlayRequest.Live -> ChannelPrefs.ctKey(request.channelId)
             is PlayRequest.DvbLive -> ChannelPrefs.dvbKey(request.channelId)
+            is PlayRequest.PspLive -> ChannelPrefs.pspKey(request.channelId)
             else -> null
         }
 
@@ -85,6 +88,7 @@ object PlayRequests {
                 request.resumeSeconds?.let { intent.putExtra(RESUME, it) }
             }
             is PlayRequest.DvbLive -> intent.putExtra(KIND, "dvbLive")
+            is PlayRequest.PspLive -> intent.putExtra(KIND, "pspLive")
             is PlayRequest.DvbRecorded -> {
                 intent.putExtra(KIND, "dvbRecorded")
                     .putExtra(RECORDING, request.recordingId)
@@ -121,6 +125,7 @@ object PlayRequests {
                 resumeSeconds = resume,
             )
             "dvbLive" -> PlayRequest.DvbLive(channel, title)
+            "pspLive" -> PlayRequest.PspLive(channel, title)
             "dvbRecorded" -> PlayRequest.DvbRecorded(
                 channelId = channel,
                 title = title,

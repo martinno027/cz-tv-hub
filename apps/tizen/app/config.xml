@@ -3,7 +3,7 @@
         id="https://github.com/martinno027/cz-tv-hub" version="0.1.0" viewmodes="maximized">
     <tizen:application id="CzTvHubApp.Televize" package="CzTvHubApp" required_version="4.0"/>
     <name>Televize</name>
-    <description>Oficiální streamy České televize a vlastní anténa. Neoficiální projekt, není spojen s ČT.</description>
+    <description>Oficiální streamy České televize, přímé přenosy Poslanecké sněmovny a vlastní anténa. Neoficiální projekt, není spojen s ČT ani s PS PČR.</description>
     <content src="index.html"/>
     <icon src="icon.png"/>
     <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>

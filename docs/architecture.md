@@ -76,6 +76,20 @@ antenna ─▶ tuner ─▶ TVHeadend (127.0.0.1:9981): scan, EPG, autorec of ev
   detected before ffmpeg starts) and pipes it into ffmpeg's stdin.
 - API contract for the apps: `spec/dvb-gateway.md`. Setup for the user (Czech): `docs/dvb-setup.md`.
 
+## Chamber of Deputies live streams (TV apps only, live only)
+
+```
+TV app ──GET pspcr-ott-live.ssl.cdn.cra.cz/channels/ps-streamN/playlist/cze.m3u8──▶ Chamber's CDN
+       ◀──HLS playlist (200 while broadcasting, 404 "not processed now" otherwise)──
+```
+
+- Five fixed public URLs (catalogue in `spec/fixtures/psp_cases.json`), played by the app's own player exactly as
+  published. No Pi, no gateway, no Kodi add-on, no playlist export: there is nothing to resolve, and no household
+  server handles the video, so nothing of ours can record or re-serve it (approved scope: play only, as offered).
+- "Is it on now?" is a GET of the same playlist, only while Živě or the guide is visible, at most once a minute per
+  stream; segments are never fetched. Rules and golden cases: `spec/apps.md` "Poslanecká sněmovna".
+- Legal basis and limits: `docs/legal-notes.md`.
+
 ## Extension points
 - `channels.py`: add channels (see skill `add-channel`), including the GraphQL `slug`.
 - Future: TVHeadend channels in the IPTV Simple playlist for Kodi.

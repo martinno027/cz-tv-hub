@@ -17,6 +17,9 @@ struct PlayerSession: Identifiable {
 struct LiveStart {
     let resolve: @MainActor () async throws -> PlaybackSource
     let liveTitle: @MainActor () async -> PlayerTitle
+    /// Poslanecká sněmovna only: a 404 when opening means the broadcast just ended; called before the player
+    /// closes with `PSPStreams.offAirMessage`.
+    var offAir: (@MainActor () -> Void)? = nil
 }
 
 @MainActor
@@ -30,6 +33,8 @@ final class AppModel {
     let images = GuideImageStore()
     /// Channels hidden / reordered in Nastavení → Kanály, on this device only.
     let channelPrefs: ChannelPrefsStore
+    /// "Is it on now?" of the Chamber of Deputies' streams, checked only while Živě or the guide is on screen.
+    let parliament = PSPLiveMonitor()
 
     var session: PlayerSession?
     var alertMessage: String?
@@ -85,6 +90,16 @@ final class AppModel {
         switch channel {
         case .ct(let ct): return await schedules.onAir(at: Date())[ct.slug]?.title
         case .antenna(let dvb): return await antenna?.onAir(at: Date())[dvb.id]?.title
+        case .parliament(let stream): return Self.parliamentText(parliament.state(of: stream.key))
+        }
+    }
+
+    /// "Přímý přenos" / "Nevysílá se" / "Zjišťuji…".
+    static func parliamentText(_ state: PSPLiveState) -> String {
+        switch state {
+        case .live: return PSPStreams.liveText
+        case .off: return PSPStreams.offText
+        case .unknown: return PSPStreams.unknownText
         }
     }
 
@@ -106,14 +121,29 @@ final class AppModel {
                 let airing = await antenna.onAir(at: Date())[dvb.id]
                 return .live(channel: dvb.name, airing: airing.map { ($0.title, $0.end) })
             })
+        case .parliament(let stream):
+            // The published URL as it is: no extra or faked headers, live only (no resume, start-over, thumbnails).
+            // Right before playback: a check younger than 60 s, else one more check of the same playlist, so an
+            // off stream gets the message instead of a player error.
+            let parliament = parliament
+            let source = PlaybackSource(url: stream.url, title: stream.name, mode: .live)
+            return LiveStart(resolve: {
+                if await parliament.stateBeforePlaying(stream) == .off {
+                    throw CTError(PSPStreams.offAirMessage, code: PSPStreams.offAirCode)
+                }
+                return source
+            }, liveTitle: {
+                PlayerTitle(title: stream.name, subtitle: PSPStreams.sourceLabel)
+            }, offAir: { parliament.markOff(stream.key) })
         }
     }
+
 
     /// Live playback of any channel; the player can zap from it.
     func playLive(_ channel: MixedChannel) {
         guard let start = liveStart(channel) else { return }
         log.info("play live \(channel.key, privacy: .public)")
-        open(liveTitle: start.liveTitle, zapFrom: channel, start.resolve)
+        open(liveTitle: start.liveTitle, offAir: start.offAir, zapFrom: channel, start.resolve)
     }
 
     /// Applies (and by default stores in the Keychain) a gateway configuration; nil removes it.
@@ -188,7 +218,7 @@ final class AppModel {
 
     private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil, resumeTarget: ResumeTarget? = nil,
                       title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
-                      zapFrom channel: MixedChannel? = nil, _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
+                      offAir: (@MainActor () -> Void)? = nil, zapFrom channel: MixedChannel? = nil, _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
             log.info("play ignored: still resolving the previous selection")
             return
@@ -206,7 +236,7 @@ final class AppModel {
                 log.info("resolved \(source.title, privacy: .public) mode=\(String(describing: source.mode), privacy: .public) host=\(source.url.host() ?? "", privacy: .public)")
                 let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks,
                                                   progress: resumeTarget.map { ($0, resume) },
-                                                  title: title, liveTitle: liveTitle)
+                                                  title: title, liveTitle: liveTitle, offAir: offAir)
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
                 var session = PlayerSession(controller: controller)
                 if let channel, source.mode == .live {

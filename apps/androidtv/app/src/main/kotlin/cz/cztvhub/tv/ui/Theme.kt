@@ -16,6 +16,8 @@ object Palette {
     val text = Color(0xFFE8EAED)
     val textDim = Color(0xFF9AA0A6)
     val nowLine = Color(0xFFFF5252)
+    /** The "● ŽIVĚ" badge of a Poslanecká sněmovna stream that is on. */
+    val liveBadge = Color(0xFFD32F2F)
 }
 
 @Composable

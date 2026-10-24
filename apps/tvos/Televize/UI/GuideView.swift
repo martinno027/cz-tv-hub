@@ -2,15 +2,18 @@ import CTCore
 import SwiftUI
 import UIKit
 
-/// One guide cell: a CT internet programme or an "Anténa" (DVB-T2) event.
+/// One guide cell: a CT internet programme, an "Anténa" (DVB-T2) event or a Poslanecká sněmovna stream (one cell
+/// over the whole day, no programme data).
 enum GuideEntry: Identifiable, TimedItem {
     case ct(Programme)
     case antenna(DVBEvent, DVBChannel)
+    case parliament(PSPStream, start: Date, end: Date)
 
     var id: String {
         switch self {
         case .ct(let programme): return programme.id
         case .antenna(let event, let channel): return "dvb|\(channel.id)|\(event.id)"
+        case .parliament(let stream, _, _): return stream.key
         }
     }
 
@@ -18,6 +21,7 @@ enum GuideEntry: Identifiable, TimedItem {
         switch self {
         case .ct(let programme): return programme.start
         case .antenna(let event, _): return event.start
+        case .parliament(_, let start, _): return start
         }
     }
 
@@ -25,6 +29,7 @@ enum GuideEntry: Identifiable, TimedItem {
         switch self {
         case .ct(let programme): return programme.end
         case .antenna(let event, _): return event.end
+        case .parliament(_, _, let end): return end
         }
     }
 
@@ -32,6 +37,7 @@ enum GuideEntry: Identifiable, TimedItem {
         switch self {
         case .ct(let programme): return programme.title
         case .antenna(let event, _): return event.title
+        case .parliament(let stream, _, _): return stream.name
         }
     }
 
@@ -48,6 +54,19 @@ enum GuideEntry: Identifiable, TimedItem {
             case .recording: return .archive
             case .notRecorded: return .unavailable
             }
+        case .parliament:
+            return .offAir  // the live state comes from the monitor: `ProgrammeState(parliament:)`
+        }
+    }
+}
+
+extension ProgrammeState {
+    /// The look of a Poslanecká sněmovna cell: on = airing, off = dimmed, not checked yet = future.
+    init(parliament: PSPLiveState) {
+        switch parliament {
+        case .live: self = .airing
+        case .off: self = .offAir
+        case .unknown: self = .future
         }
     }
 }
@@ -73,6 +92,8 @@ private struct GuideLayout {
     var segmentOf: [String: Int] = [:]
     /// x of each segment's leading edge, per row (`segments` start at the timeline's start).
     var starts: [[Double]] = []
+    /// The Poslanecká sněmovna streams among the rows ("is it on now?" is checked for these).
+    var parliamentStreams: [PSPStream] = []
 
     /// Horizontal extent of a focusable cell.
     func span(of id: String) -> (row: Int, from: Double, to: Double)? {
@@ -236,6 +257,8 @@ struct GuideView: View {
         }
         .task(id: LoadKey(day: day, gateway: model.gateway)) { await load() }
         .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
+        // checked only while the grid shows today (other days have no live state)
+        .watchesParliament(layout.timeline.contains(Date()) ? layout.parliamentStreams : [])
         .onChange(of: opens) { _, _ in reopen() }
         .onChange(of: focusedChip) { _, chip in
             if chip != nil { cameFromStrip = true }
@@ -298,13 +321,16 @@ struct GuideView: View {
                 if choice.isAiring {
                     Button("Živě") { model.playAntennaLive(channel) }
                 }
+            case .parliament:
+                EmptyView()  // selected directly, never a choice
             }
             Button("Zrušit", role: .cancel) {}
         }
     }
 
     private func buildRows() -> [GuideRow] {
-        model.channelPrefs.channels(antenna: antennaChannels).visible.map { channel in
+        let bounds = Self.bounds(of: day)
+        return model.channelPrefs.channels(antenna: antennaChannels).visible.map { channel in
             switch channel {
             case .ct(let ct):
                 return GuideRow(id: ct.slug, name: ct.name, source: .ct,
@@ -312,6 +338,9 @@ struct GuideView: View {
             case .antenna(let dvb):
                 return GuideRow(id: "dvb|\(dvb.id)", name: dvb.name, source: .dvb,
                                 entries: (antennaEPG[dvb.id] ?? []).map { GuideEntry.antenna($0, dvb) })
+            case .parliament(let stream):
+                return GuideRow(id: stream.key, name: stream.name, source: .psp,
+                                entries: [.parliament(stream, start: bounds.start, end: bounds.end)])
             }
         }
     }
@@ -348,8 +377,13 @@ struct GuideView: View {
             }
             starts.append(rowStarts)
         }
+        let streams = rows.flatMap(\.entries).compactMap { entry -> PSPStream? in
+            if case .parliament(let stream, _, _) = entry { return stream }
+            return nil
+        }
         layout = GuideLayout(version: layout.version + 1, rows: rows, timeline: timeline, segments: segments,
-                             entries: entries, rowOf: rowOf, segmentOf: segmentOf, starts: starts)
+                             entries: entries, rowOf: rowOf, segmentOf: segmentOf, starts: starts,
+                             parliamentStreams: streams)
     }
 
     // MARK: grid
@@ -371,7 +405,8 @@ struct GuideView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 // Equatable: a focus move re-renders GuideView (detail), not the thousands of cells.
-                GuideGrid(layout: layout, window: window, now: now, focusedID: $focusedID, defaultFocusID: defaultFocusID,
+                GuideGrid(layout: layout, window: window, now: now, parliament: model.parliament.states,
+                          focusedID: $focusedID, defaultFocusID: defaultFocusID,
                           scrollRequest: scrollRequest, previousDay: edgeLabel(next: false, today: today),
                           nextDay: edgeLabel(next: true, today: today), select: select)
                     .equatable()
@@ -620,6 +655,8 @@ struct GuideView: View {
                 return .ct(url)
             }
             return images.thumbnail(for: event)
+        case .parliament:
+            return nil  // no thumbnails for these streams
         }
     }
 
@@ -656,6 +693,13 @@ struct GuideView: View {
             case .notRecorded:
                 model.alertMessage = AntennaAction.notRecordedMessage
             }
+        case .parliament(let stream, _, _):
+            // Today: live, or "Poslanecká sněmovna teď nevysílá." (no choice, no resume, no start-over).
+            if entry.isAiring(at: now) {
+                model.playLive(.parliament(stream))
+            } else {
+                model.alertMessage = PSPStreams.onlyLiveMessage
+            }
         }
     }
 
@@ -675,6 +719,8 @@ private struct GuideGrid: View, Equatable {
     let layout: GuideLayout
     let window: GuideView.Window
     let now: Date
+    /// Live state of the Poslanecká sněmovna rows: the grid redraws when one changes (rarely), not on focus moves.
+    let parliament: [String: PSPLiveState]
     let focusedID: FocusState<String?>.Binding
     let defaultFocusID: String?
     let scrollRequest: GuideView.ScrollRequest?
@@ -685,6 +731,7 @@ private struct GuideGrid: View, Equatable {
 
     nonisolated static func == (lhs: GuideGrid, rhs: GuideGrid) -> Bool {
         lhs.layout.version == rhs.layout.version && lhs.window == rhs.window && lhs.now == rhs.now
+            && lhs.parliament == rhs.parliament
             && lhs.defaultFocusID == rhs.defaultFocusID && lhs.scrollRequest == rhs.scrollRequest
             && lhs.previousDay == rhs.previousDay && lhs.nextDay == rhs.nextDay
     }
@@ -803,12 +850,19 @@ private struct GuideGrid: View, Equatable {
                     .accessibilityIdentifier("guide.\(rowIndex).\(index)")
                     .padding(.horizontal, 3)
                 case .item(let entry, let width):
-                    let state = entry.state(at: now)
+                    let live = parliamentState(entry)
+                    let state = live.map(ProgrammeState.init(parliament:)) ?? entry.state(at: now)
                     Button {
                         select(entry)
                     } label: {
-                        EntryCellLabel(start: entry.start, title: entry.title, state: state)
-                            .frame(width: max(width - 6, 2))
+                        Group {
+                            if let live {
+                                ParliamentCellLabel(state: live, today: entry.isAiring(at: now))
+                            } else {
+                                EntryCellLabel(start: entry.start, title: entry.title, state: state)
+                            }
+                        }
+                        .frame(width: max(width - 6, 2))
                     }
                     .buttonStyle(GuideCellStyle(state: state))
                     .focused(focusedID, equals: entry.id)
@@ -819,6 +873,12 @@ private struct GuideGrid: View, Equatable {
             Color.clear.frame(width: max(0, tail))
             if let nextDay { dayEdge(nextDay, id: GuideLayout.edgeID(next: true, rowID: row.id)) }
         }
+    }
+
+    /// nil for other cells; `.off` look (with "Jen přímé přenosy") on days other than today.
+    private func parliamentState(_ entry: GuideEntry) -> PSPLiveState? {
+        guard case .parliament(let stream, _, _) = entry else { return nil }
+        return entry.isAiring(at: now) ? parliament[stream.key] ?? .unknown : .off
     }
 
     /// "‹ Včera" / "Zítra ›" at a row's start / end: moving onto it opens that day (GuideView.crossDay).
@@ -901,6 +961,26 @@ private struct EntryCellLabel: View {
     }
 }
 
+/// A Poslanecká sněmovna cell: "Přímý přenos" / "Nevysílá se" / "Zjišťuji…" over the whole day.
+/// Other days: "Jen přímé přenosy".
+private struct ParliamentCellLabel: View {
+    let state: PSPLiveState
+    let today: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: state == .live ? ProgrammeState.airing.symbol : "building.columns")
+                .font(.system(size: 18))
+            Text(today ? AppModel.parliamentText(state) : PSPStreams.onlyLiveText)
+                .font(.system(size: 25, weight: .semibold))
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .stickyLeading()
+    }
+}
+
 extension View {
     /// Keeps a cell's text visible when the cell starts left of the visible area.
     func stickyLeading() -> some View {
@@ -968,7 +1048,8 @@ private struct EntryDetail: View {
 
     var body: some View {
         if let entry {
-            let state = entry.state(at: now)
+            let live = parliamentState(entry)
+            let state = live.map(ProgrammeState.init(parliament:)) ?? entry.state(at: now)
             HStack(alignment: .top, spacing: 36) {
                 artwork(entry)
                     .frame(width: Self.imageSize.width, height: Self.imageSize.height)
@@ -983,7 +1064,7 @@ private struct EntryDetail: View {
                     line(meta(entry))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Label(statusText(entry, state: state), systemImage: state.symbol)
+                    Label(live.map { parliamentText(entry, state: $0) } ?? statusText(entry, state: state), systemImage: state.symbol)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .foregroundStyle(state == .airing ? .red : (state == .buffer || state == .archive ? .green : .secondary))
@@ -1015,6 +1096,15 @@ private struct EntryDetail: View {
         }
     }
 
+    private func parliamentState(_ entry: GuideEntry) -> PSPLiveState? {
+        guard case .parliament(let stream, _, _) = entry else { return nil }
+        return entry.isAiring(at: now) ? model.parliament.state(of: stream.key) : .off
+    }
+
+    private func parliamentText(_ entry: GuideEntry, state: PSPLiveState) -> String {
+        entry.isAiring(at: now) ? AppModel.parliamentText(state) : PSPStreams.onlyLiveText
+    }
+
     /// One line that keeps its height when empty.
     private func line(_ text: String) -> some View {
         Text(text.isEmpty ? " " : text).lineLimit(1)
@@ -1038,6 +1128,16 @@ private struct EntryDetail: View {
                     .foregroundStyle(.secondary)
                 }
             }
+        case .parliament(let stream, _, _):
+            // a generic symbol, never the Chamber's logo or the state emblem
+            ZStack {
+                Color(white: 0.15)
+                VStack(spacing: 8) {
+                    Image(systemName: "building.columns").font(.system(size: 44))
+                    Text(stream.name).font(.headline)
+                }
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1045,6 +1145,7 @@ private struct EntryDetail: View {
         switch entry {
         case .ct(let programme): return programme.episodeTitle
         case .antenna(let event, _): return event.subtitle
+        case .parliament: return ""
         }
     }
 
@@ -1052,6 +1153,7 @@ private struct EntryDetail: View {
         switch entry {
         case .ct(let programme): return programme.description
         case .antenna(let event, _): return event.description
+        case .parliament: return ""  // no programme data
         }
     }
 
@@ -1066,6 +1168,7 @@ private struct EntryDetail: View {
     }
 
     private func meta(_ entry: GuideEntry) -> String {
+        if case .parliament = entry { return "Zdroj: \(PSPStreams.sourceLabel)" }
         let channel: String
         let genre: String
         switch entry {
@@ -1075,6 +1178,8 @@ private struct EntryDetail: View {
         case .antenna(let event, let dvbChannel):
             channel = "\(dvbChannel.name) (anténa)"
             genre = event.genre
+        case .parliament:
+            return ""
         }
         let day = BroadcastDay(containing: entry.start).label(today: today)
         let range = "\(Formatting.time(entry.start))–\(Formatting.time(entry.end))"

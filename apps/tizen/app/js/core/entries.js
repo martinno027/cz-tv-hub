@@ -1,6 +1,8 @@
 /*
  * Guide cells from either source (CT internet or "Anténa"): how they look and what selecting them does.
- * Entry = {source: 'ct' | 'dvb', channel, item, start, end, title, subtitle, description, genre, imageUrl}.
+ * Entry = {source: 'ct' | 'dvb' | 'psp', channel, item, start, end, title, subtitle, description, genre, imageUrl}.
+ * A Poslanecká sněmovna entry is one cell over the whole day; its item = {state: 'live' | 'off' | 'unknown',
+ * today: the grid containing now} (no programme data).
  */
 (function (root) {
   'use strict';
@@ -23,12 +25,27 @@
       };
     },
 
+    /** The single whole-day cell of a Chamber stream (`start`/`end` = the guide's day). Only the day containing now
+     *  shows the live state; other days just say the source has live broadcasts only. */
+    psp: function (channel, state, today, start, end) {
+      var P = CT.Psp;
+      var title = !today ? P.ONLY_LIVE_TEXT : state === 'live' ? P.LIVE_TEXT : state === 'off' ? P.OFF_TEXT : P.UNKNOWN_TEXT;
+      return {
+        source: 'psp', channel: channel, item: { state: state, today: today }, start: start, end: end,
+        title: title, subtitle: '', description: '', genre: '', imageUrl: ''
+      };
+    },
+
     isAiring: function (entry, now) {
       return entry.start <= now && now < entry.end;
     },
 
     /** 'airing' | 'playable' | 'future' | 'dimmed' */
     look: function (entry, now) {
+      if (entry.source === 'psp') {
+        if (!entry.item.today) return 'dimmed';
+        return entry.item.state === 'live' ? 'airing' : entry.item.state === 'off' ? 'dimmed' : 'future';
+      }
       if (entry.source === 'ct') {
         if (Entries.isAiring(entry, now)) return 'airing';
         var p = entry.item;
@@ -49,6 +66,7 @@
 
     /** Key and length under which "Pokračovat" remembers this entry, or null (nothing to resume). */
     resumeInfo: function (entry) {
+      if (entry.source === 'psp') return null; // live only, nothing to resume
       var lengthSeconds = (entry.end - entry.start) / 1000;
       if (entry.source === 'ct') return { key: 'ct:' + entry.item.idec, lengthSeconds: lengthSeconds };
       var rec = entry.item.recording;
@@ -86,6 +104,12 @@
 
     baseSelect: function (entry, now) {
       var ch = entry.channel;
+      if (entry.source === 'psp') {
+        // Live only: off → the message (no player); on or not checked yet → try to play live.
+        if (!entry.item.today) return { type: 'notice', text: CT.Psp.ONLY_LIVE_MESSAGE };
+        if (entry.item.state === 'off') return { type: 'notice', text: CT.Psp.OFF_MESSAGE };
+        return { type: 'play', request: { kind: 'pspLive', channelId: ch.id, title: ch.name } };
+      }
       if (entry.source === 'ct') {
         var p = entry.item;
         if (now < p.start) return { type: 'notice', text: CT.Messages.FUTURE };

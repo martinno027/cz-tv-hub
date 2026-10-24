@@ -40,6 +40,9 @@ import cz.cztvhub.core.PlayerTitle
 import cz.cztvhub.core.PlayKind
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.PlayTarget
+import cz.cztvhub.core.PspMessages
+import cz.cztvhub.core.PspState
+import cz.cztvhub.core.PspStreams
 import cz.cztvhub.core.ResumeRules
 import cz.cztvhub.core.ResumeSpot
 import cz.cztvhub.core.dvb.AdBreak
@@ -306,6 +309,18 @@ class PlayerActivity : ComponentActivity() {
         loadJob?.cancel()
         showMessage(getString(R.string.loading))
         loadJob = lifecycleScope.launch {
+            // Poslanecká sněmovna, right before playback: an answer younger than 60 s (e.g. the one Živě just made),
+            // else one more check of the playlist. Off (e.g. zapped onto): the message instead of a player error.
+            (request as? PlayRequest.PspLive)?.let { psp ->
+                if (withContext(Dispatchers.IO) { tvApp.psp.stateForPlayback(psp.channelId) } == PspState.OFF) {
+                    target = null
+                    showMessage(getString(R.string.psp_not_on))
+                    // A zap overlay still showing gets "Nevysílá se".
+                    val zapped = zapChannels.firstOrNull { it.key == ZapChannel.keyOf(psp) }
+                    if (zapped != null && zapOverlay.visibility == View.VISIBLE) showZapOverlay(zapped)
+                    return@launch
+                }
+            }
             val planned = try {
                 withContext(Dispatchers.IO) { tvApp.planner.plan(request, forceRefresh) }
             } catch (e: CtException) {
@@ -337,11 +352,19 @@ class PlayerActivity : ComponentActivity() {
                 .setMimeType(MimeTypes.APPLICATION_M3U8)
                 .setMediaMetadata(MediaMetadata.Builder().setTitle(planned.title).build())
                 .build()
-            // Headers (the gateway's bearer key) go on every request: playlists and segments.
-            val http = DefaultHttpDataSource.Factory()
-                .setDefaultRequestProperties(planned.headers)
-                .setReadTimeoutMs(HTTP_TIMEOUT_MS) // a gateway live start blocks until the first segment
-                .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
+            val http = if (request is PlayRequest.PspLive) {
+                // Poslanecká sněmovna: its own data source, the published URL as is, no header of ours (no gateway
+                // key, nothing faked).
+                DefaultHttpDataSource.Factory()
+                    .setReadTimeoutMs(HTTP_TIMEOUT_MS)
+                    .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
+            } else {
+                // Headers (the gateway's bearer key) go on every request: playlists and segments.
+                DefaultHttpDataSource.Factory()
+                    .setDefaultRequestProperties(planned.headers)
+                    .setReadTimeoutMs(HTTP_TIMEOUT_MS) // a gateway live start blocks until the first segment
+                    .setConnectTimeoutMs(HTTP_TIMEOUT_MS)
+            }
             val source = HlsMediaSource.Factory(http).createMediaSource(item)
             // A master playlist with several audio renditions gets new track groups: the menu's override is stale.
             exo.trackSelectionParameters = audioPreference.applyTo(exo.trackSelectionParameters)
@@ -373,6 +396,12 @@ class PlayerActivity : ComponentActivity() {
                 exo.prepare()
                 return
             }
+            // Poslanecká sněmovna answers 404 outside broadcasts: the broadcast just ended (or never began).
+            if (request is PlayRequest.PspLive && httpStatus(error) == 404) {
+                exo.stop()
+                showMessage(getString(R.string.psp_not_on))
+                return
+            }
             // The gateway explains tuner/stream problems in Czech (503 "Tuner je obsazený", 502).
             gatewayError(error)?.let {
                 showMessage(it)
@@ -387,6 +416,12 @@ class PlayerActivity : ComponentActivity() {
                 showMessage(getString(R.string.error_playback))
             }
         }
+    }
+
+    private fun httpStatus(error: PlaybackException): Int? {
+        var cause: Throwable? = error
+        while (cause != null && cause !is HttpDataSource.InvalidResponseCodeException) cause = cause.cause
+        return (cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
     }
 
     private fun gatewayError(error: PlaybackException): String? {
@@ -532,6 +567,7 @@ class PlayerActivity : ComponentActivity() {
     /** Channel name of the request (CT catalogue or the gateway's channel list). */
     private fun channelName(): String {
         val id = request.channelId
+        if (request is PlayRequest.PspLive) return PspStreams.byId(id)?.name ?: request.title
         Channels.byId(id)?.let { return it.name }
         return runCatching { tvApp.dvb()?.channels()?.firstOrNull { it.id == id }?.name }.getOrNull()
             ?: request.title
@@ -564,6 +600,8 @@ class PlayerActivity : ComponentActivity() {
                 val on = runCatching { tvApp.dvb()?.onAir(now)?.get(r.channelId)?.current }.getOrNull()
                 PlayerTitle.live(channel, on?.title, on?.subtitle.orEmpty()) to on?.end
             }
+            // No programme data: the stream's name over where it comes from.
+            is PlayRequest.PspLive -> InfoTitle(channel, PspMessages.SOURCE) to null
             else -> PlayerTitle.programme(r.title, channel) to null
         }
     }
@@ -722,6 +760,12 @@ class PlayerActivity : ComponentActivity() {
         return when (val live = channel.liveRequest()) {
             is PlayRequest.Live -> runCatching { tvApp.schedules.onAir(now)[live.channelId]?.current?.title }.getOrNull()
             is PlayRequest.DvbLive -> runCatching { tvApp.dvb()?.onAir(now)?.get(live.channelId)?.current?.title }.getOrNull()
+            // The last known answer only (no check from the player): "Přímý přenos" / "Nevysílá se".
+            is PlayRequest.PspLive -> when (tvApp.psp.state(live.channelId, now)) {
+                PspState.LIVE -> getString(R.string.psp_live)
+                PspState.OFF -> getString(R.string.psp_off)
+                PspState.UNKNOWN -> null
+            }
             else -> null
         }
     }

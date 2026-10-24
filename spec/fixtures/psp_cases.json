@@ -1,0 +1,40 @@
+{
+ "comment": "Poslanecká sněmovna live streams (spec/apps.md, T06). Synthetic responses only: tests never contact psp.cz or its CDN.",
+ "streams": [
+  {"key": "psp:stream1", "name": "Schůze PS", "url": "https://pspcr-ott-live.ssl.cdn.cra.cz/channels/ps-stream1/playlist/cze.m3u8"},
+  {"key": "psp:stream2", "name": "Tiskové konference", "url": "https://pspcr-ott-live.ssl.cdn.cra.cz/channels/ps-stream2/playlist/cze.m3u8"},
+  {"key": "psp:stream3", "name": "Výbory a semináře 1", "url": "https://pspcr-ott-live.ssl.cdn.cra.cz/channels/ps-stream3/playlist/cze.m3u8"},
+  {"key": "psp:stream4", "name": "Výbory a semináře 2", "url": "https://pspcr-ott-live.ssl.cdn.cra.cz/channels/ps-stream4/playlist/cze.m3u8"},
+  {"key": "psp:stream5", "name": "Výbory a semináře 3", "url": "https://pspcr-ott-live.ssl.cdn.cra.cz/channels/ps-stream5/playlist/cze.m3u8"}
+ ],
+ "checkIntervalSeconds": 60,
+ "errorIntervalSeconds": 120,
+ "staleLiveSeconds": 180,
+ "live": [
+  {"name": "media playlist with segments", "status": 200,
+   "body": "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:10\n#EXTINF:6.0,\nseg10.ts\n#EXTINF:6.0,\nseg11.ts\n", "live": true},
+  {"name": "master playlist with variants", "status": 200,
+   "body": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\nchunklist.m3u8\n", "live": true},
+  {"name": "not processed now (outside broadcasts)", "status": 404,
+   "body": "NOT_FOUND: channel ps-stream1 is not processed now", "live": false},
+  {"name": "empty playlist", "status": 200, "body": "#EXTM3U\n#EXT-X-VERSION:3\n", "live": false},
+  {"name": "not a playlist", "status": 200, "body": "<html>maintenance</html>", "live": false},
+  {"name": "server error", "status": 503, "body": "", "live": false}
+ ],
+ "arrange": [
+  {"name": "three sources, default order",
+   "channels": ["ct:CH_1", "dvb:a", "psp:stream1", "psp:stream2"],
+   "prefs": {"order": [], "hidden": []},
+   "all": ["ct:CH_1", "dvb:a", "psp:stream1", "psp:stream2"],
+   "visible": ["ct:CH_1", "dvb:a", "psp:stream1", "psp:stream2"]},
+  {"name": "a stream moved before CT and one hidden",
+   "channels": ["ct:CH_1", "ct:CH_2", "psp:stream1", "psp:stream2"],
+   "prefs": {"order": ["psp:stream2", "ct:CH_1"], "hidden": ["psp:stream1"]},
+   "all": ["psp:stream2", "ct:CH_1", "ct:CH_2", "psp:stream1"],
+   "visible": ["psp:stream2", "ct:CH_1", "ct:CH_2"]}
+ ],
+ "sources": [
+  {"name": "missing sourcesOff: all on", "sourcesOff": null, "on": ["ct", "dvb", "psp"]},
+  {"name": "Chamber switched off", "sourcesOff": ["psp"], "on": ["ct", "dvb"]}
+ ]
+}

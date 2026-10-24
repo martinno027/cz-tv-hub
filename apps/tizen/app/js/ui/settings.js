@@ -1,6 +1,7 @@
 /*
  * "Nastavení" is a choice of two sections (spec/apps.md); OK opens the chosen one full screen (the app's tabs are
- * hidden), Return goes back to the choice. "Kanály" = the source switches (Internetová TV, Anténa) and which
+ * hidden), Return goes back to the choice. "Kanály" = the source switches (Internetová TV, Anténa, Poslanecká
+ * sněmovna) and which
  * channels this TV shows in what order (one mixed list of rows [icon ☑ name] [▲] [▼]); "Server" = gateway address
  * and key for "Anténa" (saving tests the gateway right away) and "O aplikaci". The choice screen starts with the
  * version line (js/build-info.js, written by build.py; "vývojová verze" without it).
@@ -122,6 +123,8 @@
     var dvb = app.dvbConfig ? app.dvbState : null;
     var sources = [{ source: 'ct', label: 'Internetová TV (ČT)' }];
     if (dvb) sources.push({ source: 'dvb', label: 'Anténa' });
+    // Reads "Poslanecká sněmovna PČR · jen přímé přenosy" (the full label would not fit the row).
+    sources.push({ source: 'psp', label: CT.Psp.SWITCH_LABEL, detail: 'PČR · jen přímé přenosy' });
     sources.forEach(function (s) {
       var on = !CT.ChannelPrefs.isSourceOff(app.channelPrefs, s.source);
       var row = el('div', 'ch-row ch-source' + (on ? '' : ' off'));
@@ -129,6 +132,7 @@
       name.appendChild(document.createTextNode(on ? '☑ ' : '☐ '));
       name.appendChild(CT.sourceIcon(s.source));
       name.appendChild(document.createTextNode(s.label));
+      if (s.detail) name.appendChild(el('span', 'ch-detail', s.detail));
       row.appendChild(name);
       box.appendChild(row);
       self.chItems.push({ source: s.source, controls: [name], enabled: [true] });
@@ -144,7 +148,7 @@
     if (list.length) {
       this.listRows(box, list);
     } else {
-      box.appendChild(el('div', 'ch-message', 'Žádný kanál: zapněte Internetovou TV nebo Anténu.'));
+      box.appendChild(el('div', 'ch-message', 'Žádný kanál: zapněte Internetovou TV, Anténu nebo Poslaneckou sněmovnu.'));
     }
 
     var reset = el('div', 'button', 'Obnovit výchozí pořadí');
