@@ -26,8 +26,6 @@ class ChannelPrefsStore(context: Context) {
 
     fun set(value: ChannelPrefs) = update { value }
 
-    fun reset() = update { ChannelPrefs.DEFAULT }
-
     private companion object {
         const val KEY = "prefs"
     }

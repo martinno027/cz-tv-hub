@@ -74,6 +74,9 @@ simulované, poloha běží s hodinami), `?demo&timeline=growing` totéž pro je
 Nastavení → Profil mluví v ukázce s vymyšlenou bránou v paměti (profil **Demo**, heslo **1234**); po obnovení
 stránky brána profily zapomene, takže přihlášená ukázka projde odhlášením (401). `?demo&profile=offline` = čtení
 a ukládání profilu selže jako při nedostupné bráně (stav „Čeká na uložení“).
+Výchozí seznam kanálů domácnosti (`/dvb/defaults`) má ukázka v paměti (ČT24 první, ČT art skrytý, verze 1);
+`?demo&defaults=none` = bez výchozího seznamu. Novější verzi lze nastavit v konzoli (`CT.Demo.defaults`) a otevřít
+Nastavení. Ukázka si pamatuje stav v `localStorage` prohlížeče; čistý start = `localStorage.clear()`.
 
 ## Instalace do televize (bez obchodu Samsung)
 

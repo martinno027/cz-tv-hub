@@ -262,7 +262,25 @@ not shown on this TV.
   `hidden`. Živě and the guide show `visible`; the settings list shows `all`.
 - **move(key, by ±1)** swaps the channel with its neighbour in `all` (no-op at the edge); the new `order` = `all`
   followed by the stored keys not in the list (e.g. the channels of a source that is off). Hiding/showing does not
-  change the order. **Obnovit výchozí** clears `order` and `hidden` (and switches both sources on).
+  change the order. **Obnovit výchozí** clears `order`, `hidden` and `sourcesOff` (all sources on), or, when the
+  gateway has a **household default** (below), makes the TV follow that default again.
+- **Household default (T11)**: a TV that is **not signed in** and whose channel list the viewer **never changed**
+  shows the household default from `GET /dvb/defaults` (`spec/dvb-gateway.md`), fetched on app start and when
+  Nastavení opens and kept on the device for offline starts; a newer `version` replaces it. The first change on the
+  TV (hide/show, move, a source switch) makes the TV's list its own (`own`), starting from what it showed; from then
+  on the default no longer applies there. **Obnovit výchozí** clears `own` (and the TV's order/hidden/sources), so
+  the TV follows the household default again (or the built-in order without one). A TV that already had stored
+  prefs before T11 (non-empty `order`, `hidden` or `sourcesOff`) counts as `own`. Signed in, the profile applies as
+  before; signing out returns to what the TV had (its own list, or following the default). A new profile starts with
+  what the TV shows. The thumbnails switch is not part of the default. **Signed in**, Obnovit výchozí sets the
+  profile's list to a copy of the household default (or the built-in order without one) and sends it to the profile
+  as any change; the TV's own `own`/local list is untouched. `GET /dvb/defaults` failing, answering `404` (an older
+  gateway) or a malformed body (`channelPrefs` neither an object nor `null`, a bad `version`) keeps the cached
+  default; the same `version` again is ignored; **Odebrat bránu** or a changed gateway address drops the cache (a different
+  gateway counts its versions from its own start). Golden cases:
+  `spec/fixtures/household_default_cases.json` (`migrate`; `sequences` of the events `defaults` — its `settings` =
+  the gateway's `channelPrefs` — `change` and `reset`, each step with the state and the `effective` list), all three
+  apps. "Newer" = a higher `version`.
 - **Source icon**: every channel shows where it comes from, an internet/globe icon for CT internet channels and an
   antenna icon for Anténa (SF Symbols `globe` / `antenna.radiowaves.left.and.right`, Material `Language` / `SettingsInputAntenna`
   or similar, inline SVG on Samsung): in the settings rows (required), on the Živě cards and next to the channel name

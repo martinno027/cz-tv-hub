@@ -76,6 +76,7 @@
     dialog: null,
     channelPrefs: null,
     profile: null, // "Profil" (CT.Profile.ProfileSync)
+    household: null, // "Kanály" household default (CT.Household.HouseholdList)
     dvbThumbs: false, // the gateway has thumbnails on (from /dvb/status)
     images: null, // guide images (CT and gateway thumbnails), memory only
 
@@ -107,10 +108,13 @@
       this.resumeStore = new CT.ResumeStore(localBackend('cztvhub.resume'));
       this.channelPrefs = CT.ChannelPrefsStore.load();
       this.profile = this.makeProfile();
+      this.household = this.makeHousehold();
+      if (!this.profile.signedIn()) this.showPrefs(this.household.effective(), true);
       this.player = new CT.Player(this);
       this.numberEntry = new CT.NumberEntry(function (n) { self.playNumber(n); });
       this.setDvbConfig(CT.Demo.enabled ? CT.Demo.dvbConfig() : CT.SettingsStore.config(), true);
       this.profile.sync(); // app start: send what is pending, else read another TV's change
+      this.fetchDefaults();
       setInterval(function () { self.profile.retry(); }, PROFILE_RETRY_MS);
 
       CT.Keys.register();
@@ -170,10 +174,42 @@
       });
     },
 
+    /**
+     * "Kanály" household default: whether this TV's list is its own (else it follows the gateway's default). A TV
+     * from before T11 decides once from its own prefs (signed in: the ones ProfileSync keeps aside).
+     */
+    makeHousehold: function () {
+      var self = this;
+      return new CT.Household.HouseholdList({
+        store: CT.HouseholdStore,
+        legacy: function () {
+          var profile = self.profile;
+          return profile.signedIn() ? CT.Profile.Document.apply(profile.state.local).channelPrefs : self.channelPrefs;
+        }
+      });
+    },
+
+    /** GET /dvb/defaults (app start, Nastavení opens); unreachable or an older gateway keeps the cached default. */
+    fetchDefaults: function () {
+      var self = this;
+      var repo = this.dvbRepo;
+      if (!repo) return;
+      CT.Household.fetchDefaults(repo.client).then(function (answer) {
+        if (self.dvbRepo === repo && self.household.defaults(answer)) self.followDefault();
+      }, function () {});
+    },
+
+    /** Signed out and not the TV's own list: show the (new) household default. */
+    followDefault: function () {
+      if (this.profile.signedIn() || this.household.state.own) return;
+      var prefs = this.household.effective();
+      if (CT.ChannelPrefs.serialise(prefs) !== CT.ChannelPrefs.serialise(this.channelPrefs)) this.showPrefs(prefs);
+    },
+
     /** Other settings become this TV's current ones (signing in or out, another TV changed the profile). */
     applySettings: function (settings) {
-      this.channelPrefs = settings.channelPrefs;
-      CT.ChannelPrefsStore.save(settings.channelPrefs);
+      this.channelPrefs = this.household.shown(settings, this.profile.signedIn());
+      CT.ChannelPrefsStore.save(this.channelPrefs);
       CT.ThumbsSwitch.set(settings.thumbnails);
       this.renderLive();
       this.screens.guide.reload();
@@ -227,6 +263,7 @@
     },
 
     setDvbConfig: function (config, initial) {
+      var before = this.dvbConfig;
       this.dvbConfig = config;
       this.dvbRepo = config ? new CT.DvbRepository(new CT.DvbClient(config, this.transport)) : null;
       this.dvbChannels = [];
@@ -235,8 +272,14 @@
       this.images.clear('gw');
       this.checkThumbs();
       if (initial) return;
+      if (!before || !config || before.baseUrl !== config.baseUrl) {
+        // another gateway (or none): its default versions start anew
+        this.household.forget();
+        this.followDefault();
+      }
       this.refresh();
       this.screens.guide.reload();
+      this.fetchDefaults();
     },
 
     /** Whether the gateway offers thumbnails (asked on setup and every few minutes; off when it does not answer). */
@@ -379,13 +422,34 @@
       this.playItem(list[number - 1]);
     },
 
-    /** Stores new "Kanály" prefs and redraws Živě and the guide; signed in, they go to the profile too. */
+    /**
+     * Stores new "Kanály" prefs and redraws Živě and the guide; signed in, they go to the profile too, signed out the
+     * list becomes this TV's own (the household default no longer applies).
+     */
     setChannelPrefs: function (prefs) {
+      if (!this.profile.signedIn()) this.household.change(prefs);
+      this.showPrefs(prefs);
+      this.profile.changed();
+    },
+
+    /**
+     * "Obnovit výchozí": signed out the TV follows the household default again; signed in the profile gets a copy of
+     * it (the built-in order without one), sent like any change; the TV's own list stays as it is.
+     */
+    resetChannelPrefs: function () {
+      if (this.profile.signedIn()) return this.setChannelPrefs(this.household.defaultCopy());
+      this.household.reset();
+      this.showPrefs(this.household.effective());
+      this.profile.changed();
+    },
+
+    /** The prefs the TV shows now; `initial` = during start, before the screens have anything to redraw. */
+    showPrefs: function (prefs, initial) {
       this.channelPrefs = prefs;
       CT.ChannelPrefsStore.save(prefs);
+      if (initial) return;
       this.renderLive();
       this.screens.guide.reload();
-      this.profile.changed();
     },
 
     showTab: function (tab) {
@@ -398,7 +462,10 @@
       });
       var screen = this.screens[tab];
       if (screen.show) screen.show();
-      if (tab === 'settings') this.profile.sync(); // Nastavení opens: pending sent, else another TV's change read
+      if (tab === 'settings') {
+        this.profile.sync(); // Nastavení opens: pending sent, else another TV's change read
+        this.fetchDefaults(); // and a newer household default
+      }
       this.applyFocus();
     },
 

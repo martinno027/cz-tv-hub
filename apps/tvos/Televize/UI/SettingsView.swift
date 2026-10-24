@@ -54,8 +54,9 @@ struct SettingsView: View {
             SettingsPage(section: section)
                 .onAppear { lastOpened = section }
         }
-        // Nastavení opens: a pending profile change is sent, a newer profile version applied.
-        .task { await model.profile.refresh() }
+        // Nastavení opens: a newer household default and a newer profile version are applied, a pending
+        // profile change is sent.
+        .task { await model.refreshFromGateway() }
         #if DEBUG
         // `-settingsSection channels|profile|server` opens that section, for simulator screenshots.
         .onAppear {

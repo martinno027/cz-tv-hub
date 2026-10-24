@@ -39,6 +39,9 @@ class TvApp : Application() {
     /** "Profil": the settings above kept in a profile on the gateway while signed in. */
     val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) }
 
+    /** The household default channel list from the gateway, shown while signed out and the list is not the TV's own. */
+    val defaults by lazy { HouseholdDefaultManager(this, this) }
+
     private var dvbRepository: DvbRepository? = null
 
     /** Repository for the configured gateway, or null when "Anténa" is not set up. */

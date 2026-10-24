@@ -282,6 +282,13 @@ neodhlásí; po odhlášení platí zase vlastní nastavení televize. Pozice �
 administraci je záložka **Profily**: seznam, nový profil, nové heslo a smazání (obojí odhlásí všechny televize
 s tím profilem). Heslo aspoň 4 znaky; na Raspberry je uložené jen jako otisk (PBKDF2), televize si ho neukládá.
 
+**Výchozí kanály domácnosti**: v administraci na záložce **Výchozí kanály** nastavíte pořadí, skryté kanály
+a zapnuté zdroje, které se ukážou na každé televizi bez přihlášeného profilu, kde nikdo kanály neměnil. Nejrychleji
+u svého profilu v záložce **Profily** tlačítkem **Použít jako výchozí**: zkopíruje se jeho současný seznam kanálů
+(jednou; pozdější změny profilu výchozí nezmění). Televize, na které si někdo kanály přeházel, si svůj seznam
+nechá; **Obnovit výchozí pořadí** v Nastavení → Kanály ji vrátí na výchozí domácnosti. **Zrušit výchozí** vrátí
+původní pořadí aplikace.
+
 ## Řešení potíží
 
 - `curl -H "Authorization: Bearer <klíč>" http://127.0.0.1:8098/dvb/status` na Raspberry ukáže tunery,
