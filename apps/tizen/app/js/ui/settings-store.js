@@ -10,6 +10,7 @@
   var PREFS_KEY = 'cztvhub.channelPrefs';
   var THUMBS_KEY = 'cztvhub.thumbs'; // only this TV's switch; the images themselves are never stored
   var PROFILE_KEY = 'cztvhub.profile'; // "Profil": name, session token, settings documents; never the password
+  var HOUSEHOLD_KEY = 'cztvhub.household'; // "Kanály" household default: own flag, own list, cached default
 
   function read() {
     try {
@@ -100,6 +101,29 @@
         else root.localStorage.removeItem(PROFILE_KEY);
       } catch (e) {
         // See SettingsStore.save(): signed in until the app closes.
+      }
+    }
+  };
+
+  /**
+   * "Kanály" household default (spec/apps.md, T11): {own, local, default, version} (CT.Household.HouseholdList).
+   * The channel prefs below always hold what the TV shows; this keeps whether that is the TV's own list.
+   */
+  CT.HouseholdStore = {
+    load: function () {
+      try {
+        var raw = root.localStorage.getItem(HOUSEHOLD_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    save: function (saved) {
+      try {
+        root.localStorage.setItem(HOUSEHOLD_KEY, JSON.stringify(saved));
+      } catch (e) {
+        // See SettingsStore.save(): the default is fetched again on the next start.
       }
     }
   };

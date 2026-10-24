@@ -216,8 +216,8 @@
     var P = CT.ChannelPrefs;
     var prefs = this.app.channelPrefs;
     if (!item || !item.enabled[this.chCol]) return;
-    if (item.reset) prefs = P.reset();
-    else if (!item.key) prefs = P.setSource(prefs, item.source, P.isSourceOff(prefs, item.source));
+    if (item.reset) return this.app.resetChannelPrefs(); // re-renders this list like a change
+    if (!item.key) prefs = P.setSource(prefs, item.source, P.isSourceOff(prefs, item.source));
     else if (this.chCol === 0) prefs = P.toggle(prefs, item.key);
     else prefs = P.move(item.keys, prefs, item.key, this.chCol === 1 ? -1 : 1);
     this.app.setChannelPrefs(prefs); // re-renders this list; focus follows the row (same key, same control)

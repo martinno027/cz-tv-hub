@@ -9,6 +9,8 @@
  * "Profil": an in-memory fake of the gateway's profile API (forgotten on reload, so a TV signed in before the reload
  * gets the 401 path); profile "Demo" with password "1234" exists (ČT2 hidden, thumbnails off).
  * `?demo&profile=offline` = reading and saving a profile fail as if the gateway were down (login still works).
+ * "Kanály" household default: /dvb/defaults answers from memory (ČT24 first, ČT art hidden, version 1);
+ * `?demo&defaults=none` = no default (version 0). Change CT.Demo.defaults from the console and open Nastavení.
  */
 (function (root) {
   'use strict';
@@ -96,6 +98,10 @@
   var PROFILE_OFFLINE = /[?&]profile=offline\b/.test(root.location.search);
   var profiles = [{ name: 'Demo', password: '1234', version: 1, tokens: [],
     settings: { v: 1, channelPrefs: { order: [], hidden: ['ct:CH_2'], sourcesOff: [] }, thumbnails: false } }];
+  var defaults = /[?&]defaults=none\b/.test(root.location.search)
+    ? { channelPrefs: null, version: 0, updated: null }
+    : { channelPrefs: { order: ['ct:CH_24', 'ct:CH_1'], hidden: ['ct:CH_6'], sourcesOff: [] }, version: 1,
+      updated: '2026-10-24T08:00:00Z' };
   var loginFailures = {}; // name key → [times]
   var tokenCount = 0;
 
@@ -162,6 +168,7 @@
   function transport(request) {
     var url = request.url;
     if (/\/dvb\/profiles?(\/|$)/.test(url)) return profileApi(request);
+    if (/\/dvb\/defaults$/.test(url)) return answer(200, defaults);
     if (url.indexOf('pspcr-ott-live.ssl.cdn.cra.cz') >= 0) {
       return new Promise(function (resolve) { setTimeout(function () { resolve(pspPlaylist(url)); }, 300); });
     }
@@ -376,6 +383,8 @@
     afterStart: afterStart,
     /** The fake gateway's profiles, to play "another TV" from the browser console (change settings, version += 1). */
     profiles: profiles,
+    /** The fake gateway's household default, e.g. `CT.Demo.defaults.channelPrefs = null; CT.Demo.defaults.version += 1`. */
+    defaults: defaults,
     /** Playback URL of a Chamber stream in the demo: local and absent (nothing plays, nothing leaves the PC). */
     pspPlayUrl: function (stream) {
       return 'demo-psp-' + stream.id + '.m3u8';
