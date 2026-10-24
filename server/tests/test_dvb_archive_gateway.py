@@ -91,6 +91,8 @@ class ArchiveGatewayTest(unittest.TestCase):
         self.assertEqual(resp.status, 200, body)
         text = body.decode()
         self.assertIn("#EXT-X-PLAYLIST-TYPE:EVENT", text)
+        # "Od začátku": players start an EVENT playlist at its live edge unless told to start at the beginning
+        self.assertIn("#EXT-X-START:TIME-OFFSET=0,PRECISE=YES", text)
         self.assertNotIn("#EXT-X-ENDLIST", text)
         uris = [line for line in text.splitlines() if line.startswith("/dvb/v/")]
         # recorded from a minute before; the playlist starts 30 s before the programme (segment 12 of 2.5 s)
@@ -105,6 +107,7 @@ class ArchiveGatewayTest(unittest.TestCase):
         resp, body = self.get(f"/dvb/recording/{rid}.m3u8")
         self.assertEqual(resp.status, 200)
         self.assertIn(b"#EXT-X-PLAYLIST-TYPE:VOD", body)
+        self.assertNotIn(b"#EXT-X-START", body)  # a finished one starts at the beginning anyway
         self.assertIn(b"#EXT-X-ENDLIST", body)
 
     def test_live_of_a_recorded_channel_comes_from_the_recording(self):

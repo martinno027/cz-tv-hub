@@ -113,8 +113,10 @@ class CommandTest(unittest.TestCase):
         out = hls.rewrite_playlist(PLAYLIST, "/dvb/hls/abc/")
         self.assertIn('#EXT-X-MAP:URI="/dvb/hls/abc/init.mp4"', out)
         self.assertIn("\n/dvb/hls/abc/seg_00000.m4s\n", out)
-        self.assertIn("#EXT-X-PLAYLIST-TYPE:EVENT", out)
-        self.assertIn("#EXT-X-PLAYLIST-TYPE:VOD", hls.rewrite_playlist(PLAYLIST, "/p/", vod=True))
+        self.assertIn("#EXT-X-PLAYLIST-TYPE:EVENT\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n", out)
+        vod = hls.rewrite_playlist(PLAYLIST, "/p/", vod=True)
+        self.assertIn("#EXT-X-PLAYLIST-TYPE:VOD", vod)
+        self.assertNotIn("#EXT-X-START", vod)
 
 
 class SessionTest(unittest.TestCase):

@@ -51,6 +51,21 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(stats["gaps"], 0)
         self.assertEqual(stats["bytesPerHour"], int(301 * 1000 / (301 * 2.5) * 3600))
 
+    def test_range_lookup_same_with_long_segments_and_a_clock_jump(self):
+        store = BufferStore(self.root)
+        run = "1792300800-ab12"
+        starts = [(0, 2.5), (2.5, 2.5), (5, 30.0), (35, 2.5), (100, 2.5)]  # one long segment, a gap
+        for n, (t, d) in enumerate(starts):
+            add(store, self.work, CH, run, n, T0 + t, d)
+        # the long segment overlaps a range that starts well after its start
+        self.assertEqual([s.n for s in store.between(CH, T0 + 30, T0 + 36)], [2, 3])
+        self.assertEqual([s.n for s in store.between(CH, T0 + 50, T0 + 60)], [])
+        add(store, self.work, CH, run, 5, T0 + 1, 2.5)  # the clock jumped back: still found
+        self.assertEqual([s.n for s in store.between(CH, T0 + 0.5, T0 + 1.5)], [0, 5])
+        self.assertEqual([s.n for s in BufferStore(self.root).between(CH, T0 + 30, T0 + 36)], [2, 3])
+        store.delete_block(CH, "20261018T0530")  # nothing there; order checked again
+        self.assertEqual([s.n for s in store.between(CH, T0 + 0.5, T0 + 1.5)], [0, 5])
+
     def test_gaps_delete_and_runs(self):
         store = BufferStore(self.root)
         add(store, self.work, CH, "1792300800-ab12", 0, T0)
@@ -223,23 +238,14 @@ class RecordingIdTest(unittest.TestCase):
             self.assertIsNone(parse_recording_id(bad), bad)
 
 
+class NoCapTest(GuardTest):
+    def test_no_cap_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            archive, started = self.archive(tmp, allow=True, limit=0)
+            archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
+            archive.sync()
+            self.assertEqual(len(started), 6)
+
+
 if __name__ == "__main__":
     unittest.main()
-
-
-class NoCapTest(GuardTest):
-    def test_no_cap_by_default(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            archive, started = self.archive(tmp, allow=True, limit=0)
-            archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
-            archive.sync()
-            self.assertEqual(len(started), 6)
-
-
-class NoCapTest(GuardTest):
-    def test_no_cap_by_default(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            archive, started = self.archive(tmp, allow=True, limit=0)
-            archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
-            archive.sync()
-            self.assertEqual(len(started), 6)

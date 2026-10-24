@@ -137,6 +137,11 @@ def needed_target(text: str) -> int:
     return longest
 
 
+# A growing (EVENT) recording opened with "Od začátku" starts at its first segment: without this players start it
+# at the live edge (seen with AVPlayer on 2026-10-24: the app's own seek to 0 did not take).
+START_AT_BEGINNING = "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES"
+
+
 def rewrite_playlist(text: str, prefix: str, vod: bool = False, target: int | None = None) -> str:
     """Point segment and init URIs at ``prefix`` (e.g. /dvb/hls/<sid>/); optionally mark as VOD and
     announce a fixed ``#EXT-X-TARGETDURATION`` (ffmpeg's grows with the longest segment so far)."""
@@ -151,6 +156,8 @@ def rewrite_playlist(text: str, prefix: str, vod: bool = False, target: int | No
         elif vod and line.startswith("#EXT-X-PLAYLIST-TYPE:"):
             line = "#EXT-X-PLAYLIST-TYPE:VOD"
         out.append(line)
+        if line == "#EXT-X-PLAYLIST-TYPE:EVENT":
+            out.append(START_AT_BEGINNING)
     return "\n".join(out) + "\n"
 
 

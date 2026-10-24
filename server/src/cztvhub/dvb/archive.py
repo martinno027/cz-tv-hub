@@ -4,8 +4,9 @@
   event). Its HLS is built from the stored segments, 30 s before the start to 60 s after the end.
 - With one audio track the playlist is the muxed fMP4 as before; with more, a master playlist offers the video
   and each audio track as renditions, cut from the same muxed fragments (fmp4.split_*), so they stay in sync.
-- Playlists only ever cover one programme or the live window, and media are served only through such a view:
-  there is no listing, no static file serving and no way to fetch "everything" (legal-guard, 2026-10-23).
+- Playlists only ever cover one programme, the live window or a timeline window (a programme ± 3 h of its
+  channel, at most 12 h), and media are served only through such a view: there is no listing, no static file
+  serving and no way to fetch "everything" (legal-guard, 2026-10-23 and 2026-10-24).
 - Every 60 s: age limit (always), free-space reserve (fair share per channel), hard stop when the reserve
   cannot be reached, and recorders started/stopped to match the channels selected in /admin.
 """
@@ -24,8 +25,10 @@ from typing import Any, Callable, Iterable
 
 from . import fmp4, space
 from .buffer import GAP_SECONDS, BufferStore, Segment
+from .hls import START_AT_BEGINNING
 from .recorder import RecorderManager
 from .thumbs import Settings, Thumbnails
+from .tvheadend import EpgEvent
 
 RECORDING_ID_RE = re.compile(r"^b([A-Za-z0-9_]{1,40})-(\d{9,11})-(\d{9,11})$")
 VIEW_RE = re.compile(r"^([0-9a-f]{32})/(?:(m|v|a\d{1,2})\.m3u8|(m|v|a\d{1,2})/(init-(\d{6,12}-[0-9a-f]{4})\.mp4|"
@@ -33,6 +36,10 @@ VIEW_RE = re.compile(r"^([0-9a-f]{32})/(?:(m|v|a\d{1,2})\.m3u8|(m|v|a\d{1,2})/(i
 PRE_PADDING = 30
 POST_PADDING = 60
 MAX_PROGRAMME = 12 * 3600
+TIMELINE_MARGIN = 3 * 3600  # a timeline window: the programme and this much before and after (at most 12 h)
+TIMELINE_START = 30  # a timeline playlist starts this long before its programme (EXT-X-START)
+TIMELINE_VIEWS = 4  # timeline windows per channel and key (one key for the household); a fifth drops
+# the one requested longest ago
 LIVE_WINDOW = 40.0
 LIVE_TARGET = 3
 LIVE_HEALTH = 20.0
@@ -74,14 +81,21 @@ def iso(t: float) -> str:
 class View:
     vid: str
     channel: str
-    start: float | None  # None = live
+    start: float | None  # programme times; None = live
     end: float | None
     owner: str = ""
     touched: float = field(default_factory=time.monotonic)
+    lo: float = 0.0  # listed and served range (programme with padding, or the timeline window)
+    hi: float = 0.0
+    timeline: bool = False
     origin_g: int = 0  # live: first segment ever listed (discontinuity counting starts here)
     disc_g: int = 0  # live: discontinuities counted up to this segment
     disc_count: int = 0
     multi: bool | None = None  # master playlist with renditions; decided once, the entry URL never changes type
+
+    def __post_init__(self) -> None:
+        if self.start is not None and not self.timeline:
+            self.lo, self.hi = self.start - PRE_PADDING, self.end + POST_PADDING
 
     @property
     def live(self) -> bool:
@@ -104,13 +118,16 @@ class Archive:
                  default_days: int, now: Callable[[], float] = time.time, log: Callable[[str], None] = print,
                  offered: Callable[[], set[str] | None] | None = None,
                  is_programme: Callable[[str, int, int], bool] | None = None, max_recordings: int = 0,
-                 allow_system_disk: bool = False):
+                 allow_system_disk: bool = False,
+                 programmes: Callable[[str, int, int], list[EpgEvent]] | None = None):
         self.store, self.recorders, self.settings, self.thumbs = store, recorders, settings, thumbs
         self.default_days, self.now, self.log = default_days, now, log
         # offered channels (None = TVHeadend not reachable: then nothing is deleted or stopped)
         self.offered = offered or (lambda: None)
         # only real EPG programmes get a playlist (no arbitrary ranges, legal-guard 2026-10-23)
         self.is_programme = is_programme or (lambda channel, start, end: True)
+        # EPG programmes of a channel overlapping a range (TVHeadend + EPG history), for timelines
+        self.programmes = programmes or (lambda channel, start, end: [])
         self.max_recordings = max_recordings
         self.allow_system_disk = allow_system_disk
         self._views: dict[str, View] = {}
@@ -167,7 +184,7 @@ class Archive:
             rec.stop(wait=0)
         with self._lock:
             for vid in [v for v, view in self._views.items() if view.channel == channel]:
-                del self._views[vid]
+                self._drop(vid)
         return self.store.delete_channel(channel)
 
     def max_days(self) -> int:
@@ -213,18 +230,29 @@ class Archive:
         now = time.monotonic()
         with self._lock:
             for vid in [v for v, view in self._views.items() if now - view.touched > VIEW_IDLE]:
-                del self._views[vid]
+                self._drop(vid)
             vid = self._view_keys.get(key)
             view = self._views.get(vid) if vid else None
             if view is None:
                 view = make()
+                if view.timeline:  # at most TIMELINE_VIEWS windows per channel and key: the oldest goes
+                    same = sorted((v for v in self._views.values() if v.timeline and v.channel == view.channel
+                                   and v.owner == view.owner), key=lambda v: v.touched)
+                    for old in same[:max(0, len(same) - TIMELINE_VIEWS + 1)]:
+                        self._drop(old.vid)
                 self._views[view.vid] = view
                 self._view_keys[key] = view.vid
             view.touched = now
             return view
 
-    def programme(self, rid: str, owner: str = "") -> tuple[bytes, str]:
-        """Playlist (master or media) of a programme; ArchiveError when not available."""
+    def _drop(self, vid: str) -> None:
+        """Forget a view and the keys pointing at it (caller holds the lock)."""
+        self._views.pop(vid, None)
+        for key in [k for k, v in self._view_keys.items() if v == vid]:
+            del self._view_keys[key]
+
+    def _valid(self, rid: str) -> tuple[str, int, int]:
+        """A real EPG programme of an offered channel, recorded (airing or ended); ArchiveError otherwise."""
         parsed = parse_recording_id(rid)
         if parsed is None:
             raise ArchiveError(404, "Nahrávka není k dispozici")
@@ -232,8 +260,107 @@ class Archive:
         if channel not in (self.offered() or set()) or not self.is_programme(channel, start, end) \
                 or self.state(channel, start, end) not in ("completed", "recording"):
             raise ArchiveError(404, "Nahrávka není k dispozici")
+        return parsed
+
+    def programme(self, rid: str, owner: str = "") -> tuple[bytes, str]:
+        """Playlist (master or media) of a programme; ArchiveError when not available."""
+        channel, start, end = self._valid(rid)
         view = self._view(f"p:{owner}:{rid}", lambda: View(secrets.token_hex(16), channel, start, end, owner))
         return self._entry_playlist(view)
+
+    # -- channel timeline (spec/dvb-gateway.md "Channel timeline") ------------------------------
+    def _timeline_view(self, rid: str, owner: str) -> View:
+        channel, start, end = self._valid(rid)
+        lo, hi = timeline_window(start, end)
+        return self._view(f"t:{owner}:{rid}", lambda: View(secrets.token_hex(16), channel, start, end, owner,
+                                                           lo=lo, hi=hi, timeline=True))
+
+    def timeline(self, rid: str, owner: str = "") -> tuple[bytes, str]:
+        """Playlist (master or media) of a programme's timeline window; ArchiveError when not available."""
+        return self._entry_playlist(self._timeline_view(rid, owner))
+
+    def timeline_info(self, rid: str, owner: str = "") -> dict:
+        """The JSON of ``/dvb/timeline/<id>``: the window's pieces, its programmes and the neighbours."""
+        view = self._timeline_view(rid, owner)
+        segments = self._listed(view, "v", self._segments(view))
+        if not segments:
+            raise ArchiveError(404, "Nahrávka není k dispozici")
+        pieces: list[dict] = []
+        position = 0.0
+        prev: Segment | None = None
+        for seg in segments:
+            duration = _extinf(seg)
+            if prev is None or _discontinuous(prev, seg):
+                pieces.append({"position": round(position, 3), "time": iso(seg.start), "duration": 0.0})
+            pieces[-1]["duration"] = round(pieces[-1]["duration"] + duration, 3)
+            position += duration
+            prev = seg
+        first, last = segments[0].start, segments[-1].end
+        complete = self.now() >= view.hi
+        lo, hi = max(view.lo, first), min(view.hi, last)
+        programmes = []
+        for event in self._epg(view.channel, int(lo), math.ceil(hi)):
+            pid = self._playable(view.channel, event)
+            programmes.append({"id": pid, "title": event.title, "subtitle": event.subtitle,
+                               "start": _iso_s(event.start), "end": _iso_s(event.stop), "breaks": False})
+        return {
+            "id": rid,
+            "channel": view.channel,
+            "playlist": f"/dvb/timeline/{rid}.m3u8",
+            "complete": complete,
+            "programme": {"start": _iso_s(view.start), "end": _iso_s(view.end)},
+            "pieces": pieces,
+            "programmes": programmes,
+            "previous": self._neighbour(view, first, before=True),
+            # while growing, nothing after the window has started yet: the guard only states the rule
+            "next": self._neighbour(view, last, before=False) if complete else None,
+        }
+
+    def _epg(self, channel: str, start: int, end: int) -> list[EpgEvent]:
+        """Programmes of the channel overlapping [start, end), by start; zero-length events are no programmes."""
+        seen: dict[tuple[int, int], EpgEvent] = {}
+        for event in self.programmes(channel, start, end):
+            if event.channel == channel and event.stop > event.start and event.stop > start and event.start < end:
+                seen.setdefault((event.start, event.stop), event)
+        return sorted(seen.values(), key=lambda e: e.start)
+
+    def _playable(self, channel: str, event: EpgEvent) -> str | None:
+        """The ``b…`` id of an EPG programme when ``/dvb/timeline`` would accept it, else None."""
+        if not 0 < event.stop - event.start <= MAX_PROGRAMME:
+            return None
+        if self.state(channel, event.start, event.stop) not in ("completed", "recording"):
+            return None
+        return recording_id(channel, event.start, event.stop)
+
+    def _neighbour(self, view: View, edge: float, before: bool) -> str | None:
+        """``previous``: the programme airing 1 s before the window's first media, else the latest one starting
+        before it. ``next``: the same after its last media, else the earliest one starting after it. Only with
+        a valid id, never the anchor itself, and None when nothing is recorded on that side."""
+        channel = view.channel
+        if before:
+            oldest = self.store.oldest(channel)
+            if oldest is None or oldest.start >= edge:
+                return None
+            lo, hi = oldest.start, edge
+        else:
+            newest = self.store.newest(channel)
+            if newest is None or newest.end <= edge:
+                return None
+            lo, hi = edge, newest.end
+        # only programmes on that side of the anchor, so a neighbour always opens another window
+        events = [e for e in self._epg(channel, int(lo), math.ceil(hi))
+                  if (e.start < view.start if before else e.start > view.start)]
+        at = edge - 1 if before else edge + 1
+        airing = [e for e in events if e.start <= at < e.stop]
+        if before:
+            rest = sorted((e for e in events if e.start < edge), key=lambda e: -e.start)
+        else:
+            rest = sorted((e for e in events if e.start > edge), key=lambda e: e.start)
+        for event in airing + rest:
+            pid = self._playable(channel, event)
+            if pid is not None:
+                return pid
+        return None
 
     def live_ready(self, channel: str) -> bool:
         rec = self.recorders.recorder(channel)
@@ -249,7 +376,7 @@ class Archive:
     def _segments(self, view: View) -> list[Segment]:
         if view.live:
             return [s for s in self.store.latest(view.channel, LIVE_WINDOW) if s.g >= view.origin_g]
-        return self.store.between(view.channel, view.start - PRE_PADDING, view.end + POST_PADDING)
+        return self.store.between(view.channel, view.lo, view.hi)
 
     def _entry_playlist(self, view: View) -> tuple[bytes, str]:
         segments = self._segments(view)
@@ -296,18 +423,21 @@ class Archive:
                 continue
         return int(size * 8 / seconds * 1.2) if seconds > 0 else 8_000_000
 
-    def _media_playlist(self, view: View, role: str, segments: list[Segment]) -> bytes:
-        track = None
-        if role.startswith("a"):
-            track = int(role[1:])
+    def _listed(self, view: View, role: str, segments: list[Segment]) -> list[Segment]:
+        """The segments a rendition lists: an audio rendition skips only runs without any audio (a run with
+        fewer tracks plays its first track there), so every rendition has the same segments and positions."""
+        if not role.startswith("a"):
+            return segments
         listed: list[Segment] = []
         for seg in segments:
-            if track is not None:
-                info = self._run(view.channel, seg.run)
-                if info is None or track >= len(info.audio):
-                    continue
-            listed.append(seg)
-        complete = not view.live and self.now() >= (view.end or 0) + POST_PADDING
+            info = self._run(view.channel, seg.run)
+            if info is not None and info.audio:
+                listed.append(seg)
+        return listed
+
+    def _media_playlist(self, view: View, role: str, segments: list[Segment]) -> bytes:
+        listed = self._listed(view, role, segments)
+        complete = not view.live and self.now() >= view.hi
         if complete:
             target = max([1] + [math.ceil(s.duration) for s in listed])
         else:  # a live or growing playlist must not change its target later: a fixed one, as for live
@@ -318,6 +448,11 @@ class Archive:
             lines.append(f"#EXT-X-DISCONTINUITY-SEQUENCE:{self._discontinuities(view, listed)}")
         else:
             lines.append(f"#EXT-X-PLAYLIST-TYPE:{'VOD' if complete else 'EVENT'}")
+            if view.timeline:  # a player without its own seek starts at the programme
+                offset = position_of(listed, view.start - TIMELINE_START)
+                lines.append(f"#EXT-X-START:TIME-OFFSET={offset:.3f},PRECISE=YES")
+            elif not complete:
+                lines.append(START_AT_BEGINNING)  # "Od začátku" of an airing programme (hls.py)
         prev: Segment | None = None
         for seg in listed:
             if prev is None or seg.run != prev.run:
@@ -327,7 +462,7 @@ class Archive:
             elif seg.start - prev.end > GAP_SECONDS:
                 lines.append("#EXT-X-DISCONTINUITY")
             lines.append(f"#EXT-X-PROGRAM-DATE-TIME:{iso(seg.start)}")
-            lines.append(f"#EXTINF:{seg.duration:.3f},")
+            lines.append(f"#EXTINF:{_extinf(seg):.3f},")
             lines.append(f"/dvb/v/{view.vid}/{role}/{seg.g}.m4s")
             prev = seg
         if complete:
@@ -344,7 +479,7 @@ class Archive:
             for seg in self.store.between(view.channel, prev.start if prev else first.start, first.start + 0.001):
                 if seg.g <= view.disc_g or seg.g > first.g:
                     continue
-                if prev is not None and (seg.run != prev.run or seg.start - prev.end > GAP_SECONDS):
+                if prev is not None and _discontinuous(prev, seg):
                     view.disc_count += 1
                 prev = seg
             view.disc_g = first.g
@@ -391,7 +526,7 @@ class Archive:
     def _in_view(self, view: View, seg: Segment) -> bool:
         if view.live:
             return seg.g >= view.origin_g
-        return seg.end > view.start - PRE_PADDING and seg.start < view.end + POST_PADDING
+        return seg.end > view.lo and seg.start < view.hi
 
     def _run_in_view(self, view: View, run: str) -> bool:
         if view.live:
@@ -410,9 +545,10 @@ class Archive:
         if role == "v":
             return info.video
         index = int(role[1:])
-        if index >= len(info.audio):
+        if not info.audio:
             raise ArchiveError(404, "Zvuková stopa není k dispozici")
-        return info.audio[index]
+        # a run with fewer tracks plays its first one in the missing renditions (same segments everywhere)
+        return info.audio[index] if index < len(info.audio) else info.audio[0]
 
     def _run(self, channel: str, run: str) -> RunInfo | None:
         key = (channel, run)
@@ -561,6 +697,40 @@ class Archive:
             "hoursPerChannel": space.hours_per_channel(blocks, free, total, self.max_days()),
             "channels": channels,
         }
+
+
+def timeline_window(start: int, end: int) -> tuple[int, int]:
+    """Programme ± TIMELINE_MARGIN, at most MAX_PROGRAMME in total: a longer programme gets equal smaller
+    margins, never below 0. Clipped to what is recorded and to now by the listing itself."""
+    margin = max(0, min(TIMELINE_MARGIN, (MAX_PROGRAMME - (end - start)) // 2))
+    return start - margin, end + margin
+
+
+def position_of(segments: list[Segment], t: float) -> float:
+    """Playlist position (sum of EXTINF) of wall clock ``t``: inside a segment proportionally, in a gap the next
+    segment's start, before the first 0, after the last the end."""
+    position = 0.0
+    for seg in segments:
+        if t < seg.start:
+            return round(position, 3)
+        duration = _extinf(seg)
+        if t < seg.end:
+            return round(position + min(duration, t - seg.start), 3)
+        position += duration
+    return round(position, 3)
+
+
+def _extinf(seg: Segment) -> float:
+    """The duration as the playlist writes it, so positions add up exactly as players count them."""
+    return round(seg.duration, 3)
+
+
+def _discontinuous(prev: Segment, seg: Segment) -> bool:
+    return seg.run != prev.run or seg.start - prev.end > GAP_SECONDS
+
+
+def _iso_s(t: float) -> str:
+    return datetime.fromtimestamp(int(t), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _epoch(value: str) -> float:

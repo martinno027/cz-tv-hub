@@ -38,11 +38,12 @@ LIVE_RE = re.compile(rf"^/dvb/live/({UUID})\.m3u8$")
 RECORDING_RE = re.compile(rf"^/dvb/recording/({UUID})\.m3u8$")
 BREAKS_RE = re.compile(rf"^/dvb/recording/({UUID})/breaks$")
 THUMB_RE = re.compile(rf"^/dvb/recording/({UUID})/thumb\.jpg$")
+TIMELINE_RE = re.compile(rf"^/dvb/timeline/({UUID})(\.m3u8)?$")
 JOBS_PATH = "/dvb/ads/jobs"
 COOKIE_NAME = "cztvhub_key"
 MAX_BODY = 64 * 1024
 HLS_RE = re.compile(r"^/dvb/hls/([0-9a-f]{32})/([A-Za-z0-9_.-]+)$")
-VIEW_PREFIX = "/dvb/v/"  # continuous recording: playlists and media of one programme or the live window
+VIEW_PREFIX = "/dvb/v/"  # continuous recording: playlists and media of a programme, timeline or the live window
 WORKER_IDLE = 120.0  # the worker may switch programmes after this long without a request
 ICON_RE = re.compile(rf"^/dvb/icon/({UUID})$")
 RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -110,7 +111,7 @@ class DvbGateway:
             archive = Archive(store, recorders, self.settings, self.thumbs, self.dvb.retention_days, now=now,
                               log=log, offered=self._offered_ids, is_programme=self._is_programme,
                               max_recordings=self.dvb.max_recordings,
-                              allow_system_disk=self.dvb.buffer_on_system_disk)
+                              allow_system_disk=self.dvb.buffer_on_system_disk, programmes=self._programmes)
         self.archive = archive
         self._worker_rid: str | None = None
         self._worker_at = float("-inf")
@@ -198,6 +199,8 @@ class DvbGateway:
             return self.live(m.group(1))
         if m := RECORDING_RE.match(path):
             return self.recording(m.group(1))
+        if m := TIMELINE_RE.match(path):
+            return self.timeline(m.group(1), playlist=bool(m.group(2)))
         if m := BREAKS_RE.match(path):
             return self.get_breaks(m.group(1))
         if m := THUMB_RE.match(path):
@@ -246,6 +249,16 @@ class DvbGateway:
                        for e in self.client.epg_events(start, start + 1))
         except TvhError:
             return False
+
+    def _programmes(self, channel: str, start: int, end: int) -> list:
+        """EPG programmes of a channel overlapping [start, end): remembered ones plus TVHeadend's current ones."""
+        events = [e for e in self.history.between(start, end) if e.channel == channel]
+        try:
+            have = {e.event_id for e in events}
+            events += [e for e in self.client.epg_events(start, end) if e.channel == channel and e.event_id not in have]
+        except TvhError:
+            pass
+        return events
 
     # -- EPG history (epgstore.py) -----------------------------------------------------------
     def _remember(self, events: list, window: tuple[int, int]) -> None:
@@ -454,6 +467,21 @@ class DvbGateway:
         if on_session is not None:
             on_session(session)
         return self._playlist(session)
+
+    def timeline(self, rid: str, playlist: bool) -> Response:
+        """A programme's window of its channel's recording (spec/dvb-gateway.md "Channel timeline"): the playlist,
+        or the JSON with its pieces, programmes and neighbours. Only for ``b…`` programmes."""
+        if not parse_recording_id(rid):
+            raise HttpError(404, "Nahrávka není k dispozici")
+        if playlist:
+            body, content_type = self._archive_call(self.archive.timeline, rid)
+            return Response(200, body, content_type, {"Cache-Control": "no-cache"})
+        info = self._archive_call(self.archive.timeline_info, rid)
+        if self.ads.enabled:
+            stored = self.breaks.ids()
+            for item in info["programmes"]:
+                item["breaks"] = item["id"] is not None and item["id"] in stored
+        return json_response(200, info)
 
     def thumbnail(self, dvr_uuid: str) -> Response:
         """One still of a recording (spec/dvb-gateway.md "Thumbnails"); checked against TVHeadend every time.
