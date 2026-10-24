@@ -135,6 +135,28 @@ Builds the add-on ZIP into `dist/`; `--serve` offers it on the LAN for installin
 ## Repository
 
 <details>
+<summary><code>./scripts/merge-dev-main.sh [--dry-run | --help]</code> — release <code>dev</code> to <code>main</code></summary>
+
+Moves `main` (what the Raspberry `git pull`s and the apps are built from) to `origin/dev`. Fetches origin, then
+stops before touching anything when local `dev` has unpushed commits, `origin/main` has commits `origin/dev` lacks,
+or CI is not green for the `origin/dev` commit. Prints the commits to release and names changes to `server/deploy/`
+and `config.py`, then asks to type `main` (anything else cancels). The move is a fast-forward push on the server
+(`git push origin refs/remotes/origin/dev:refs/heads/main`): no checkout, no merge commit, the working tree is left
+alone; a local `main` follows only when it is not checked out. `--dry-run` stops before the confirmation. Only on
+the owner's go-ahead with the double approval naming `main` (`/release`). Tests:
+`./scripts/merge-dev-main.test.sh` (throwaway repos and a fake `gh`, never the real remote).
+
+What it does not do: deploy. The Pi updates only with `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`,
+the TV apps only when rebuilt from `main`.
+
+Can go wrong: it moves production — what the Pi gets on its next `git pull`. A change to `server/deploy/` or the
+config format is not undone by going back to an older release (what `install.sh` set up on the Pi and the edited
+`/etc/cztvhub/cztvhub.conf` stay). Releasing by hand (`git checkout main && git merge dev && git push`) instead of
+the script leaves a tree parked on `main`, where the next stray commit is released unreviewed.
+
+</details>
+
+<details>
 <summary><code>python3 tools/check_public.py [--staged]</code> — public-repo guard</summary>
 
 Fails when a tracked (or staged) file is forbidden or contains forbidden content (generic checks such as private

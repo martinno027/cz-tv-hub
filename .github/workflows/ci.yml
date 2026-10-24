@@ -17,6 +17,8 @@ jobs:
           python-version: "3.12"
       - run: python3 tools/check_public.py
       - run: python3 -m unittest discover -s tools
+      - run: shellcheck -x scripts/*.sh scripts/lib/*.sh
+      - run: ./scripts/merge-dev-main.test.sh
 
   server:
     runs-on: ubuntu-latest
