@@ -22,4 +22,4 @@ sudo systemctl enable cztvhub
 source deploy/health.sh
 restarted=$(date '+%Y-%m-%d %H:%M:%S')
 sudo systemctl restart cztvhub
-wait_for_health "$(service_port)" 30 "$restarted"
+wait_for_health "$(service_port /etc/cztvhub/cztvhub.conf)" 30 "$restarted"
