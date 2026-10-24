@@ -1,6 +1,8 @@
 package cz.cztvhub.core.dvb
 
+import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.CtException
+import cz.cztvhub.core.HouseholdDefaults
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -53,6 +55,23 @@ object DvbParser {
             tvheadendReachable = root.str("tvheadendReachable") == "true",
             thumbnails = root.str("thumbnails") == "true",
         )
+    }
+
+    /**
+     * `GET /dvb/defaults` (T11): `channelPrefs` null or missing = no household default; anything else but an object,
+     * or a `version` that is no non-negative integer, is an error (the cached default stays).
+     */
+    fun parseDefaults(status: Int, body: String): HouseholdDefaults {
+        val root = ok(status, body)
+        fun bad(what: String): Nothing = throw CtException("gateway defaults: $what", DvbMessages.GENERIC)
+        val version = (root["version"] as? JsonPrimitive)?.takeIf { it !is JsonNull && !it.isString }
+            ?.content?.toLongOrNull()?.takeIf { it >= 0 } ?: bad("no version")
+        val prefs = when (val p = root["channelPrefs"]) {
+            null, JsonNull -> null
+            is JsonObject -> ChannelPrefs.decode(p.toString())
+            else -> bad("channelPrefs is no object")
+        }
+        return HouseholdDefaults(prefs, version)
     }
 
     /**

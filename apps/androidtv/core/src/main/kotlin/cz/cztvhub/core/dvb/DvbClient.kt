@@ -1,6 +1,7 @@
 package cz.cztvhub.core.dvb
 
 import cz.cztvhub.core.CtException
+import cz.cztvhub.core.HouseholdDefaults
 import cz.cztvhub.core.HttpResponse
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -21,6 +22,9 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
 
     /** Events of a Prague broadcast day (05:00–05:00). */
     fun epg(day: LocalDate): List<DvbEvent> = call("/dvb/epg?date=$day") { s, b -> DvbParser.parseEpg(s, b) }
+
+    /** The household default channel list (T11); `404` from a gateway without it. */
+    fun defaults(): HouseholdDefaults = call("/dvb/defaults") { s, b -> DvbParser.parseDefaults(s, b) }
 
     /** Ad breaks of a finished recording (`[ads]` on the gateway); `404` when the feature is off. */
     fun breaks(recordingId: String): List<AdBreak> =

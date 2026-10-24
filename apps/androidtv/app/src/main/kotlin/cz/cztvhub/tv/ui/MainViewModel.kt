@@ -63,13 +63,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** "Kanály": hidden channels and their order on this device (or in the signed-in profile). */
     val channelPrefs: StateFlow<ChannelPrefs> = app.channelPrefs.value
 
-    // Every settings change while signed in is saved in the profile (spec/apps.md "Profil").
+    // Every settings change while signed in is saved in the profile (spec/apps.md "Profil"); signed out, the first
+    // one makes the list the TV's own instead of the household default ("Kanály").
     fun updateChannelPrefs(change: (ChannelPrefs) -> ChannelPrefs) {
-        if (app.channelPrefs.update(change)) app.profiles.changed()
+        if (!app.channelPrefs.update(change)) return
+        app.defaults.changed()
+        app.profiles.changed()
     }
 
     fun resetChannelPrefs() {
-        if (app.channelPrefs.reset()) app.profiles.changed()
+        if (app.defaults.reset()) app.profiles.changed()
     }
 
     /** "Náhledy anténních pořadů" on this TV. */
@@ -82,8 +85,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** "Profil": the signed-in profile (null = signed out) and its sync state. */
     val profiles get() = app.profiles
 
-    /** Nastavení opened: send a pending change or read a newer profile version. */
-    fun syncProfile() = app.profiles.sync()
+    /** Nastavení opened: send a pending change or read a newer profile version, and a newer household default. */
+    fun syncProfile() {
+        app.profiles.sync()
+        app.defaults.refresh()
+    }
 
     /** Thumbnail URL and headers of an Anténa event when the gateway and this TV allow it (spec/apps.md). */
     fun thumbnail(event: DvbEvent): Pair<String, Map<String, String>>? {
@@ -170,6 +176,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selectDay(_selectedDay.value)
         // App start (spec/apps.md "Profil"); the gateway's "signed out" is said once, over any screen.
         app.profiles.sync()
+        app.defaults.follow() // the cached household default before the first frame, also offline
         viewModelScope.launch {
             app.profiles.message.collect { text ->
                 if (text != null) {
@@ -183,6 +190,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _dvbPlans.value = emptyMap()
                 _dvb.value = if (it == null) null else DvbState()
                 refreshDvb()
+                app.defaults.refresh() // app start and a new gateway
                 loadDvbDay(_selectedDay.value)
             }
         }
