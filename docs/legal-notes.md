@@ -57,9 +57,21 @@ or Poslanecká sněmovna Parlamentu ČR.
   the recording, needs the same key, is never made from ČT internet streams, never uses a tuner and can be switched
   off for the household (`/admin`) and per TV. Thumbnails are never published, committed or shown in screenshots.
 
+## Programme details (TMDb, approved by the user on 2026-10-24)
+- Optional, off without the household's own TMDb API key (free, non-commercial use only). The Raspberry Pi sends TMDb
+  only the title, year and type of a programme a viewer opens, one at a time, from the Pi's own address; no viewing
+  history, device or profile data. Lookup results are cached on the Pi's disk for at most 30 days (TMDb's terms
+  allow at most 6 months, section 1.C, checked 2026-10-24); posters only in the Pi's memory, and only while their
+  result is cached. Both reach the apps only through the gateway, so the TVs never
+  contact TMDb. Ratings are shown as TMDb's ("Hodnocení TMDB").
+- "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." The
+  TMDB logo is shown with it, less prominent than the app's own name.
+- No other metadata sources; ČSFD, IMDb and similar sites are not scraped. Each user registers their own key; none
+  is published or committed.
+
 ## Publishing and use
 - The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,
   playlists or EPG exports and runs no public server. You build and run it yourself, for your own household only.
 - Do not host it for others, expose it to the public internet or share access outside your household.
-- Do not add sources other than those listed above, and never pirate sources.
+- Do not add video sources other than those listed above, and never pirate sources.
 - The Czech TV licence fee (televizní poplatek) remains your responsibility.

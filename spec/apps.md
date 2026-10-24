@@ -219,6 +219,34 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
 - Golden cases: `spec/fixtures/timeline_cases.json` (`map`, `edge`, `hold`, `labels`, `edges`, `programmeAt`,
   `jump`, `resume`), tested in all three apps.
 
+## Programme page (T15)
+Selecting a programme in the **TV průvodce** opens a full-screen **page of that programme** instead of the
+"Pokračovat / Od začátku / Živě" choice (every programme: ČT and Anténa, ended, airing and future; Poslanecká
+sněmovna streams keep playing live at once). **Back** returns to the guide with the same focus.
+- **Shows**: the image (TMDb poster when the gateway has a match, else the guide image / gateway thumbnail /
+  placeholder as in the guide detail), the title, the episode line, a facts line — channel (with its source icon) ·
+  `Dnes 20:15–22:05` (day label as in the guide) · `110 min` · genre · year — then **"Hodnocení TMDB 7,4 (1 234
+  hlasů)"** when there is a rating (only with ≥ 20 votes; Czech plural 1 hlas / 2–4 hlasy / else hlasů, one decimal, decimal comma, space as thousands separator), the original
+  title when it differs ("Původní název: …"), the full description (the guide's, else TMDb's overview), and the state
+  line as in the guide ("Právě běží", "Pořad nebyl nahrán", "Ještě nezačalo" …). With TMDb data the attribution line
+  and the TMDB logo at the bottom, small.
+- **Buttons** (`spec/fixtures/programme_page_cases.json`, the same decision as the old choice, now a list):
+  airing → [`Pokračovat od …`] `Od začátku` `Živě` (`Od začátku` only when the airing programme is playable from
+  the start: CT buffer, or an Anténa recording in state `recording`); ended and playable → [`Pokračovat od …`]
+  `Od začátku`; an ended ČT programme always offers `Od začátku` (playing shows ČT's own text when it cannot be
+  played: licence, DRM — the decision rules); future → none; an Anténa programme not recorded → none, the state line
+  says why; `Pokračovat` only together with a playable start; ČT programmes that have started also get **`Otevřít v
+  iVysílání`** (Samsung: not offered, as before); every page ends with **`Zpět`**. Focus starts on the first button.
+  Facts: duration = broadcast end − start; genre = the guide's, else the first two TMDb genres; year from TMDb only;
+  the original title only when it differs from the shown and the TMDb Czech title. The page stays under the player
+  and is recomputed (buttons, a new `Pokračovat` focused) when the player closes.
+- **Details** are fetched from `GET /dvb/details` (`spec/dvb-gateway.md`) when the page opens (CT programmes too,
+  with `source=ct`), only with a configured gateway; the page shows at once and the TMDb lines fill in; `404` or no
+  gateway = the page without them. Posters through the gateway (`/dvb/details/image/…`, with the key), memory cache
+  only, like thumbnails.
+- Golden cases: `spec/fixtures/programme_page_cases.json` (buttons for each state; the rating line incl. plurals),
+  all three apps.
+
 ## "Pokračovat" (resume where the viewer stopped)
 Each TV remembers, **on the device only**, how far it got in a programme, and offers to continue there. Nothing leaves
 the device (no account, no sync, no analytics); only positions are stored, never stream URLs or video.
