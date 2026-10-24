@@ -28,11 +28,13 @@ from typing import Any, Callable, Mapping
 from ..config import Config
 from . import epg
 from .gateway import DvbGateway, Response, error, json_response
+from .profiles import ProfileError, parse_body
 from .setup import RULE_COMMENT, apply_setup, plan_setup, recording_set_up
 from .tvheadend import MUX_DISABLE, MUX_ENABLE, Channel, TvheadendClient, TvhError, TvhNotFound
 
 ADMIN_USER = "admin"
 CHANNEL_RE = re.compile(r"^/admin/api/channels/([A-Za-z0-9_-]{1,64})$")
+PROFILE_RE = re.compile(r"^/admin/api/profiles/([0-9a-f]{16})$")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BULK = 500
 MAX_NAME = 64
@@ -239,7 +241,14 @@ class AdminSite:
                     return error(403, "Požadavek z cizí stránky")
                 m = CHANNEL_RE.match(path)
                 return self._set(m.group(1) if m else None, body)
-            if path.startswith("/admin/api/channels"):
+            if method == "GET" and path == "/admin/api/profiles":
+                return json_response(200, {"profiles": self.gateway.profiles.overview()})
+            if method == "POST" and (path == "/admin/api/profiles" or PROFILE_RE.match(path)):
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                m = PROFILE_RE.match(path)
+                return self._profile(m.group(1) if m else None, body)
+            if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles"):
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -371,6 +380,29 @@ class AdminSite:
         return json_response(200, {"settings": {"thumbnails": self.gateway.thumbs.enabled,
                                                 "maxDays": self.gateway.archive.max_days()}})
 
+    def _profile(self, profile_id: str | None, body: bytes) -> Response:
+        """Tab "Profily": ``POST /admin/api/profiles`` {"name", "password"} (default settings), or for one
+        profile ``POST /admin/api/profiles/<id>`` {"password"} (ends its sessions) | {"delete": true}.
+        Logged with the name only, never the password."""
+        store = self.gateway.profiles
+        try:
+            payload = parse_body(body, 1024)
+            if profile_id is None:
+                name = store.admin_create(payload.get("name"), payload.get("password"))
+                self.gateway.log(f"admin: profile {name}: created")
+                return json_response(201, {"name": name})
+            if payload.get("delete") is True:
+                name = store.delete(profile_id)
+                self.gateway.log(f"admin: profile {name}: deleted")
+                return json_response(200, {"name": name})
+            if "password" in payload:
+                name = store.set_password(profile_id, payload.get("password"))
+                self.gateway.log(f"admin: profile {name}: new password")
+                return json_response(200, {"name": name})
+            return error(400, 'Očekávám {"password": "…"} nebo {"delete": true}')
+        except ProfileError as exc:
+            return json_response(exc.status, exc.payload(), exc.headers)
+
     def _rename(self, channel_id: str | None, payload: dict) -> Response:
         raw = {channel_id: payload.get("name")} if channel_id else payload.get("names")
         if not isinstance(raw, dict) or not 0 < len(raw) <= MAX_BULK or \
@@ -487,6 +519,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
 <div class="tabs" role="tablist">
   <button role="tab" id="tab-channels" aria-selected="true">Kanály</button>
   <button role="tab" id="tab-storage" aria-selected="false">Přehled nahrávek</button>
+  <button role="tab" id="tab-profiles" aria-selected="false">Profily</button>
 </div>
 <p class="legal">Nahrávání je soukromá kopie jen pro tuto domácnost. Záznam zůstává na disku tohoto Raspberry, maže se
 automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostatku místa a nelze ho stáhnout ani sdílet.</p>
@@ -498,6 +531,20 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
   <p class="help">Když místo dochází, maže se nejstarších 10 minut z kanálu, který má uloženo nejvíc hodin, takže
   každý nahrávaný kanál drží zhruba stejný počet posledních hodin. Na disku zůstává rezerva 10 % (nejméně 5 GB);
   když ji nejde udržet, nahrávání se pozastaví. Datový tok je změřený ze skutečných nahrávek.</p>
+</section>
+<section id="profiles" hidden>
+  <table><thead><tr><th>Jméno</th><th>Vytvořen</th><th>Poslední změna</th><th class="n">Přihlášeno</th><th></th></tr></thead>
+    <tbody id="profile-rows"></tbody></table>
+  <form id="profile-new" class="edit" style="margin-top: 16px">
+    <b>Nový profil</b>
+    <input id="profile-name" maxlength="32" placeholder="Jméno" autocomplete="off" aria-label="Jméno">
+    <input id="profile-password" type="password" maxlength="64" placeholder="Heslo (4 až 64 znaků)"
+      autocomplete="new-password" aria-label="Heslo">
+    <button type="submit">Vytvořit</button>
+  </form>
+  <p class="help">Profil drží nastavení televizí (pořadí a skrytí kanálů, zdroje, náhledy), nic o sledování. Nový
+  profil má výchozí nastavení; přihlásí se k němu televize v Nastavení → Profil. Nové heslo odhlásí všechny televize
+  profilu, Smazat ho odstraní i s jeho přihlášeními. Heslo se ukládá jen jako otisk (PBKDF2).</p>
 </section>
 <section id="channels">
 <label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
@@ -555,16 +602,76 @@ function api(method, path, body) {
   });
 }
 
-var tabChannels = document.getElementById("tab-channels"), tabStorage = document.getElementById("tab-storage");
-function showTab(storage) {
-  tabChannels.setAttribute("aria-selected", String(!storage));
-  tabStorage.setAttribute("aria-selected", String(storage));
-  document.getElementById("channels").hidden = storage;
-  document.getElementById("storage").hidden = !storage;
-  if (storage) loadStorage();
+var TABS = ["channels", "storage", "profiles"];
+function showTab(name) {
+  TABS.forEach(function (t) {
+    document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
+    document.getElementById(t).hidden = t !== name;
+  });
+  if (name === "storage") loadStorage();
+  if (name === "profiles") loadProfiles();
 }
-tabChannels.addEventListener("click", function () { showTab(false); });
-tabStorage.addEventListener("click", function () { showTab(true); });
+TABS.forEach(function (t) {
+  document.getElementById("tab-" + t).addEventListener("click", function () { showTab(t); });
+});
+
+function tvs(n) { return n + " " + plural(n, "televize", "televize", "televizí"); }
+var profileEditing = null;
+function loadProfiles() {
+  return api("GET", "/admin/api/profiles").then(function (data) {
+    var body = document.getElementById("profile-rows");
+    body.textContent = "";
+    if (!data.profiles.length) {
+      var tr = el("tr"), td = el("td", null, "Zatím žádný profil.");
+      td.colSpan = 5; tr.appendChild(td); body.appendChild(tr);
+    }
+    data.profiles.forEach(function (p) {
+      var tr = el("tr");
+      tr.appendChild(el("td", "name", p.name));
+      tr.appendChild(el("td", null, when(p.created)));
+      tr.appendChild(el("td", null, when(p.updated)));
+      tr.appendChild(el("td", "n", tvs(p.sessions)));
+      var cell = el("td", "confirm");
+      if (profileEditing && profileEditing.id === p.id && profileEditing.what === "password") {
+        var input = el("input");
+        input.type = "password"; input.maxLength = 64; input.autocomplete = "new-password";
+        input.placeholder = "Nové heslo"; input.setAttribute("aria-label", "Nové heslo pro " + p.name);
+        var save = el("button", null, "Uložit"), cancel = el("button", null, "Zrušit");
+        save.addEventListener("click", function () {
+          profileAction(p.id, {password: input.value}, "Nové heslo pro " + p.name + " je uložené, televize profilu jsou odhlášené.");
+        });
+        cancel.addEventListener("click", function () { profileEditing = null; loadProfiles(); });
+        cell.appendChild(input); cell.appendChild(save); cell.appendChild(cancel);
+      } else if (profileEditing && profileEditing.id === p.id && profileEditing.what === "delete") {
+        var yes = el("button", "danger", "Smazat"), no = el("button", null, "Zrušit");
+        cell.appendChild(el("span", null, "Smazat profil " + p.name + "?"));
+        yes.addEventListener("click", function () { profileAction(p.id, {"delete": true}, "Profil " + p.name + " je smazaný."); });
+        no.addEventListener("click", function () { profileEditing = null; loadProfiles(); });
+        cell.appendChild(yes); cell.appendChild(no);
+      } else {
+        var pw = el("button", null, "Nové heslo"), del = el("button", null, "Smazat");
+        pw.addEventListener("click", function () { profileEditing = {id: p.id, what: "password"}; loadProfiles(); });
+        del.addEventListener("click", function () { profileEditing = {id: p.id, what: "delete"}; loadProfiles(); });
+        cell.appendChild(pw); cell.appendChild(del);
+      }
+      tr.appendChild(cell);
+      body.appendChild(tr);
+    });
+  }, function (e) { say("Profily se nepodařilo načíst: " + e.message, true); });
+}
+function profileAction(id, body, done) {
+  api("POST", "/admin/api/profiles/" + id, body).then(function () {
+    profileEditing = null; say(done);
+  }, function (e) { say(e.message, true); }).then(loadProfiles);
+}
+document.getElementById("profile-new").addEventListener("submit", function (ev) {
+  ev.preventDefault();
+  var name = document.getElementById("profile-name"), password = document.getElementById("profile-password");
+  api("POST", "/admin/api/profiles", {name: name.value, password: password.value}).then(function (data) {
+    name.value = ""; password.value = "";
+    say("Profil " + data.name + " je vytvořený.");
+  }, function (e) { say(e.message, true); }).then(loadProfiles);
+});
 
 function muxLabel(names) {
   // TVHeadend names multiplexes by frequency ("514MHz"); one tuner receives one multiplex at a time
@@ -1017,7 +1124,8 @@ load();
 // keep "now playing" current, but never while the user is in the middle of something
 setInterval(function () {
   if (busy || pending !== null || editing !== null) return;
-  if (document.getElementById("storage").hidden) load(); else loadStorage();
+  if (!document.getElementById("channels").hidden) load();
+  else if (!document.getElementById("storage").hidden) loadStorage();
 }, 60000);
 </script>
 </body>

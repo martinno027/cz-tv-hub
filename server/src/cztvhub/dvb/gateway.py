@@ -30,6 +30,8 @@ from .hls import (INIT, LIVE_START_SECONDS, Codecs, EmptySource, HlsManager, Hls
 from .retention import RetentionLoop
 from .sources import GrowingRecording
 from .epgstore import EpgHistory, merge_past
+from . import profiles as prof
+from .profiles import ProfileError, ProfileStore
 from .thumbs import Settings, Thumbnails, ThumbsBusy
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
@@ -40,6 +42,8 @@ BREAKS_RE = re.compile(rf"^/dvb/recording/({UUID})/breaks$")
 THUMB_RE = re.compile(rf"^/dvb/recording/({UUID})/thumb\.jpg$")
 TIMELINE_RE = re.compile(rf"^/dvb/timeline/({UUID})(\.m3u8)?$")
 JOBS_PATH = "/dvb/ads/jobs"
+PROFILE_PREFIX = "/dvb/profile"  # /dvb/profile, /dvb/profile/logout, /dvb/profiles, /dvb/profiles/login
+PROFILE_HEADER = "X-Cztvhub-Profile"
 COOKIE_NAME = "cztvhub_key"
 MAX_BODY = 64 * 1024
 HLS_RE = re.compile(r"^/dvb/hls/([0-9a-f]{32})/([A-Za-z0-9_.-]+)$")
@@ -88,7 +92,8 @@ class DvbGateway:
     def __init__(self, cfg: Config, client: TvheadendClient | None = None, hls: HlsManager | None = None,
                  now: Callable[[], float] = time.time, prober: Callable[[bytes], Codecs] | None = None,
                  popen: Callable[..., Any] | None = None, playlist_timeout: float = PLAYLIST_TIMEOUT,
-                 log: Callable[[str], None] = print, archive: Archive | None = None):
+                 log: Callable[[str], None] = print, archive: Archive | None = None,
+                 profiles: ProfileStore | None = None):
         self.cfg = cfg
         self.dvb = cfg.dvb
         tvh = cfg.tvheadend
@@ -105,6 +110,7 @@ class DvbGateway:
         self.thumbs = Thumbnails(self.client, self.settings, self.dvb.ffmpeg, now=now, log=log)
         self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log, after=self._after_retention)
         self.history = EpgHistory(self.dvb.state_dir)
+        self.profiles = profiles or ProfileStore(self.dvb.state_dir, log=log)
         if archive is None:
             store = BufferStore(self.dvb.buffer_dir)
             recorders = RecorderManager(store, self._recording_source, self.dvb.ffmpeg, self.dvb.ffprobe, log=log)
@@ -149,6 +155,8 @@ class DvbGateway:
         try:
             if role == "worker":
                 return self._worker_route(method, path, query, body)
+            if path.startswith(PROFILE_PREFIX):
+                return self._profile_route(method, path, headers, body)
             if method != "GET":
                 if BREAKS_RE.match(path) and self.ads.enabled:
                     raise HttpError(403, "Bloky reklam ukládá jen pracovník")
@@ -554,6 +562,52 @@ class DvbGateway:
         # open-GOP HEVC: keyframe after its leading pictures again (ffmpeg HLS muxer bug, fmp4.py)
         data = fmp4.fix_leading_pictures(data, session.hevc_track)
         return fmp4.shift_fragments(data, session.shifts)
+
+    # -- profiles (profiles.py) ------------------------------------------------------------
+    def _profile_route(self, method: str, path: str, headers: Mapping[str, str], body: bytes) -> Response:
+        """Settings profiles (spec/dvb-gateway.md "Profiles"). The app key must come as the bearer header:
+        the cookie is only for players, and a header cannot be sent cross-site without a CORS preflight."""
+        scheme, _, key = (headers.get("Authorization") or "").partition(" ")
+        if scheme.lower() != "bearer" or not _same(key.strip(), self.dvb.key):
+            raise HttpError(403, "Profily potřebují klíč v hlavičce Authorization")
+        routes = {
+            "/dvb/profiles": {"POST": self._profile_create},
+            "/dvb/profiles/login": {"POST": self._profile_login},
+            "/dvb/profile": {"GET": self._profile_get, "PUT": self._profile_put},
+            "/dvb/profile/logout": {"POST": self._profile_logout},
+        }
+        if path not in routes:
+            raise HttpError(404, "Nenalezeno")
+        handler = routes[path].get(method)
+        if handler is None:
+            raise HttpError(405, "Nepodporovaná metoda")
+        try:
+            return handler(headers.get(PROFILE_HEADER) or "", body)
+        except ProfileError as exc:
+            return json_response(exc.status, exc.payload(), exc.headers)
+
+    def _profile_create(self, _token: str, body: bytes) -> Response:
+        payload = prof.parse_body(body, prof.MAX_BODY)
+        return json_response(201, self.profiles.create(payload.get("name"), payload.get("password"),
+                                                       payload.get("settings")))
+
+    def _profile_login(self, _token: str, body: bytes) -> Response:
+        payload = prof.parse_body(body, prof.MAX_LOGIN_BODY)
+        return json_response(200, self.profiles.login(payload.get("name"), payload.get("password")))
+
+    def _profile_get(self, token: str, _body: bytes) -> Response:
+        return json_response(200, self.profiles.get(token))
+
+    def _profile_put(self, token: str, body: bytes) -> Response:
+        if len(body) > prof.MAX_BODY:
+            raise ProfileError(413, "Příliš velký požadavek")
+        self.profiles.get(token)  # 401 before anything about the body
+        payload = prof.parse_body(body, prof.MAX_BODY)
+        return json_response(200, self.profiles.put(token, payload.get("settings")))
+
+    def _profile_logout(self, token: str, _body: bytes) -> Response:
+        self.profiles.logout(token)
+        return Response(204, b"", JSON, {"Cache-Control": "no-store"})
 
     # -- ad breaks (spec/ad-breaks.md) -----------------------------------------------------
     def get_breaks(self, dvr_uuid: str) -> Response:

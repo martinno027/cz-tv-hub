@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from .api import StreamError, StreamResolver
 from .channels import BY_ID
+from .dvb.profiles import MAX_BODY  # the largest body: a profile's 64 KB settings plus its wrapper
 from .m3u import build_playlist
 
 if TYPE_CHECKING:
@@ -20,8 +21,8 @@ if TYPE_CHECKING:
     from .dvb.gateway import DvbGateway
 
 STREAM_RE = re.compile(r"^/ct/(CH_\d+)\.m3u8$")
-MAX_PUT_BODY = 64 * 1024  # ad-break uploads (spec/ad-breaks.md)
 DVB_DISABLED = '{"error": "DVB není zapnuté"}'.encode("utf-8")
+TOO_LARGE = '{"error": "Příliš velký požadavek"}'.encode("utf-8")
 
 
 def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, admin: AdminSite | None = None):
@@ -64,25 +65,32 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
 
         def do_PUT(self):
             path, _, query = self.path.partition("?")
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                length = -1
-            if not path.startswith("/dvb/") or not 0 <= length <= MAX_PUT_BODY:
-                self.close_connection = True
-                return self._send(400, b"bad request\n")
-            self._dvb(path, query, "PUT", self.rfile.read(length))
+            body = self._body(path.startswith("/dvb/"))
+            if body is not None:
+                self._dvb(path, query, "PUT", body)
 
         def do_POST(self):
-            path = self.path.partition("?")[0]
+            path, _, query = self.path.partition("?")
+            body = self._body(path.startswith("/dvb/") or path.startswith("/admin/"))
+            if body is None:
+                return
+            if path.startswith("/dvb/"):
+                return self._dvb(path, query, "POST", body)
+            self._admin(path, "POST", body)
+
+        def _body(self, routed: bool):
+            """The request body, or None after answering: 400 elsewhere or without a length, 413 too large."""
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = -1
-            if not path.startswith("/admin/") or not 0 <= length <= MAX_PUT_BODY:
+            if not routed or length < 0:
                 self.close_connection = True
                 return self._send(400, b"bad request\n")
-            self._admin(path, "POST", self.rfile.read(length))
+            if length > MAX_BODY:
+                self.close_connection = True  # the body is not read
+                return self._send(413, TOO_LARGE, "application/json; charset=utf-8")
+            return self.rfile.read(length)
 
         def _admin(self, path, method="GET", body=b""):
             if admin is None:
