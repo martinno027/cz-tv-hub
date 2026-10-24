@@ -26,6 +26,32 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
     fun breaks(recordingId: String): List<AdBreak> =
         call("/dvb/recording/$recordingId/breaks") { s, b -> DvbParser.parseBreaks(s, b) }
 
+    /** The channel timeline window around a continuous-recording programme (`b…` id). */
+    fun timeline(recordingId: String): DvbTimeline =
+        call("/dvb/timeline/$recordingId") { s, b -> DvbParser.parseTimeline(s, b) }
+
+    /** The window's playlist (needs [DvbConfig.authHeaders]). */
+    fun timelineUrl(timeline: DvbTimeline): String = config.url(timeline.playlist)
+
+    /**
+     * Fetches the window's playlist once before a window switch, so a failure keeps the old window playing;
+     * throws [CtException] with the gateway's Czech text.
+     */
+    fun checkPlaylist(timeline: DvbTimeline) {
+        val response = try {
+            transport.get(timelineUrl(timeline), config.authHeaders)
+        } catch (e: IOException) {
+            throw CtException("gateway playlist failed: $e", DvbMessages.UNREACHABLE)
+        }
+        if (response.status !in 200..299) {
+            throw CtException(
+                "gateway playlist HTTP ${response.status}",
+                DvbParser.errorText(response.body) ?: DvbMessages.GENERIC,
+                response.status.toString(),
+            )
+        }
+    }
+
     fun liveUrl(channelId: String): String = config.url("/dvb/live/$channelId.m3u8")
 
     fun recordingUrl(recordingId: String): String = config.url("/dvb/recording/$recordingId.m3u8")

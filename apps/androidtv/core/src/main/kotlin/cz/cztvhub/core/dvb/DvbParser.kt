@@ -70,6 +70,62 @@ object DvbParser {
         }.sortedBy { it.start }
     }
 
+    /**
+     * `GET /dvb/timeline/<id>`: the window's map must be usable (non-empty `pieces` with numeric, non-negative,
+     * ordered positions and valid times, a gateway path as `playlist`), else an error; programmes without valid
+     * times are dropped, neighbours that are no `b…` id become null, unknown fields are ignored.
+     */
+    fun parseTimeline(status: Int, body: String): DvbTimeline {
+        val root = ok(status, body)
+        fun bad(what: String): Nothing = throw CtException("gateway timeline: $what", DvbMessages.GENERIC)
+        val id = root.str("id") ?: bad("no id")
+        val playlist = root.str("playlist")?.takeIf { it.startsWith("/") && !it.startsWith("//") }
+            ?: bad("bad playlist")
+        val complete = when (root.str("complete")) {
+            "true" -> true
+            "false" -> false
+            else -> bad("bad complete")
+        }
+        val programme = root["programme"] as? JsonObject ?: bad("no programme")
+        val programmeStart = programme.str("start")?.let(::instant) ?: bad("bad programme start")
+        val programmeEnd = programme.str("end")?.let(::instant) ?: bad("bad programme end")
+        val pieces = (root["pieces"] as? JsonArray ?: bad("no pieces")).map { item ->
+            val o = item as? JsonObject ?: bad("bad piece")
+            val position = o.num("position")?.takeIf { it >= 0 } ?: bad("bad piece position")
+            val duration = o.num("duration")?.takeIf { it >= 0 } ?: bad("bad piece duration")
+            val time = o.str("time")?.let(::instant) ?: bad("bad piece time")
+            TimelinePiece(position, time, duration)
+        }
+        if (pieces.isEmpty()) bad("no pieces")
+        if (pieces.zipWithNext().any { (a, b) -> b.position < a.position }) bad("pieces out of order")
+        val programmes = (root["programmes"] as? JsonArray).orEmpty().mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val start = o.str("start")?.let(::instant) ?: return@mapNotNull null
+            val end = o.str("end")?.let(::instant) ?: return@mapNotNull null
+            if (!end.isAfter(start)) return@mapNotNull null
+            TimelineProgramme(
+                id = o.str("id")?.takeIf(TimelineRules::isTimelineId),
+                title = o.str("title").orEmpty(),
+                subtitle = o.str("subtitle").orEmpty(),
+                start = start,
+                end = end,
+                breaks = o.str("breaks") == "true",
+            )
+        }.sortedBy { it.start }
+        return DvbTimeline(
+            id = id,
+            channel = root.str("channel").orEmpty(),
+            playlist = playlist,
+            complete = complete,
+            programmeStart = programmeStart,
+            programmeEnd = programmeEnd,
+            pieces = pieces,
+            programmes = programmes,
+            previous = root.str("previous")?.takeIf(TimelineRules::isTimelineId),
+            next = root.str("next")?.takeIf(TimelineRules::isTimelineId),
+        )
+    }
+
     /** The gateway's Czech `error` text from a JSON error body, if any. */
     fun errorText(body: String): String? = (parse(body))?.str("error")
 

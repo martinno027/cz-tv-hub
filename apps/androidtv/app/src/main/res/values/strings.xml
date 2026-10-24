@@ -61,5 +61,8 @@
     <string name="state_live">Jen živě</string>
     <string name="back">Zpět</string>
     <string name="skip_ad">Přeskočit reklamu</string>
+    <string name="audio_title">Zvuk</string>
+    <string name="audio_single">Pořad má jen jednu zvukovou stopu</string>
+    <string name="audio_track">Stopa %1$d</string>
     <string name="disclaimer">Neoficiální projekt, není spojen s Českou televizí. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.</string>
 </resources>
