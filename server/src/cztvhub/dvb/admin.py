@@ -6,8 +6,8 @@ A hidden channel is switched off in TVHeadend itself, so TVHeadend is the only s
   so the tuner does not tune to it at all (no reception, no EPG scan);
 - its cztvhub autorec rule is disabled (``dvb-setup`` keeps it disabled), its scheduled and running
   recordings are cancelled and its finished recordings deleted.
-Channels can be renamed (TVHeadend name, ``autoname`` off so a rescan keeps it); ``short_name()``
-suggests a TV-style name ("CT 1 PHA HD T2" -> "ČT1", matching the CT internet channels).
+Channels can be renamed (TVHeadend name, ``autoname`` off so a rescan keeps it; the service name stays the
+original, shown less prominently on the page); ``short_name()`` suggests a TV-style name ("CT 1 PHA HD T2" -> "ČT1", matching the CT internet channels).
 Showing the channel again reverses the switches (recordings start with the next programme); showing an
 already offered channel repairs its reception (services / multiplex switched off elsewhere).
 
@@ -92,11 +92,14 @@ class ChannelAdmin:
             mux_ids = sorted({s.mux for s in own if s.mux})
             rule = next((r for r in rules if r.channel == channel.uuid), None)
             event = airing.get(channel.uuid)
+            # TVHeadend names a channel after its service; a different name was set on rename (autoname off)
+            original = next((s.name for s in own if s.name), "")
             rows.append({
                 "id": channel.uuid,
                 "number": channel.number,
                 "name": channel.name,
                 "shortName": short_name(channel.name),
+                "originalName": original if original and original != channel.name else None,
                 "offered": channel.enabled,
                 # every service scrambled (CA): cannot be recorded (free-to-air only, nothing is descrambled)
                 "scrambled": bool(own) and all(s.encrypted for s in own),
@@ -416,6 +419,13 @@ h1 { font-size: 22px; margin: 0 0 4px; }
 input[type=checkbox].pick { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .name { font-weight: 600; }
+.orig { color: var(--muted); font-size: 12px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); font-size: 14px; }
+.filters input, .filters select { font: inherit; font-size: 14px; padding: 3px 8px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg); max-width: 100%; }
+.filters input { width: 200px; }
+.filters .count { color: var(--muted); margin-left: auto; }
 .now { margin-top: 2px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .now .time { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
 .now .genre { color: var(--muted); }
@@ -493,6 +503,16 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
 <label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
 <label class="setting">Uchovávat nahrávky nejvýše <select id="maxdays"></select> (dříve se maže, když dochází místo)</label>
 <div class="list">
+  <div class="filters" role="search">
+    <input type="search" id="f-text" placeholder="Hledat název" aria-label="Hledat v názvu i původním názvu">
+    <select id="f-offered" aria-label="Zapnuté nebo vypnuté"><option value="">Zapnuté i vypnuté</option>
+      <option value="on">Jen zapnuté</option><option value="off">Jen vypnuté</option></select>
+    <select id="f-rec" aria-label="Nahrávání"><option value="">Nahrávané i nenahrávané</option>
+      <option value="on">Jen nahrávané</option><option value="off">Jen nenahrávané</option></select>
+    <select id="f-mux" aria-label="Multiplex"><option value="">Všechny multiplexy</option></select>
+    <button id="f-reset" hidden>Zrušit filtr</button>
+    <span class="count" id="f-count"></span>
+  </div>
   <div class="bar" id="bar"></div>
   <div id="list"><div class="row"><span></span><span></span><span class="meta">Načítám…</span></div></div>
 </div>
@@ -640,20 +660,70 @@ function renderStatus(data) {
   if (data.recording && data.recording.blocked) item("Nahrávání nejde zapnout:", data.recording.blocked);
 }
 
-function picked() { return rows.filter(function (c) { return selected[c.id]; }); }
+// filters (AND), client-side only; kept in the URL hash so a reload keeps them
+var fText = document.getElementById("f-text"), fOffered = document.getElementById("f-offered");
+var fRec = document.getElementById("f-rec"), fMux = document.getElementById("f-mux");
+var fReset = document.getElementById("f-reset"), fCount = document.getElementById("f-count");
+var filters = {q: "", offered: "", rec: "", mux: ""};
+function fold(s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); }
+// "nahrává se": continuous recording ("Nahrávat") or an enabled dvb-setup recording rule
+function recorded(c) { return !!c.record || c.recordingRule === true; }
+function visible(c) {
+  if (filters.offered && c.offered !== (filters.offered === "on")) return false;
+  if (filters.rec && recorded(c) !== (filters.rec === "on")) return false;
+  if (filters.mux && c.multiplexes.indexOf(filters.mux) < 0) return false;
+  var hay = fold(c.name + " " + (c.originalName || ""));
+  return fold(filters.q).split(/\s+/).every(function (w) { return hay.indexOf(w) >= 0; });
+}
+function shown() { return rows.filter(visible); }
+function filtering() { return !!(filters.q.trim() || filters.offered || filters.rec || filters.mux); }
+function readHash() {
+  var p = new URLSearchParams(location.hash.slice(1));
+  Object.keys(filters).forEach(function (k) { filters[k] = p.get(k) || ""; });
+  fText.value = filters.q; fOffered.value = filters.offered; fRec.value = filters.rec;
+  filters.offered = fOffered.value; filters.rec = fRec.value;  // unknown values fall back to "all"
+}
+function applyFilters() {
+  filters = {q: fText.value, offered: fOffered.value, rec: fRec.value, mux: fMux.value};
+  var p = new URLSearchParams();
+  Object.keys(filters).forEach(function (k) { if (filters[k]) p.set(k, filters[k]); });
+  history.replaceState(null, "", p.toString() ? "#" + p.toString() : location.pathname + location.search);
+  rows.forEach(function (c) { if (!visible(c)) delete selected[c.id]; });  // bulk actions only on what is visible
+  pending = null;
+  if (editing !== null && !rows.some(function (c) { return c.id === editing && visible(c); })) editing = null;
+  render();
+}
+function renderMuxOptions() {
+  var names = {};
+  rows.forEach(function (c) { c.multiplexes.forEach(function (n) { names[n] = true; }); });
+  var sorted = Object.keys(names).sort(function (a, b) { return (parseFloat(a) || 0) - (parseFloat(b) || 0) || (a < b ? -1 : a > b ? 1 : 0); });
+  while (fMux.options.length > 1) fMux.remove(1);
+  sorted.forEach(function (n) { var o = el("option", null, muxLabel([n])); o.value = n; fMux.appendChild(o); });
+  fMux.value = names[filters.mux] ? filters.mux : "";
+  filters.mux = fMux.value;
+}
+fText.addEventListener("input", applyFilters);
+[fOffered, fRec, fMux].forEach(function (s) { s.addEventListener("change", applyFilters); });
+fReset.addEventListener("click", function () {
+  fText.value = ""; fOffered.value = ""; fRec.value = ""; fMux.value = "";
+  applyFilters();
+});
+readHash();
+
+function picked() { return rows.filter(function (c) { return selected[c.id] && visible(c); }); }
 
 function renderBar() {
   bar.textContent = "";
-  var chosen = picked();
+  var chosen = picked(), vis = shown();
   var all = el("input", "pick");
   all.type = "checkbox";
-  all.checked = rows.length > 0 && chosen.length === rows.length;
-  all.indeterminate = chosen.length > 0 && chosen.length < rows.length;
-  all.setAttribute("aria-label", "Vybrat všechny kanály");
-  all.disabled = busy;
+  all.checked = vis.length > 0 && chosen.length === vis.length;
+  all.indeterminate = chosen.length > 0 && chosen.length < vis.length;
+  all.setAttribute("aria-label", filtering() ? "Vybrat všechny zobrazené kanály" : "Vybrat všechny kanály");
+  all.disabled = busy || !vis.length;
   all.addEventListener("change", function () {
     selected = {};
-    if (all.checked) rows.forEach(function (c) { selected[c.id] = true; });
+    if (all.checked) vis.forEach(function (c) { selected[c.id] = true; });
     pending = null;
     render();
   });
@@ -663,7 +733,7 @@ function renderBar() {
   var on = el("button", null, "Zapnout vybrané");
   off.disabled = busy || !chosen.some(function (c) { return c.offered; });
   on.disabled = busy || !chosen.some(function (c) { return !c.offered || !c.received; });
-  var shorten = (chosen.length ? chosen : rows).filter(function (c) { return c.shortName !== c.name; });
+  var shorten = (chosen.length ? chosen : vis).filter(function (c) { return c.shortName !== c.name; });
   var short = el("button", null, chosen.length ? "Zkrátit názvy vybraných" : "Zkrátit názvy");
   short.disabled = busy || !shorten.length;
   short.title = "Např. „CT 1 PHA HD T2“ → „ČT1“";
@@ -730,8 +800,12 @@ function nowLine(c) {
 function render() {
   renderBar();
   list.textContent = "";
+  var vis = shown();
+  fReset.hidden = !filtering();
+  fCount.textContent = vis.length + " z " + rows.length + (rows.length === 1 ? " kanálu" : " kanálů");
   if (!rows.length) { list.appendChild(el("div", "row", "TVHeadend nemá žádné kanály.")); return; }
-  rows.forEach(function (c) {
+  if (!vis.length) { list.appendChild(el("div", "row", "Filtru neodpovídá žádný kanál.")); return; }
+  vis.forEach(function (c) {
     var row = el("div", "row" + (c.offered ? "" : " hidden") + (selected[c.id] ? " selected" : ""));
     var pick = el("input", "pick");
     pick.type = "checkbox";
@@ -761,6 +835,11 @@ function render() {
       pen.addEventListener("click", function () { editing = c.id; pending = null; render(); });
       name.appendChild(pen);
       info.appendChild(name);
+    }
+    if (c.originalName) {
+      var orig = el("div", "orig", "původní název: " + c.originalName);
+      orig.title = "Název z vysílání (služba v TVHeadendu)";
+      info.appendChild(orig);
     }
     info.appendChild(nowLine(c));
     var meta = el("div", "meta");
@@ -929,6 +1008,7 @@ function load() {
     var known = {};
     rows.forEach(function (c) { if (selected[c.id]) known[c.id] = true; });
     selected = known;
+    renderMuxOptions();
     renderStatus(data);
     render();
   }, function (e) { say("Nepodařilo se načíst kanály: " + e.message, true); });

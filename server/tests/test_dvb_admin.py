@@ -211,6 +211,16 @@ class AdminTest(unittest.TestCase):
                          ["Prima HD → Prima"])
         self.assertEqual(self.rename({"names": {CT1: "ČT1"}})[1]["changes"], [])  # unchanged
 
+    def test_original_name_after_rename(self):
+        self.assertIsNone(self.row(CT1)["originalName"])  # named after its service: nothing extra to show
+        self.rename({"names": {CT1: "ČT1"}})
+        row = self.row(CT1)
+        self.assertEqual((row["name"], row["originalName"]), ("ČT1", "ČT1 HD"))  # the service keeps the original
+        self.rename({"names": {CT1: "ČT1 HD"}})  # renamed back
+        self.assertIsNone(self.row(CT1)["originalName"])
+        next(c for c in self.fake.channels if c["uuid"] == NOVA)["services"] = []
+        self.assertIsNone(self.row(NOVA)["originalName"])  # no service: original unknown
+
     def test_rename_validation(self):
         for payload in ({"names": {CT1: ""}}, {"names": {CT1: "x" * 65}}, {"names": {CT1: "a\tb\x00"}},
                         {"names": {}}, {"names": [CT1]}, {"names": {"../x": "a"}}, {"names": {CT1: 5}}):
