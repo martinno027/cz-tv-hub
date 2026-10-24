@@ -31,6 +31,7 @@ from .retention import RetentionLoop
 from .sources import GrowingRecording
 from .epgstore import EpgHistory, merge_past
 from . import profiles as prof
+from .defaults import DefaultsStore
 from .profiles import ProfileError, ProfileStore
 from .thumbs import Settings, Thumbnails, ThumbsBusy
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
@@ -93,7 +94,7 @@ class DvbGateway:
                  now: Callable[[], float] = time.time, prober: Callable[[bytes], Codecs] | None = None,
                  popen: Callable[..., Any] | None = None, playlist_timeout: float = PLAYLIST_TIMEOUT,
                  log: Callable[[str], None] = print, archive: Archive | None = None,
-                 profiles: ProfileStore | None = None):
+                 profiles: ProfileStore | None = None, defaults: DefaultsStore | None = None):
         self.cfg = cfg
         self.dvb = cfg.dvb
         tvh = cfg.tvheadend
@@ -111,6 +112,7 @@ class DvbGateway:
         self.retention = RetentionLoop(self.client, self.dvb.retention_days, log=log, after=self._after_retention)
         self.history = EpgHistory(self.dvb.state_dir)
         self.profiles = profiles or ProfileStore(self.dvb.state_dir, log=log)
+        self.defaults = defaults or DefaultsStore(self.dvb.state_dir, log=log)
         if archive is None:
             store = BufferStore(self.dvb.buffer_dir)
             recorders = RecorderManager(store, self._recording_source, self.dvb.ffmpeg, self.dvb.ffprobe, log=log)
@@ -199,6 +201,8 @@ class DvbGateway:
             return self.channels()
         if path == "/dvb/epg":
             return self.epg(query.get("date"))
+        if path == "/dvb/defaults":
+            return json_response(200, self.defaults.get())
         if m := HLS_RE.match(path):
             return self.media(m.group(1), m.group(2), headers.get("Range"))
         if path.startswith(VIEW_PREFIX):

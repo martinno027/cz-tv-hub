@@ -11,6 +11,9 @@ original, shown less prominently on the page); ``short_name()`` suggests a TV-st
 Showing the channel again reverses the switches (recordings start with the next programme); showing an
 already offered channel repairs its reception (services / multiplex switched off elsewhere).
 
+The tab "Výchozí kanály" edits the household default channel list (``defaults.py``); "Použít jako výchozí" on
+the tab "Profily" copies a profile's list into it once.
+
 Login: HTTP Basic, user ``admin``, ``[admin] password``. State-changing requests must carry the
 ``X-Cztvhub-Admin`` header (a cross-site page cannot send it without a CORS preflight, which this
 server never grants) and a same-origin ``Origin`` if the browser sends one.
@@ -25,7 +28,9 @@ import re
 import time
 from typing import Any, Callable, Mapping
 
+from .. import channels as ct_channels
 from ..config import Config
+from . import defaults as dflt
 from . import epg
 from .gateway import DvbGateway, Response, error, json_response
 from .profiles import ProfileError, parse_body
@@ -248,7 +253,14 @@ class AdminSite:
                     return error(403, "Požadavek z cizí stránky")
                 m = PROFILE_RE.match(path)
                 return self._profile(m.group(1) if m else None, body)
-            if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles"):
+            if method == "GET" and path == "/admin/api/defaults":
+                return self._defaults_overview()
+            if method == "POST" and path == "/admin/api/defaults":
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._defaults(body)
+            if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles") \
+                    or path == "/admin/api/defaults":
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -382,7 +394,8 @@ class AdminSite:
 
     def _profile(self, profile_id: str | None, body: bytes) -> Response:
         """Tab "Profily": ``POST /admin/api/profiles`` {"name", "password"} (default settings), or for one
-        profile ``POST /admin/api/profiles/<id>`` {"password"} (ends its sessions) | {"delete": true}.
+        profile ``POST /admin/api/profiles/<id>`` {"password"} (ends its sessions) | {"delete": true} |
+        {"makeDefault": true} (its channel list copied once into the household default).
         Logged with the name only, never the password."""
         store = self.gateway.profiles
         try:
@@ -399,9 +412,45 @@ class AdminSite:
                 name = store.set_password(profile_id, payload.get("password"))
                 self.gateway.log(f"admin: profile {name}: new password")
                 return json_response(200, {"name": name})
-            return error(400, 'Očekávám {"password": "…"} nebo {"delete": true}')
+            if payload.get("makeDefault") is True:
+                name, prefs = store.channel_prefs(profile_id)
+                if prefs is None:
+                    return error(400, f"Profil {name} nemá uložený seznam kanálů")
+                doc = self.gateway.defaults.set(prefs)
+                self.gateway.log(f"admin: defaults: copied from profile {name}")
+                return json_response(200, {"name": name, **doc})
+            return error(400, 'Očekávám {"password": "…"}, {"delete": true} nebo {"makeDefault": true}')
         except ProfileError as exc:
             return json_response(exc.status, exc.payload(), exc.headers)
+
+    def _defaults_overview(self) -> Response:
+        """Tab "Výchozí kanály": the default plus every channel a TV can list, in the apps' built-in order
+        (ČT catalogue, the offered Anténa channels, Poslanecká sněmovna). Without TVHeadend the others still come."""
+        known = [{"key": f"ct:{c.id}", "name": c.name, "source": "ct"} for c in ct_channels.CHANNELS]
+        dvb_error = None
+        try:
+            known += [{"key": f"dvb:{c['id']}", "name": c["name"], "source": "dvb"}
+                      for c in json.loads(self.gateway.channels().body)["channels"]]
+        except TvhError:
+            dvb_error = TvhError.user_message
+        known += [{"key": key, "name": name, "source": "psp"} for key, name in dflt.PSP_STREAMS]
+        return json_response(200, {**self.gateway.defaults.get(), "channels": known, "dvbError": dvb_error})
+
+    def _defaults(self, body: bytes) -> Response:
+        """``POST /admin/api/defaults`` {"channelPrefs": {...}} (Uložit) | {"clear": true} (Zrušit výchozí)."""
+        try:
+            payload = parse_body(body, dflt.MAX_BODY)
+            if payload.get("clear") is True:
+                doc = self.gateway.defaults.set(None)
+                self.gateway.log("admin: defaults: cleared")
+            elif "channelPrefs" in payload:
+                doc = self.gateway.defaults.set(dflt.check_prefs(payload["channelPrefs"]))  # null: 400, not a clear
+                self.gateway.log("admin: defaults: saved")
+            else:
+                return error(400, 'Očekávám {"channelPrefs": {…}} nebo {"clear": true}')
+        except ProfileError as exc:
+            return json_response(exc.status, exc.payload(), exc.headers)
+        return json_response(200, doc)
 
     def _rename(self, channel_id: str | None, payload: dict) -> Response:
         raw = {channel_id: payload.get("name")} if channel_id else payload.get("names")
@@ -509,6 +558,16 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
 .totals { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 12px; font-size: 14px; }
 .totals b { font-weight: 600; }
 .warn { color: var(--warn); }
+.drow { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto auto; gap: 12px; align-items: center;
+  padding: 8px 16px; border-top: 1px solid var(--line); }
+.list .drow:first-of-type { border-top: 0; }
+.drow.hidden .name, .drow.off .name { color: var(--muted); }
+.drow .src { color: var(--muted); font-size: 12px; }
+.drow .arrows { display: flex; gap: 4px; }
+.drow .arrows button { padding: 2px 10px; }
+.drow label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.drow input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.dactions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -520,6 +579,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
   <button role="tab" id="tab-channels" aria-selected="true">Kanály</button>
   <button role="tab" id="tab-storage" aria-selected="false">Přehled nahrávek</button>
   <button role="tab" id="tab-profiles" aria-selected="false">Profily</button>
+  <button role="tab" id="tab-defaults" aria-selected="false">Výchozí kanály</button>
 </div>
 <p class="legal">Nahrávání je soukromá kopie jen pro tuto domácnost. Záznam zůstává na disku tohoto Raspberry, maže se
 automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostatku místa a nelze ho stáhnout ani sdílet.</p>
@@ -545,6 +605,23 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
   <p class="help">Profil drží nastavení televizí (pořadí a skrytí kanálů, zdroje, náhledy), nic o sledování. Nový
   profil má výchozí nastavení; přihlásí se k němu televize v Nastavení → Profil. Nové heslo odhlásí všechny televize
   profilu, Smazat ho odstraní i s jeho přihlášeními. Heslo se ukládá jen jako otisk (PBKDF2).</p>
+</section>
+<section id="defaults" hidden>
+  <p class="sub" id="defaults-state"></p>
+  <label class="setting"><input type="checkbox" id="d-src-ct"> Internetová TV (ČT)</label>
+  <label class="setting"><input type="checkbox" id="d-src-dvb"> Anténa</label>
+  <label class="setting"><input type="checkbox" id="d-src-psp"> Poslanecká sněmovna</label>
+  <div class="list" id="defaults-rows"></div>
+  <div class="dactions" id="defaults-actions">
+    <button id="defaults-save">Uložit</button>
+    <button id="defaults-clear">Zrušit výchozí</button>
+    <span class="meta" id="defaults-dirty"></span>
+  </div>
+  <p class="help">Výchozí seznam kanálů platí pro televize bez profilu, na kterých nikdo seznam nezměnil (Nastavení →
+  Kanály). Televize ho načte při spuštění a při otevření Nastavení. Jakmile na televizi někdo kanál skryje, přesune
+  nebo vypne zdroj, má televize vlastní seznam; „Obnovit výchozí pořadí“ ji vrátí k tomuto. Profil se tímto nemění
+  a výchozí seznam nesleduje změny profilu („Použít jako výchozí“ v záložce Profily ho jednou zkopíruje).
+  Zrušit výchozí vrátí televize k vestavěnému pořadí.</p>
 </section>
 <section id="channels">
 <label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
@@ -602,7 +679,7 @@ function api(method, path, body) {
   });
 }
 
-var TABS = ["channels", "storage", "profiles"];
+var TABS = ["channels", "storage", "profiles", "defaults"];
 function showTab(name) {
   TABS.forEach(function (t) {
     document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
@@ -610,6 +687,7 @@ function showTab(name) {
   });
   if (name === "storage") loadStorage();
   if (name === "profiles") loadProfiles();
+  if (name === "defaults" && !dfltDirty) loadDefaults();  // unsaved edits survive a look at another tab
 }
 TABS.forEach(function (t) {
   document.getElementById("tab-" + t).addEventListener("click", function () { showTab(t); });
@@ -648,11 +726,22 @@ function loadProfiles() {
         yes.addEventListener("click", function () { profileAction(p.id, {"delete": true}, "Profil " + p.name + " je smazaný."); });
         no.addEventListener("click", function () { profileEditing = null; loadProfiles(); });
         cell.appendChild(yes); cell.appendChild(no);
+      } else if (profileEditing && profileEditing.id === p.id && profileEditing.what === "default") {
+        var use = el("button", null, "Použít"), back = el("button", null, "Zrušit");
+        cell.appendChild(el("span", null, "Nahradit výchozí seznam kanálů seznamem profilu " + p.name + "?"));
+        use.addEventListener("click", function () {
+          profileAction(p.id, {makeDefault: true}, "Výchozí seznam kanálů je zkopírovaný z profilu " + p.name +
+            ". Další změny profilu ho neovlivní.");
+        });
+        back.addEventListener("click", function () { profileEditing = null; loadProfiles(); });
+        cell.appendChild(use); cell.appendChild(back);
       } else {
-        var pw = el("button", null, "Nové heslo"), del = el("button", null, "Smazat");
+        var pw = el("button", null, "Nové heslo"), del = el("button", null, "Smazat"),
+          copy = el("button", null, "Použít jako výchozí");
         pw.addEventListener("click", function () { profileEditing = {id: p.id, what: "password"}; loadProfiles(); });
         del.addEventListener("click", function () { profileEditing = {id: p.id, what: "delete"}; loadProfiles(); });
-        cell.appendChild(pw); cell.appendChild(del);
+        copy.addEventListener("click", function () { profileEditing = {id: p.id, what: "default"}; loadProfiles(); });
+        cell.appendChild(pw); cell.appendChild(del); cell.appendChild(copy);
       }
       tr.appendChild(cell);
       body.appendChild(tr);
@@ -671,6 +760,93 @@ document.getElementById("profile-new").addEventListener("submit", function (ev) 
     name.value = ""; password.value = "";
     say("Profil " + data.name + " je vytvořený.");
   }, function (e) { say(e.message, true); }).then(loadProfiles);
+});
+
+// "Výchozí kanály": seq = the stored order incl. keys this page does not know (kept at their place), then the
+// known channels missing from it; arrows swap a row with its neighbouring known row, like the apps' move().
+var dflt = null, dfltDirty = false, dfltClearing = false;
+var SOURCES = {ct: "Internet ČT", dvb: "Anténa", psp: "Sněmovna"};
+function loadDefaults() {
+  return api("GET", "/admin/api/defaults").then(function (data) {
+    var prefs = data.channelPrefs, known = {}, seq = [], seen = {};
+    data.channels.forEach(function (c) { known[c.key] = c; });
+    ((prefs && prefs.order) || []).forEach(function (k) { if (!seen[k]) { seen[k] = true; seq.push(k); } });
+    data.channels.forEach(function (c) { if (!seen[c.key]) { seen[c.key] = true; seq.push(c.key); } });
+    dflt = {data: data, known: known, seq: seq, hidden: ((prefs && prefs.hidden) || []).slice(),
+      sourcesOff: ((prefs && prefs.sourcesOff) || []).slice()};
+    dfltDirty = false; dfltClearing = false;
+    renderDefaults();
+  }, function (e) { say("Výchozí kanály se nepodařilo načíst: " + e.message, true); });
+}
+function dfltMove(index, by) {
+  var seq = dflt.seq, j = index + by;
+  while (j >= 0 && j < seq.length && !dflt.known[seq[j]]) j += by;
+  if (j < 0 || j >= seq.length) return;
+  var t = seq[index]; seq[index] = seq[j]; seq[j] = t;
+  dfltDirty = true; renderDefaults();
+}
+function dfltToggle(list, value, on) {
+  var i = list.indexOf(value);
+  if (on && i < 0) list.push(value);
+  if (!on && i >= 0) list.splice(i, 1);
+  dfltDirty = true; renderDefaults();
+}
+function renderDefaults() {
+  var d = dflt.data, state = document.getElementById("defaults-state");
+  state.textContent = d.channelPrefs
+    ? "Výchozí seznam je nastavený (verze " + d.version + ", změněno " + when(d.updated) + ")."
+    : "Výchozí seznam není nastavený: televize bez vlastního seznamu mají vestavěné pořadí.";
+  if (d.dvbError) state.textContent += " Anténní kanály teď nejde načíst (" + d.dvbError + "), jejich místo v seznamu zůstává.";
+  ["ct", "dvb", "psp"].forEach(function (s) {
+    var box = document.getElementById("d-src-" + s);
+    box.checked = dflt.sourcesOff.indexOf(s) < 0;
+    box.onchange = function () { dfltToggle(dflt.sourcesOff, s, !box.checked); };
+  });
+  var box = document.getElementById("defaults-rows"), rowsShown = [];
+  box.textContent = "";
+  dflt.seq.forEach(function (k, i) { if (dflt.known[k]) rowsShown.push(i); });
+  rowsShown.forEach(function (i, n) {
+    var c = dflt.known[dflt.seq[i]], hidden = dflt.hidden.indexOf(c.key) >= 0,
+      off = dflt.sourcesOff.indexOf(c.source) >= 0;
+    var row = el("div", "drow" + (hidden ? " hidden" : "") + (off ? " off" : ""));
+    row.appendChild(el("span", "src", SOURCES[c.source]));
+    var name = el("span", "name", c.name);
+    if (off) name.appendChild(el("span", "orig", " (zdroj vypnutý)"));
+    row.appendChild(name);
+    var label = el("label"), show = el("input");
+    show.type = "checkbox"; show.checked = !hidden; show.setAttribute("aria-label", "Zobrazovat " + c.name);
+    show.addEventListener("change", function () { dfltToggle(dflt.hidden, c.key, !show.checked); });
+    label.appendChild(show); label.appendChild(document.createTextNode("zobrazovat"));
+    row.appendChild(label);
+    var arrows = el("span", "arrows"), up = el("button", null, "▲"), down = el("button", null, "▼");
+    up.disabled = n === 0; down.disabled = n === rowsShown.length - 1;
+    up.setAttribute("aria-label", "Výš: " + c.name); down.setAttribute("aria-label", "Níž: " + c.name);
+    up.addEventListener("click", function () { dfltMove(i, -1); });
+    down.addEventListener("click", function () { dfltMove(i, 1); });
+    arrows.appendChild(up); arrows.appendChild(down);
+    row.appendChild(arrows);
+    box.appendChild(row);
+  });
+  document.getElementById("defaults-dirty").textContent = dfltDirty ? "Neuložené změny" : "";
+  var clear = document.getElementById("defaults-clear");
+  clear.textContent = dfltClearing ? "Opravdu zrušit výchozí" : "Zrušit výchozí";
+  clear.className = dfltClearing ? "danger" : "";
+  clear.disabled = !d.channelPrefs;
+}
+document.getElementById("defaults-save").addEventListener("click", function () {
+  if (!dflt) return;
+  var prefs = {}, old = dflt.data.channelPrefs || {};
+  Object.keys(old).forEach(function (k) { prefs[k] = old[k]; });  // fields of a newer app stay as they came
+  prefs.order = dflt.seq.slice(); prefs.hidden = dflt.hidden.slice(); prefs.sourcesOff = dflt.sourcesOff.slice();
+  api("POST", "/admin/api/defaults", {channelPrefs: prefs}).then(function () {
+    say("Výchozí seznam kanálů je uložený.");
+  }, function (e) { say(e.message, true); }).then(loadDefaults);
+});
+document.getElementById("defaults-clear").addEventListener("click", function () {
+  if (!dfltClearing) { dfltClearing = true; renderDefaults(); return; }
+  api("POST", "/admin/api/defaults", {clear: true}).then(function () {
+    say("Výchozí seznam je zrušený, televize bez vlastního seznamu mají vestavěné pořadí.");
+  }, function (e) { say(e.message, true); }).then(loadDefaults);
 });
 
 function muxLabel(names) {

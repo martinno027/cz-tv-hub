@@ -305,6 +305,14 @@ class ProfileStore:
             return [{"id": p["id"], "name": p["name"], "created": p["created"], "updated": p["updated"],
                      "sessions": len(p["sessions"])} for p in self._profiles]
 
+    def channel_prefs(self, pid: str) -> tuple[str, Any]:
+        """(name, a copy of the profile's current ``channelPrefs``) for "Použít jako výchozí"; 404 if unknown."""
+        with self._lock:
+            profile = self._by_id(pid)
+            if profile is None:
+                raise ProfileError(404, "Profil nenalezen")
+            return profile["name"], copy.deepcopy(profile["settings"].get("channelPrefs"))
+
     def admin_create(self, name: Any, password: Any) -> str:
         """A profile with the default settings and no session (the TV signs in to it)."""
         normalized, plain = normalize_name(name), normalize_password(password)
