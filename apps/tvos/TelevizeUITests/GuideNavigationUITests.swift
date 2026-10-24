@@ -89,4 +89,30 @@ final class GuideNavigationUITests: XCTestCase {
         XCTAssertLessThan(slowest, 2, "focus took \(slowest) s to move")
         XCTAssertEqual(press(.down).row, row + 1, "down after right must go to the next row")
     }
+
+    /// "Across days": left past a row's first cell opens the previous day on the same row at that day's end (not at its
+    /// default 20:00 anchor; Samsung had that bug). The day ends at 05:00, so the detail then says "Dnes H:MM" with H < 5.
+    func testLeftPastTheFirstCellOpensThePreviousDayAtItsEnd() {
+        enterGrid()
+        let row = focused?.row ?? -1
+        var segment = focused?.segment ?? -1
+        let start = Date()
+        var crossed = false
+        while !crossed, Date().timeIntervalSince(start) < 120 {
+            remote.press(.left)
+            sleep(1)
+            let now = focused?.segment ?? -1
+            crossed = now > segment  // the previous day's last cell has a high index
+            segment = now
+        }
+        sleep(2)
+        XCTAssertTrue(crossed, "never reached the previous day")
+        XCTAssertEqual(focused?.row, row, "the same row")
+        let detail = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '  ·  Dnes ' OR label CONTAINS '  ·  Včera '")).firstMatch
+        let label = detail.label  // "ČT1  ·  Dnes 4:30–6:00  ·  …"
+        let time = label.components(separatedBy: "  ·  ")[1].split(separator: " ")[1]
+        let hour = Int(time.split(separator: ":")[0]) ?? -1
+        print("GUIDE across days: \(label)")
+        XCTAssertTrue(label.contains("Dnes") && (0...5).contains(hour), "landed at \(label), not at the day's end")
+    }
 }

@@ -43,6 +43,11 @@ final class AppModel {
     let parliament = PSPLiveMonitor()
 
     var session: PlayerSession?
+    /// The guide's programme page is on screen: it presents the player and messages instead of RootView.
+    var isProgrammePageOpen = false
+    /// Bumped once a player has stopped and saved its "Pokračovat" position (not when `session` goes nil: the
+    /// dismissal sets that before the player stops), so the programme page recomputes with the new offer.
+    private(set) var playerCloses = 0
     var alertMessage: String?
     /// UNSUPPORTED_DRM from CT: shown as a full-screen notice with "Otevřít v iVysílání".
     var drmError: CTError?
@@ -59,6 +64,11 @@ final class AppModel {
     /// "Anténa" (DVB-T2 gateway). Nil when not configured: the Anténa group is hidden.
     private(set) var gateway: GatewayConfig?
     private(set) var antenna: AntennaStore?
+    /// `/dvb/details` for the programme page (memory-only transport), and its answers for a while.
+    @ObservationIgnored private var detailsClient: DVBClient?
+    @ObservationIgnored private var detailsCache: [ProgrammeDetailsQuery: (fetchedAt: Date, details: ProgrammeDetails?)] = [:]
+    private static let detailsMaxAge: TimeInterval = 10 * 60
+    private static let detailsMaxEntries = 200
 
     init(client: CTClient = CTClient()) {
         schedules = ScheduleStore(client: client)
@@ -210,6 +220,8 @@ final class AppModel {
         if persist, config != nil { Task { await household.refresh() } }
         gateway = config
         antenna = config.map { AntennaStore(client: DVBClient(config: $0)) }
+        detailsClient = client
+        detailsCache = [:]
         images.setGateway(config)
     }
 
@@ -244,6 +256,23 @@ final class AppModel {
     func resumeOffer(recordingID: String, event: DVBEvent) -> TimeInterval? {
         let target = ResumeTarget.antenna(recordingID: recordingID, event: event)
         return resume.offer(for: target.key, length: target.length)
+    }
+
+    /// TMDb details of a programme from the gateway; nil without a gateway, for a 404 (details off, unknown
+    /// programme) and on errors (the page then shows without them). Errors are not remembered.
+    func programmeDetails(_ query: ProgrammeDetailsQuery) async -> ProgrammeDetails? {
+        guard let client = detailsClient else { return nil }
+        if let hit = detailsCache[query], Date().timeIntervalSince(hit.fetchedAt) < Self.detailsMaxAge { return hit.details }
+        do {
+            let details = try await client.details(query)
+            guard client.config == detailsClient?.config else { return nil }  // the gateway changed meanwhile
+            if detailsCache.count >= Self.detailsMaxEntries { detailsCache = [:] }
+            detailsCache[query] = (Date(), details)
+            return details
+        } catch {
+            log.info("details \(String(describing: query), privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
     }
 
     /// Live picture of an Anténa channel.
@@ -351,13 +380,20 @@ final class AppModel {
     /// Closes the player and shows `message`; directly if the player never made it on screen,
     /// otherwise after the dismissal (an alert cannot appear while the player is dismissing).
     func closePlayer(showing message: String) {
-        if isPlayerOnScreen {
+        let onScreen = isPlayerOnScreen
+        if onScreen {
             messageAfterPlayer = message
         } else {
             alertMessage = message
         }
         session?.controller.stop()
         session = nil
+        if !onScreen { playerClosed() }  // else the screen's onDisappear reports it
+    }
+
+    /// The player stopped and saved its position (PlayerScreen.onDisappear, after `controller.stop()`).
+    func playerClosed() {
+        playerCloses += 1
     }
 
     /// If the full-screen player fails to present (SwiftUI drops presentations that collide

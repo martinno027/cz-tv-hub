@@ -60,7 +60,76 @@ enum GuideEntry: Identifiable, TimedItem {
     }
 }
 
+extension GuideEntry {
+    /// The episode line: CT's episode title, the Anténa subtitle.
+    var episode: String {
+        switch self {
+        case .ct(let programme): return programme.episodeTitle
+        case .antenna(let event, _): return event.subtitle
+        case .parliament: return ""
+        }
+    }
+
+    /// The guide's description.
+    var summary: String {
+        switch self {
+        case .ct(let programme): return programme.description
+        case .antenna(let event, _): return event.description
+        case .parliament: return ""  // no programme data
+        }
+    }
+
+    var genre: String {
+        switch self {
+        case .ct(let programme): return programme.genre
+        case .antenna(let event, _): return event.genre
+        case .parliament: return ""
+        }
+    }
+
+    var source: ChannelPrefs.Source {
+        switch self {
+        case .ct: return .ct
+        case .antenna: return .dvb
+        case .parliament: return .psp
+        }
+    }
+
+    var channelName: String {
+        switch self {
+        case .ct(let programme): return Channels.bySlug(programme.channel)?.name ?? programme.channel
+        case .antenna(_, let channel): return channel.name
+        case .parliament(let stream, _, _): return stream.name
+        }
+    }
+
+    /// "Dnes 20:15–22:05": the day label as in the day strip.
+    func dayAndTime(today: BroadcastDay) -> String {
+        "\(BroadcastDay(containing: start).label(today: today)) \(Formatting.time(start))–\(Formatting.time(end))"
+    }
+
+    /// The state line of the guide detail and the programme page (not for the Chamber streams).
+    func statusText(state: ProgrammeState, now: Date) -> String {
+        guard case .antenna(let event, _) = self else { return state.statusText }
+        switch AntennaAction.decide(event, now: now) {
+        case .future: return state.statusText
+        case .airing(let recording): return recording == nil ? "Právě běží – živě" : "Právě běží – od začátku nebo živě"
+        case .recording: return "Přehrát záznam"
+        case .notRecorded: return AntennaAction.notRecordedMessage
+        }
+    }
+}
+
 extension ProgrammeState {
+    /// Colour of the state line: red on air, green when it plays from a recording or the buffer.
+    var statusColor: Color {
+        switch self {
+        case .airing: return .red
+        case .buffer, .archive: return .green
+        default: return .secondary
+        }
+    }
+
     /// The look of a Poslanecká sněmovna cell: on = airing, off = dimmed, not checked yet = future.
     init(parliament: PSPLiveState) {
         switch parliament {
@@ -203,7 +272,8 @@ struct GuideView: View {
     @State private var redirectID: String?
     @State private var defaultFocusID: String?
     @State private var scrollRequest: ScrollRequest?
-    @State private var choice: Choice?
+    /// The programme page of the selected programme (spec/apps.md "Programme page (T15)").
+    @State private var page: ProgrammePageItem?
     @FocusState private var focusedID: String?
     @FocusState private var focusedChip: BroadcastDay?
     @FocusState private var officialAppFocused: Bool
@@ -225,15 +295,6 @@ struct GuideView: View {
         let rowID: String
         /// Left past the first cell: land on the row's cell at the new day's end, else at its start.
         let atEnd: Bool
-    }
-
-    /// The "Pokračovat / Od začátku / Živě" choice for a selected programme.
-    private struct Choice {
-        let entry: GuideEntry
-        /// "Pokračovat" offer in seconds from the programme's start, if any.
-        let resumeAt: TimeInterval?
-        /// The programme is on air, so "Živě" is offered too.
-        let isAiring: Bool
     }
 
     private struct LoadKey: Equatable {
@@ -282,50 +343,13 @@ struct GuideView: View {
             keepWindow(around: current)
             prefetchImages(around: current)
         }
-        .confirmationDialog(
-            choice?.entry.title ?? "",
-            isPresented: Binding(get: { choice != nil }, set: { if !$0 { choice = nil } }),
-            titleVisibility: .visible,
-            presenting: choice
-        ) { choice in
-            // "Pokračovat" comes first, so it has the focus.
-            switch choice.entry {
-            case .ct(let programme):
-                if let channel = Channels.bySlug(programme.channel) {
-                    if let resumeAt = choice.resumeAt {
-                        Button(ResumeRules.buttonTitle(resumeAt)) {
-                            model.play(.programme(programme, channel: channel), resumeAt: resumeAt)
-                        }
-                    }
-                    Button("Od začátku") { model.play(.programme(programme, channel: channel)) }
-                    if choice.isAiring {
-                        Button("Živě") { model.play(.live(channel)) }
-                        Button(OfficialApp.buttonTitle) {
-                            OfficialApp.open { model.alertMessage = OfficialApp.fallbackMessage }
-                        }
-                    }
-                }
-            case .antenna(let event, let channel):
-                if let recordingID = Self.playableRecordingID(event) {
-                    let finished = !choice.isAiring
-                    if let resumeAt = choice.resumeAt {
-                        Button(ResumeRules.buttonTitle(resumeAt)) {
-                            model.playAntennaRecording(id: recordingID, event: event, finished: finished, resumeAt: resumeAt,
-                                                   channelName: channel.name)
-                        }
-                    }
-                    Button("Od začátku") {
-                        model.playAntennaRecording(id: recordingID, event: event, finished: finished, channelName: channel.name)
-                    }
-                }
-                if choice.isAiring {
-                    Button("Živě") { model.playAntennaLive(channel) }
-                }
-            case .parliament:
-                EmptyView()  // selected directly, never a choice
-            }
-            Button("Zrušit", role: .cancel) {}
+        // Back on the page returns here; tvOS gives focus back to the cell that opened it. The page presents the
+        // player over itself (RootView cannot present from under it).
+        .fullScreenCover(item: $page) { item in
+            ProgrammePageView(item: item, ctSchedule: schedule) { page = nil }
+                .environment(model)
         }
+        .onChange(of: page == nil) { _, closed in model.isProgrammePageOpen = !closed }
     }
 
     private func buildRows() -> [GuideRow] {
@@ -551,6 +575,12 @@ struct GuideView: View {
         liveColumn = crossing == nil && anchor == now
         prefetchPoint = nil
         if let targetID { prefetchImages(around: targetID) }
+        #if DEBUG
+        // `-openPage YES` opens the programme page of the anchor cell, for simulator screenshots.
+        if UserDefaults.standard.bool(forKey: "openPage"), page == nil, let entry = targetID.flatMap({ layout.entries[$0] }) {
+            select(entry)
+        }
+        #endif
         let tick = layout.timeline.tickIndex(for: anchor.addingTimeInterval(crossing?.atEnd == true ? -90 * 60 : -30 * 60))
         // Let the new rows lay out before scrolling.
         let rowID = anchorRow?.id == rows.first?.id ? nil : anchorRow?.id
@@ -660,55 +690,18 @@ struct GuideView: View {
         }
     }
 
+    /// A programme opens its page (every state); a Poslanecká sněmovna stream plays live at once.
     private func select(_ entry: GuideEntry) {
-        let now = Date()
         switch entry {
-        case .ct(let programme):
-            guard let channel = Channels.bySlug(programme.channel) else { return }
-            switch DecisionRules.action(for: programme, now: now) {
-            case .future:
-                model.alertMessage = CTError.notStarted
-            case .startOver where programme.isAiring(at: now):
-                choice = Choice(entry: entry, resumeAt: model.resumeOffer(for: programme), isAiring: true)
-            default:
-                if let resumeAt = model.resumeOffer(for: programme) {
-                    choice = Choice(entry: entry, resumeAt: resumeAt, isAiring: false)
-                } else {
-                    model.play(.programme(programme, channel: channel))
-                }
-            }
-        case .antenna(let event, let channel):
-            switch AntennaAction.decide(event, now: now) {
-            case .future:
-                model.alertMessage = CTError.notStarted
-            case .airing(let recordingID):
-                let resumeAt = recordingID.flatMap { model.resumeOffer(recordingID: $0, event: event) }
-                choice = Choice(entry: entry, resumeAt: resumeAt, isAiring: true)
-            case .recording(let id):
-                if let resumeAt = model.resumeOffer(recordingID: id, event: event) {
-                    choice = Choice(entry: entry, resumeAt: resumeAt, isAiring: false)
-                } else {
-                    model.playAntennaRecording(id: id, event: event, finished: true, channelName: channel.name)
-                }
-            case .notRecorded:
-                model.alertMessage = AntennaAction.notRecordedMessage
-            }
+        case .ct, .antenna:
+            page = ProgrammePageItem(entry: entry, day: day)
         case .parliament(let stream, _, _):
             // Today: live, or "Poslanecká sněmovna teď nevysílá." (no choice, no resume, no start-over).
-            if entry.isAiring(at: now) {
+            if entry.isAiring(at: Date()) {
                 model.playLive(.parliament(stream))
             } else {
                 model.alertMessage = PSPStreams.onlyLiveMessage
             }
-        }
-    }
-
-    /// The recording behind "Pokračovat" / "Od začátku" of an Anténa programme (growing or finished).
-    private static func playableRecordingID(_ event: DVBEvent) -> String? {
-        switch AntennaAction.decide(event, now: Date()) {
-        case .airing(let id): return id
-        case .recording(let id): return id
-        case .future, .notRecorded: return nil
         }
     }
 }
@@ -1054,7 +1047,7 @@ private struct EntryDetail: View {
             let live = parliamentState(entry)
             let state = live.map(ProgrammeState.init(parliament:)) ?? entry.state(at: now)
             HStack(alignment: .top, spacing: 36) {
-                artwork(entry)
+                EntryArtwork(entry: entry, ctSchedule: ctSchedule)
                     .frame(width: Self.imageSize.width, height: Self.imageSize.height)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
@@ -1062,17 +1055,18 @@ private struct EntryDetail: View {
                     Text(entry.title)
                         .font(.title3.weight(.bold))
                         .lineLimit(1)
-                    line(episode(entry))
+                    line(entry.episode)
                         .font(.subheadline)
                     line(meta(entry))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Label(live.map { parliamentText(entry, state: $0) } ?? statusText(entry, state: state), systemImage: state.symbol)
+                    Label(live.map { parliamentText(entry, state: $0) } ?? entry.statusText(state: state, now: now),
+                          systemImage: state.symbol)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                        .foregroundStyle(state == .airing ? .red : (state == .buffer || state == .archive ? .green : .secondary))
+                        .foregroundStyle(state.statusColor)
                     // An empty Text takes no height even with reservesSpace: keep the two lines with a space.
-                    Text(description(entry).isEmpty ? " " : description(entry))
+                    Text(entry.summary.isEmpty ? " " : entry.summary)
                         .font(.system(size: 25))
                         .foregroundStyle(.secondary)
                         .lineLimit(2, reservesSpace: true)
@@ -1114,8 +1108,24 @@ private struct EntryDetail: View {
         Text(text.isEmpty ? " " : text).lineLimit(1)
     }
 
-    @ViewBuilder
-    private func artwork(_ entry: GuideEntry) -> some View {
+    private func meta(_ entry: GuideEntry) -> String {
+        if case .parliament = entry { return "Zdroj: \(PSPStreams.sourceLabel)" }
+        let channel = entry.source == .dvb ? "\(entry.channelName) (anténa)" : entry.channelName
+        return [channel, entry.dayAndTime(today: today), entry.genre]
+            .filter { !$0.isEmpty }
+            .joined(separator: "  ·  ")
+    }
+}
+
+/// The image of an entry in the guide detail and on the programme page: ČT image, Anténa: matched ČT image →
+/// gateway thumbnail → antenna placeholder; a generic symbol for the Chamber streams.
+struct EntryArtwork: View {
+    let entry: GuideEntry
+    /// The day's CT schedule, for the ČT image of an Anténa ČT programme.
+    let ctSchedule: ScheduleStore.Schedule
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
         let source = GuideView.imageSource(entry, images: model.images, ctSchedule: ctSchedule)
         switch entry {
         case .ct:
@@ -1144,58 +1154,11 @@ private struct EntryDetail: View {
             }
         }
     }
-
-    private func episode(_ entry: GuideEntry) -> String {
-        switch entry {
-        case .ct(let programme): return programme.episodeTitle
-        case .antenna(let event, _): return event.subtitle
-        case .parliament: return ""
-        }
-    }
-
-    private func description(_ entry: GuideEntry) -> String {
-        switch entry {
-        case .ct(let programme): return programme.description
-        case .antenna(let event, _): return event.description
-        case .parliament: return ""  // no programme data
-        }
-    }
-
-    private func statusText(_ entry: GuideEntry, state: ProgrammeState) -> String {
-        guard case .antenna(let event, _) = entry else { return state.statusText }
-        switch AntennaAction.decide(event, now: now) {
-        case .future: return state.statusText
-        case .airing(let recording): return recording == nil ? "Právě běží – živě" : "Právě běží – od začátku nebo živě"
-        case .recording: return "Přehrát záznam"
-        case .notRecorded: return AntennaAction.notRecordedMessage
-        }
-    }
-
-    private func meta(_ entry: GuideEntry) -> String {
-        if case .parliament = entry { return "Zdroj: \(PSPStreams.sourceLabel)" }
-        let channel: String
-        let genre: String
-        switch entry {
-        case .ct(let programme):
-            channel = Channels.bySlug(programme.channel)?.name ?? programme.channel
-            genre = programme.genre
-        case .antenna(let event, let dvbChannel):
-            channel = "\(dvbChannel.name) (anténa)"
-            genre = event.genre
-        case .parliament:
-            return ""
-        }
-        let day = BroadcastDay(containing: entry.start).label(today: today)
-        let range = "\(Formatting.time(entry.start))–\(Formatting.time(entry.end))"
-        return [channel, "\(day) \(range)", genre]
-            .filter { !$0.isEmpty }
-            .joined(separator: "  ·  ")
-    }
 }
 
 /// The detail image from the guide's in-memory image store (spec/apps.md "Image prefetch"): usually prefetched,
 /// else asked for at once, ahead of the queue; the placeholder until it is there.
-private struct GuideArtwork<Placeholder: View>: View {
+struct GuideArtwork<Placeholder: View>: View {
     let source: GuideImageStore.Source?
     @ViewBuilder let placeholder: Placeholder
     @Environment(AppModel.self) private var model
