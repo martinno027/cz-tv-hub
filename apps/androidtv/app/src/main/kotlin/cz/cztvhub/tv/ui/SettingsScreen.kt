@@ -172,7 +172,8 @@ private fun SectionItem(title: String, detail: String, modifier: Modifier, onCli
 @Composable
 private fun ServerSettings(viewModel: MainViewModel) {
     val context = LocalContext.current
-    val settings = context.tvApp.dvbSettings
+    val app = context.tvApp
+    val settings = app.dvbSettings
     val configured by settings.config.collectAsState()
     val discovered by remember { GatewayDiscovery.discover(context) }.collectAsState(initial = emptyList())
     var address by remember { mutableStateOf(settings.address) }
@@ -193,6 +194,7 @@ private fun ServerSettings(viewModel: MainViewModel) {
 
         Field(stringResource(R.string.settings_address), address, stringResource(R.string.settings_address_hint)) { address = it }
         Field(stringResource(R.string.settings_key), key, "", secret = true) { key = it }
+        TailnetSettings()
 
         Text(
             if (discovered.isEmpty()) stringResource(R.string.settings_searching) else stringResource(R.string.settings_discovered),
@@ -216,9 +218,12 @@ private fun ServerSettings(viewModel: MainViewModel) {
                 val config = DvbConfig(base, key.trim())
                 settings.save(config, address.trim())
                 scope.launch {
+                    // With Tailscale on, a new address restarts the bridge and the check goes through it.
+                    app.tailnet.ready()
+                    val reached = app.route(config) ?: config
                     message = withContext(Dispatchers.IO) {
                         try {
-                            val client = DvbClient(config)
+                            val client = DvbClient(reached)
                             okTemplate.format(client.channels().size, client.status().retentionDays)
                         } catch (e: CtException) {
                             e.userMessage

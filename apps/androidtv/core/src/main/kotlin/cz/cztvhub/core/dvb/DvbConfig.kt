@@ -18,6 +18,21 @@ data class DvbConfig(val baseUrl: String, val key: String) {
 
         /** `pi`, `pi.tail1234.ts.net`, `192.168.1.5:8098`, `http://…` → `http://host:port`; null if invalid. */
         fun normalizeAddress(address: String): String? {
+            val uri = parse(address) ?: return null
+            val port = if (uri.port > 0) uri.port else if (uri.scheme == "https") 443 else DEFAULT_PORT
+            return "${uri.scheme}://${hostPart(uri.host)}:$port"
+        }
+
+        /**
+         * The same address as `host:port` for the Tailscale bridge (spec/fixtures/tailnet_cases.json "target"): the
+         * bridge speaks plain HTTP to the gateway, so the default port is [DEFAULT_PORT] whatever the scheme.
+         */
+        fun tailnetTarget(address: String): String? {
+            val uri = parse(address) ?: return null
+            return "${hostPart(uri.host)}:${if (uri.port > 0) uri.port else DEFAULT_PORT}"
+        }
+
+        private fun parse(address: String): URI? {
             val trimmed = address.trim().trimEnd('/')
             if (trimmed.isEmpty()) return null
             val withScheme = if ("://" in trimmed) trimmed else "http://$trimmed"
@@ -29,11 +44,10 @@ data class DvbConfig(val baseUrl: String, val key: String) {
             if (uri.scheme != "http" && uri.scheme != "https") return null
             val host = uri.host ?: return null
             // LAN / tailnet only, whatever the scheme (spec/dvb-gateway.md: never exposed to the internet).
-            if (!isPrivateHost(host)) return null
-            val port = if (uri.port > 0) uri.port else if (uri.scheme == "https") 443 else DEFAULT_PORT
-            val hostPart = if (':' in host && !host.startsWith("[")) "[$host]" else host
-            return "${uri.scheme}://$hostPart:$port"
+            return uri.takeIf { isPrivateHost(host) }
         }
+
+        private fun hostPart(host: String) = if (':' in host && !host.startsWith("[")) "[$host]" else host
 
         fun isPrivateHost(host: String): Boolean {
             val h = host.lowercase().trim('[', ']')

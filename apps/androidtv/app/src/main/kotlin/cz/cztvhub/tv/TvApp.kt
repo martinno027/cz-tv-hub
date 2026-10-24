@@ -9,15 +9,43 @@ import cz.cztvhub.core.PspMonitor
 import cz.cztvhub.core.ResumeStore
 import cz.cztvhub.core.ScheduleRepository
 import cz.cztvhub.core.dvb.DvbClient
+import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.dvb.DvbRepository
 import cz.cztvhub.tv.dvb.DvbSettings
+import cz.cztvhub.tv.dvb.TailnetController
 import cz.cztvhub.tv.ui.ImageCache
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 
 /** Process-wide objects; in memory only, except "Pokračovat" positions and "Kanály" (no stream URL is ever persisted). */
 class TvApp : Application() {
     val api by lazy { CtApi() }
     val schedules by lazy { ScheduleRepository(api) }
     val dvbSettings by lazy { DvbSettings(this) }
+
+    /** "Připojovat přes Tailscale": the in-app tailnet node and its bridge on 127.0.0.1. */
+    val tailnet by lazy { TailnetController(this, dvbSettings) }
+
+    /**
+     * The gateway as everything talking to it uses it (API, player, thumbnails, profile): the saved address, or the
+     * Tailscale bridge with the same key; null while the bridge is starting (no request goes around it).
+     */
+    val gateway: StateFlow<DvbConfig?> by lazy {
+        combine(dvbSettings.config, tailnet.state) { config, _ -> route(config) }
+            .stateIn(CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate), SharingStarted.Eagerly, route(dvbSettings.config.value))
+    }
+
+    /** [config] (the saved one, or one being checked in Nastavení) as reached now. */
+    fun route(config: DvbConfig?): DvbConfig? = when (val route = tailnet.state.value.route) {
+        TailnetController.Route.Direct -> config
+        TailnetController.Route.Pending -> null
+        is TailnetController.Route.Bridge -> config?.copy(baseUrl = route.baseUrl)
+    }
     val planner by lazy { Planner(api, LiveResolver(api), dvb = { dvb()?.client }) }
     val images by lazy { ImageCache() }
 
@@ -37,17 +65,27 @@ class TvApp : Application() {
     val thumbnailPrefs by lazy { ThumbnailPrefs(this) }
 
     /** "Profil": the settings above kept in a profile on the gateway while signed in. */
-    val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) }
+    val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) { gateway.value } }
 
     /** The household default channel list from the gateway, shown while signed out and the list is not the TV's own. */
     val defaults by lazy { HouseholdDefaultManager(this, this) }
 
     private var dvbRepository: DvbRepository? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        tailnet // with the switch on, the node starts before the first gateway request
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level == TRIM_MEMORY_UI_HIDDEN) tailnet.saveNow()
+    }
+
     /** Repository for the configured gateway, or null when "Anténa" is not set up. */
     @Synchronized
     fun dvb(): DvbRepository? {
-        val config = dvbSettings.config.value ?: return null.also { dvbRepository = null }
+        val config = gateway.value ?: return null.also { dvbRepository = null }
         dvbRepository?.let { if (it.client.config == config) return it }
         return DvbRepository(DvbClient(config)).also { dvbRepository = it }
     }
