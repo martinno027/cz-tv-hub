@@ -1,0 +1,209 @@
+{
+ "_doc": "Household default channel list for a TV that is not signed in (spec/apps.md 'Kanály' → 'Household default (T11)'). State: own (the TV's list is its own), local (the TV's stored prefs, a label), default (the household default from the gateway, a label or null) and version. effective = own ? local : (default ?? 'builtin'). Events: defaults (GET /dvb/defaults; applied only when version is newer; null channelPrefs = no default), change (the viewer changed the list; settings = the new list), reset (Obnovit výchozí). migrate: a TV with stored prefs from before T11.",
+ "migrate": [
+  {
+   "name": "empty stored prefs: follows the default",
+   "stored": {
+    "order": [],
+    "hidden": []
+   },
+   "own": false
+  },
+  {
+   "name": "missing sourcesOff, nothing else: follows the default",
+   "stored": {
+    "order": [],
+    "hidden": [],
+    "sourcesOff": []
+   },
+   "own": false
+  },
+  {
+   "name": "a saved order is the TV's own",
+   "stored": {
+    "order": [
+     "ct:CH_24"
+    ],
+    "hidden": []
+   },
+   "own": true
+  },
+  {
+   "name": "a hidden channel is the TV's own",
+   "stored": {
+    "order": [],
+    "hidden": [
+     "ct:CH_5"
+    ]
+   },
+   "own": true
+  },
+  {
+   "name": "a source switched off is the TV's own",
+   "stored": {
+    "order": [],
+    "hidden": [],
+    "sourcesOff": [
+     "psp"
+    ]
+   },
+   "own": true
+  }
+ ],
+ "sequences": [
+  {
+   "name": "fresh TV follows the default, a newer one replaces it, an older one does not",
+   "start": {
+    "own": false,
+    "local": "empty",
+    "default": null,
+    "version": 0
+   },
+   "steps": [
+    {
+     "event": {
+      "type": "defaults",
+      "settings": "D1",
+      "version": 1
+     },
+     "state": {
+      "own": false,
+      "local": "empty",
+      "default": "D1",
+      "version": 1
+     },
+     "effective": "D1"
+    },
+    {
+     "event": {
+      "type": "defaults",
+      "settings": "D2",
+      "version": 2
+     },
+     "state": {
+      "own": false,
+      "local": "empty",
+      "default": "D2",
+      "version": 2
+     },
+     "effective": "D2"
+    },
+    {
+     "event": {
+      "type": "defaults",
+      "settings": "D1",
+      "version": 1
+     },
+     "state": {
+      "own": false,
+      "local": "empty",
+      "default": "D2",
+      "version": 2
+     },
+     "effective": "D2"
+    },
+    {
+     "event": {
+      "type": "defaults",
+      "settings": "D3",
+      "version": 2
+     },
+     "state": {
+      "own": false,
+      "local": "empty",
+      "default": "D2",
+      "version": 2
+     },
+     "effective": "D2"
+    }
+   ]
+  },
+  {
+   "name": "a change makes the list the TV's own; the default no longer applies; reset follows it again",
+   "start": {
+    "own": false,
+    "local": "empty",
+    "default": "D1",
+    "version": 1
+   },
+   "steps": [
+    {
+     "event": {
+      "type": "change",
+      "settings": "T1"
+     },
+     "state": {
+      "own": true,
+      "local": "T1",
+      "default": "D1",
+      "version": 1
+     },
+     "effective": "T1"
+    },
+    {
+     "event": {
+      "type": "defaults",
+      "settings": "D2",
+      "version": 2
+     },
+     "state": {
+      "own": true,
+      "local": "T1",
+      "default": "D2",
+      "version": 2
+     },
+     "effective": "T1"
+    },
+    {
+     "event": {
+      "type": "reset"
+     },
+     "state": {
+      "own": false,
+      "local": "empty",
+      "default": "D2",
+      "version": 2
+     },
+     "effective": "D2"
+    }
+   ]
+  },
+  {
+   "name": "no household default: built-in order; the default cleared on /admin goes back to it",
+   "start": {
+    "own": false,
+    "local": "empty",
+    "default": "D1",
+    "version": 3
+   },
+   "steps": [
+    {
+     "event": {
+      "type": "defaults",
+      "settings": null,
+      "version": 4
+     },
+     "state": {
+      "own": false,
+      "local": "empty",
+      "default": null,
+      "version": 4
+     },
+     "effective": "builtin"
+    },
+    {
+     "event": {
+      "type": "reset"
+     },
+     "state": {
+      "own": false,
+      "local": "empty",
+      "default": null,
+      "version": 4
+     },
+     "effective": "builtin"
+    }
+   ]
+  }
+ ]
+}

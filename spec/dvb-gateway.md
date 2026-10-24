@@ -288,6 +288,33 @@ never positions ("Pokračovat"), the gateway address or key, recordings or anyth
   created`, never the password). State changes need the admin header and same-origin `Origin` as every `/admin` POST.
 - Profiles exist whenever the gateway runs (`[dvb] enabled`, the app key); no extra config key.
 
+## Household default channel list (T11, `src/cztvhub/dvb/defaults.py`)
+One channel list for the whole household that TVs **without a profile and without their own changes** use, edited
+only on `/admin` and **never linked to a profile** (approved wording of the owner, 2026-10-24: take that profile's
+current list once and keep it elsewhere as the default).
+- **Storage**: `<state_dir>/defaults.json` (atomic, `0600`): `{"channelPrefs": {"order", "hidden", "sourcesOff"},
+  "version", "updated"}` — `channelPrefs` exactly as `spec/apps.md` "Kanály" stores it (≤ 500 keys each, ≤ 64 KB).
+  No file = no household default (the apps' built-in order).
+- `GET /dvb/defaults` (app key) → `200 {"channelPrefs": {...} | null, "version": <int>, "updated": "…Z" | null}`;
+  `version` grows with every save, clear and copy: `max(previous + 1, now in epoch seconds)`, so it never goes back,
+  also when a broken `defaults.json` is set aside (a clear keeps the file with `channelPrefs: null`); 0 = never set.
+- **`/admin`, tab "Výchozí kanály"**: the list of every known channel — the six ČT channels (`channels.py`), the
+  offered Anténa channels (TVHeadend, names as on the channels tab) and the five Poslanecká sněmovna streams (a
+  server copy of the catalogue in `spec/fixtures/psp_cases.json`, test-checked equal) — in the default's order with
+  ▲/▼, a "zobrazovat" switch per row and the three source switches; **Uložit** (`POST /admin/api/defaults
+  {"channelPrefs"}`), **Zrušit výchozí** (`{"clear": true}`, back to the built-in order). Keys the gateway does not
+  know (e.g. an Anténa channel hidden in `/admin`) are kept in `order` at their place.
+  `GET /admin/api/defaults` → `{"channelPrefs", "version", "updated", "channels": [{"key", "name", "source":
+  "ct" | "dvb" | "psp"}], "dvbError": null | "…"}` (`channels` in the built-in order; without TVHeadend only ČT and
+  Sněmovna, with `dvbError`). Validation: `order` and `hidden` lists required, `sourcesOff` optional, each ≤ 500
+  strings of 1–128 characters without control characters; other fields kept as they came; `400` bad document
+  (also `{"channelPrefs": null}`), `413` over 64 KB, `503` the file could not be written; admin header and
+  same-origin `Origin` as every `/admin` POST.
+- **`/admin`, tab "Profily"**: per profile **Použít jako výchozí**: copies that profile's current `channelPrefs`
+  once into the default (`POST /admin/api/profiles/<id> {"makeDefault": true}`); later changes of the profile do not
+  touch it (`400` when the profile's `channelPrefs` is missing or invalid, `404` unknown profile). Every
+  save/clear/copy is logged (`admin: defaults: saved | cleared | copied from profile <name>`).
+
 ## EPG history (`src/cztvhub/dvb/epgstore.py`)
 The gateway remembers the EPG events it sees (every 30 min the next 3 days, plus every `/dvb/epg` answer) in
 `<state dir>/epg-history.json`: titles, times, genre only. For the not-yet-started part of a fetched window

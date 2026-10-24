@@ -25,6 +25,9 @@ of "done".
   profile or setting a new password on `/admin` ends all its sessions; unknown name and wrong password answer the same
   text after the same work; 5 failures per name lock it for a minute. *Wrong:* a profile call that works with the
   cookie alone, a session that survives "Nové heslo", a response that tells which names exist.
+- The household default channel list (`GET /dvb/defaults`) needs the app key; it is changed only on `/admin` (login,
+  admin header, same origin) and never linked to a profile. *Wrong:* an app route that writes the default, or a
+  profile change that silently changes it.
 - A feature with a missing key or password is off. *Wrong:* an empty `[admin] password` meaning "no login".
 
 ### Network
