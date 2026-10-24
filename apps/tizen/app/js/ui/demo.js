@@ -101,7 +101,152 @@
       });
     }
     if (url.indexOf('/dvb/live/') >= 0) return Promise.resolve({ status: 503, body: '{"error": "Tuner je obsazený"}' });
+    var tl = /\/dvb\/timeline\/([^/.?]+)$/.exec(url);
+    if (tl) return timeline(decodeURIComponent(tl[1]));
+    if (/\/dvb\/recording\/b[^/]+\/breaks$/.test(url)) {
+      // one break in "Zprávy" of the sample timeline (positions from its start − 30 s), to see "Přeskočit reklamu"
+      return Promise.resolve({ status: 200, body: '{"state": "done", "breaks": [{"start": 400, "end": 700}]}' });
+    }
     return Promise.resolve({ status: 200, body: '#EXTM3U' });
+  }
+
+  var TIMELINE_GROWING = /[?&]timeline=growing\b/.test(root.location.search);
+
+  /**
+   * spec/fixtures/dvb/dvb_timeline.json moved so that its window ends an hour ago (`?timeline=growing`: ends now and
+   * keeps growing); its `previous` id answers the same window 6 h earlier, whose `next` leads back.
+   */
+  function timeline(id) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', FIXTURES + 'dvb/dvb_timeline.json', true);
+      xhr.onload = function () {
+        if (xhr.status !== 200) return reject(new Error('no timeline fixture'));
+        var body = JSON.parse(xhr.responseText);
+        var last = body.pieces[body.pieces.length - 1];
+        var end = Date.parse(last.time) + last.duration * 1000;
+        var now = Date.now();
+        var delta = (TIMELINE_GROWING ? now : now - 3600 * 1000) - end;
+        if (TIMELINE_GROWING) body.complete = false;
+        if (id === body.previous) {
+          delta -= 6 * 3600 * 1000;
+          body.next = body.id;
+          body.previous = null;
+          body.id = id;
+          body.complete = true;
+        } else if (id !== body.id) {
+          return resolve({ status: 404, body: '{"error": "Nahrávka není k dispozici"}' });
+        }
+        var shiftedBody = JSON.stringify(body).replace(/"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"/g, function (_, iso) {
+          return '"' + new Date(Date.parse(iso) + delta).toISOString() + '"';
+        });
+        resolve({ status: 200, body: shiftedBody });
+      };
+      xhr.onerror = function () { reject(new Error('network')); };
+      xhr.send();
+    });
+  }
+
+  /**
+   * A simulated player for timeline targets (nothing plays in the demo): the position runs with the clock, a
+   * growing window grows with it, and the end of a finished window reports "stream completed".
+   */
+  function DemoBackend(cb) {
+    this.cb = cb;
+    this.target = null;
+    this.base = 0;
+    this.since = 0;
+    this.playing = false;
+    this.endedTimer = null;
+  }
+
+  DemoBackend.prototype.limit = function () {
+    var tl = this.target.timeline;
+    var d = CT.Timeline.duration(tl.pieces) * 1000;
+    return tl.complete ? d : d + (Date.now() - this.openedAt);
+  };
+
+  DemoBackend.prototype.open = function (target, startMs) {
+    var self = this;
+    this.close();
+    this.target = target;
+    this.openedAt = Date.now();
+    this.base = Math.max(0, startMs || 0);
+    this.since = Date.now();
+    this.playing = true;
+    this.endedTimer = setInterval(function () {
+      if (self.playing && self.target.timeline.complete && self.position() >= self.limit()) {
+        self.base = self.limit();
+        self.playing = false;
+        self.cb.onEnded();
+      }
+    }, 250);
+    setTimeout(function () { if (self.target === target) self.cb.onReady(); }, 300);
+  };
+
+  DemoBackend.prototype.close = function () {
+    clearInterval(this.endedTimer);
+    this.target = null;
+    this.playing = false;
+  };
+
+  DemoBackend.prototype.position = function () {
+    if (!this.target) return 0;
+    var p = this.base + (this.playing ? Date.now() - this.since : 0);
+    return Math.min(p, this.limit());
+  };
+
+  DemoBackend.prototype.duration = function () {
+    return this.target ? this.limit() : 0;
+  };
+
+  DemoBackend.prototype.paused = function () {
+    return !!this.target && !this.playing;
+  };
+
+  DemoBackend.prototype.togglePause = function () {
+    this.base = this.position();
+    this.since = Date.now();
+    this.playing = !this.playing;
+  };
+
+  DemoBackend.prototype.seekTo = function (ms) {
+    this.base = Math.max(0, Math.min(ms, this.limit() - (this.target.timeline.complete ? 0 : 10000)));
+    this.since = Date.now();
+  };
+
+  DemoBackend.prototype.seekBy = function (deltaMs) {
+    this.seekTo(this.position() + deltaMs);
+  };
+
+  DemoBackend.prototype.audioTracks = function () {
+    return [{ index: 1, language: 'cs' }, { index: 2, language: 'en' }, { index: 3, language: 'de' }];
+  };
+
+  DemoBackend.prototype.currentAudio = function () {
+    return this.audio || 1;
+  };
+
+  DemoBackend.prototype.selectAudio = function (index) {
+    this.audio = index;
+    return true;
+  };
+
+  /** `?demo&timeline`: opens the sample timeline on the Anténa channel named Nova once the channels are there. */
+  function afterStart(app) {
+    if (!/[?&]timeline\b/.test(root.location.search)) return;
+    var tries = 0;
+    var timer = setInterval(function () {
+      var channels = app.dvbChannels || [];
+      if (!channels.length && ++tries < 20) return;
+      clearInterval(timer);
+      var nova = channels.filter(function (c) { return /nova/i.test(c.name); })[0] || channels[0];
+      app.play({
+        kind: 'dvbRecorded', channelId: nova ? nova.id : 'nova1', title: 'Zprávy',
+        recordingId: 'bnova1-1792832400-1792834200', fromStart: true,
+        resumeKey: 'dvb:bnova1-1792832400-1792834200', lengthSeconds: 1800
+      });
+    }, 250);
   }
 
   /**
@@ -138,6 +283,8 @@
     enabled: /[?&]demo\b/.test(root.location.search),
     transport: transport,
     blobTransport: blobTransport,
+    backend: function (cb) { return new DemoBackend(cb); },
+    afterStart: afterStart,
     dvbConfig: function () {
       return new CT.DvbConfig('http://cztvhub.local:8098', KEY);
     }

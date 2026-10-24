@@ -7,10 +7,13 @@
  *           {kind: 'programme', channelId, title, idec, start, end, isPlayableNow}
  *           {kind: 'dvbLive', channelId, title}
  *           {kind: 'dvbRecorded', channelId, title, recordingId, fromStart}
+ *           (a continuous-recording id plays through the channel timeline, a TVHeadend DVR id as before)
  *           Optional on startover/programme/dvbRecorded: resumeSeconds ("Pokračovat"), and for saving the progress
  *           resumeKey (`ct:<idec>` / `dvb:<recording id>`), lengthSeconds; startover/programme also carry `start`.
- * Targets:  {url, kind: 'live' | 'timeshift' | 'vod', title, seekToWallClock, fallbackOffsetMs,
- *            startPositionMs, dvb: DvbClient | null, recordingId: finished Anténa recording | null}
+ * Targets:  {url, kind: 'live' | 'timeshift' | 'vod' | 'timeline', title, seekToWallClock, fallbackOffsetMs,
+ *            startPositionMs, dvb: DvbClient | null, recordingId: finished Anténa recording | null,
+ *            timeline: the parsed window (kind 'timeline') | null,
+ *            alwaysSeek: seek to startPositionMs even when it is 0 (a growing playlist starts at its live edge)}
  */
 (function (root) {
   'use strict';
@@ -20,7 +23,7 @@
   function target(url, kind, title, extra) {
     var t = {
       url: url, kind: kind, title: title, seekToWallClock: null, fallbackOffsetMs: 0, startPositionMs: null, dvb: null,
-      recordingId: null
+      recordingId: null, timeline: null, alwaysSeek: false
     };
     return Object.assign(t, extra || {});
   }
@@ -65,6 +68,11 @@
         return target(liveUrl, 'live', request.title, { dvb: client });
       });
     }
+    if (CT.Timeline.isTimelineId(request.recordingId)) {
+      return this.timeline(client, request.recordingId, request.title, function (tl) {
+        return CT.Timeline.openTime(tl, request.resumeSeconds);
+      });
+    }
     var url = client.recordingUrl(request.recordingId);
     var resume = request.resumeSeconds;
     return client.warmUp(url).then(function () {
@@ -72,9 +80,36 @@
       return target(url, 'vod', request.title, {
         dvb: client,
         startPositionMs: resume ? resume * 1000 : (request.fromStart ? 0 : null),
+        // "Od začátku" of a growing DVR recording: an explicit seek to 0, else AVPlay starts it live
+        alwaysSeek: !!request.fromStart && !resume,
         recordingId: request.fromStart ? null : request.recordingId
       });
     });
+  };
+
+  /**
+   * A window of the channel timeline around programme `id`, starting at the wall clock `timeAt(timeline)` mapped to
+   * its position (also for the neighbouring window, which continues at the same wall clock). AVPlay has no wall-clock
+   * seek, so the map is the only way there; the playlist's EXT-X-START is the fallback of players that skip the seek.
+   */
+  Planner.prototype.timeline = function (client, id, title, timeAt) {
+    return client.timeline(id).then(function (tl) {
+      if (!tl.id) tl.id = id;
+      var url = client.config.url(tl.playlist);
+      return client.warmUp(url).then(function () {
+        var position = CT.Timeline.toPosition(tl.pieces, timeAt(tl));
+        return target(url, 'timeline', title, {
+          dvb: client, timeline: tl, startPositionMs: Math.round(position * 1000), alwaysSeek: true
+        });
+      });
+    });
+  };
+
+  /** The neighbouring window `id` (previous/next of the playing one), continuing at the wall clock `time`. */
+  Planner.prototype.timelineWindow = function (id, title, time) {
+    var client = this.dvb();
+    if (!client) return Promise.reject(new CT.CtError('DVB not configured', CT.DvbMessages.UNREACHABLE));
+    return this.timeline(client, id, title, function () { return time; });
   };
 
   Planner.prototype.programme = function (channel, request, forceRefresh) {

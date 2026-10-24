@@ -102,11 +102,24 @@
       <video id="html5player" playsinline></video>
       <div id="player-message"></div>
       <div id="zap-box"><div id="zap-channel"></div><div id="zap-programme"></div></div>
+      <div id="audio-list"><div class="audio-title">Zvuk</div><div id="audio-list-items"></div></div>
       <div id="skip-ad">Přeskočit reklamu <span class="key">OK</span></div>
       <div id="osd">
         <div id="osd-title"></div>
         <div id="osd-subtitle"></div>
         <div id="osd-bar"><div id="osd-progress"></div></div>
+        <!-- Anténa timeline (spec/apps.md "Anténa timeline player"): the window in wall clock -->
+        <div id="tl">
+          <div id="tl-label-row"><div id="tl-label"></div></div>
+          <div id="tl-track">
+            <div id="tl-pieces"></div>
+            <div id="tl-played"></div>
+            <div id="tl-programme"></div>
+            <div id="tl-ticks"></div>
+            <div id="tl-head"></div>
+          </div>
+          <div id="tl-ends"><span id="tl-start"></span><span id="tl-end"></span></div>
+        </div>
         <div id="osd-times"><span id="osd-position"></span><span id="osd-state"></span><span id="osd-duration"></span></div>
         <div id="osd-hint"></div>
       </div>
@@ -121,6 +134,7 @@
   <script src="js/core/api.js"></script>
   <script src="js/core/layout.js"></script>
   <script src="js/core/dvb.js"></script>
+  <script src="js/core/timeline.js"></script>
   <script src="js/core/schedule.js"></script>
   <script src="js/core/planner.js"></script>
   <script src="js/core/entries.js"></script>
@@ -140,6 +154,7 @@
   <script src="js/ui/settings-store.js"></script>
   <script src="js/ui/demo.js"></script>
   <script src="js/ui/zap.js"></script>
+  <script src="js/ui/timeline.js"></script>
   <script src="js/ui/player.js"></script>
   <script src="js/ui/live.js"></script>
   <script src="js/ui/guide.js"></script>

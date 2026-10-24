@@ -18,6 +18,7 @@
   var ZAP_BOX_MS = 3000;
   var HINT_LIVE = 'OK pauza · ▲ ▼ kanál · 0–9 číslo kanálu · AUDIO zvuk · Zpět konec';
   var HINT_OTHER = 'OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · ▲ AUDIO zvuk · Zpět konec';
+  var HINT_TIMELINE = 'OK pauza · ◀ ▶ 10 s, podržet = rychleji · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk · Zpět konec';
 
   function isLive(request) {
     return !!request && (request.kind === 'live' || request.kind === 'dvbLive');
@@ -70,7 +71,8 @@
       oncurrentplaytime: function () {}
     });
     av.prepareAsync(function () {
-      if (startMs > 0) {
+      // A timeline and "Od začátku" always seek (also to 0): a growing EVENT playlist would otherwise start live.
+      if (startMs > 0 || target.alwaysSeek) {
         av.seekTo(startMs, function () {
           av.play();
           cb.onReady();
@@ -191,7 +193,7 @@
     v.style.display = 'block';
     v.src = target.url;
     v.onloadedmetadata = function () {
-      if (startMs > 0) v.currentTime = startMs / 1000;
+      if (startMs > 0 || target.alwaysSeek) v.currentTime = startMs / 1000;
       v.play();
       cb.onReady();
     };
@@ -266,6 +268,8 @@
     this.zapTimer = null;
     this.zapBoxTimer = null;
     this.numberEntry = new CT.NumberEntry(function (n) { self.zapToNumber(n); });
+    this.tl = null; // TimelineController while an Anténa timeline plays
+    this.timelineAt = null; // {id, time}: the timeline window and wall clock to continue at after re-resolving
     var cb = {
       onReady: function () {
         self.hideMessage();
@@ -276,14 +280,17 @@
         $('osd-state').textContent = on ? 'Načítání…' : '';
       },
       onEnded: function () {
-        self.close();
+        if (self.tl) self.tl.onEnded();
+        else self.close();
       },
       onError: function (what) {
         self.onError(what);
       }
     };
     var hasAvPlay = root.webapis && root.webapis.avplay;
-    this.backend = hasAvPlay ? new AvPlayBackend(cb) : new Html5Backend(cb);
+    this.backend = this.mainBackend = hasAvPlay ? new AvPlayBackend(cb) : new Html5Backend(cb);
+    // ?demo: a simulated player for timelines, so the timeline bar can be checked in a browser
+    this.demoBackend = CT.Demo.enabled ? CT.Demo.backend(cb) : null;
     $('avplayer').style.display = hasAvPlay ? 'block' : 'none';
     setInterval(function () { self.updateOsd(); self.updateTitle(); }, 1000);
     setInterval(function () { self.saveProgress(); }, RESUME_SAVE_MS);
@@ -296,6 +303,7 @@
   Player.prototype.open = function (request) {
     this.request = request;
     this.lastReResolveAt = 0;
+    this.timelineAt = null;
     // Zapping uses the list of the moment the player opened (a settings change applies next time).
     this.zapList = isLive(request) ? this.app.channelList(this.app.dvbChannels) : [];
     $('osd-hint').textContent = isLive(request) ? HINT_LIVE : HINT_OTHER;
@@ -361,10 +369,9 @@
     this.zapBoxTimer = setTimeout(function () { $('zap-box').classList.remove('visible'); }, ZAP_BOX_MS);
   };
 
-  /** Info bar text; live is re-evaluated every second against the guide data the app keeps fresh. */
-  Player.prototype.updateTitle = function () {
+  /** The playing channel's name (the request's title when the channel list does not have it). */
+  Player.prototype.channelName = function () {
     var r = this.request;
-    if (!r) return;
     var app = this.app;
     var isDvb = r.kind === 'dvbLive' || r.kind === 'dvbRecorded';
     var channel = null;
@@ -374,7 +381,15 @@
     } else {
       channel = CT.Channels.byId(r.channelId);
     }
-    var name = channel ? channel.name : r.title;
+    return channel ? channel.name : r.title;
+  };
+
+  /** Info bar text; live is re-evaluated every second against the guide data the app keeps fresh. */
+  Player.prototype.updateTitle = function () {
+    var r = this.request;
+    if (!r || this.tl) return; // the timeline bar names the programme at the playhead itself
+    var app = this.app;
+    var name = this.channelName();
     var t;
     if (r.kind === 'live') {
       t = CT.PlayerTitle.live(name, app.ctState && app.ctState.onAir ? app.ctState.onAir[r.channelId] : null, Date.now());
@@ -387,17 +402,25 @@
     if ($('osd-subtitle').textContent !== t.subtitle) $('osd-subtitle').textContent = t.subtitle;
   };
 
-  /** `resumeMs`: position to continue at after re-resolving (null = the target's own start). */
+  /**
+   * `resumeMs`: position to continue at after re-resolving (null = the target's own start). A timeline continues at
+   * the wall clock in `timelineAt` instead (positions of a re-fetched window may differ).
+   */
   Player.prototype.load = function (forceRefresh, resumeMs) {
     var self = this;
     var token = ++this.loadToken;
+    var at = this.timelineAt;
     this.stopBreaks();
     this.backend.close();
     this.showMessage('Načítání…');
-    this.app.planner.plan(this.request, forceRefresh).then(function (target) {
+    var planned = at ? this.app.planner.timelineWindow(at.id, this.request.title, at.time) :
+      this.app.planner.plan(this.request, forceRefresh);
+    planned.then(function (target) {
       if (token !== self.loadToken) return;
-      self.target = target;
+      self.useTarget(target);
       self.plannedAt = Date.now();
+      self.timelineAt = null;
+      if (self.tl) self.tl.setWindow(target.timeline);
       var start = resumeMs;
       if (start === null) {
         if (target.startPositionMs !== null) start = target.startPositionMs;
@@ -415,6 +438,47 @@
     });
   };
 
+  /** The backend for `target` and the timeline controller for a timeline; returns nothing. */
+  Player.prototype.useTarget = function (target) {
+    this.target = target;
+    var backend = target.kind === 'timeline' && this.demoBackend ? this.demoBackend : this.mainBackend;
+    if (backend !== this.backend) {
+      this.backend.close();
+      this.backend = backend;
+    }
+    if (target.kind === 'timeline') {
+      if (!this.tl) this.tl = new CT.TimelineController(this);
+      $('osd-hint').textContent = HINT_TIMELINE;
+    } else if (this.tl) {
+      this.tl.stop();
+      this.tl = null;
+    }
+  };
+
+  /** The neighbouring timeline window: plays at its mapped position, the bar stays on screen. */
+  Player.prototype.switchTarget = function (target) {
+    this.loadToken++;
+    this.stopBreaks();
+    this.useTarget(target);
+    this.plannedAt = Date.now();
+    this.timelineAt = null;
+    this.tl.setWindow(target.timeline);
+    try {
+      this.backend.open(target, target.startPositionMs);
+    } catch (e) {
+      this.onError(String(e));
+    }
+  };
+
+  /** The same target again from `ms` (a timeline after its stream completed). */
+  Player.prototype.reopen = function (ms) {
+    try {
+      this.backend.open(this.target, Math.max(0, ms));
+    } catch (e) {
+      this.onError(String(e));
+    }
+  };
+
   Player.prototype.onError = function (what) {
     if (!this.isOpen()) return;
     if (root.console) root.console.warn('playback error: ' + what);
@@ -423,6 +487,7 @@
     var now = Date.now();
     if (this.lastReResolveAt === 0 || now - this.lastReResolveAt > RE_RESOLVE_COOLDOWN_MS) {
       this.lastReResolveAt = now;
+      this.timelineAt = this.tl ? this.tl.continueAt() : null;
       this.load(true, this.resumePosition());
     } else {
       this.backend.close();
@@ -435,7 +500,7 @@
    * moment, whose offset shrinks as the buffer slides forward; live restarts at the live edge.
    */
   Player.prototype.resumePosition = function () {
-    if (!this.target) return null;
+    if (!this.target || this.target.kind === 'timeline') return null;
     var position = this.backend.position();
     if (this.target.kind === 'vod') return position;
     if (this.target.kind === 'timeshift') return Math.max(0, position - (Date.now() - this.plannedAt));
@@ -455,6 +520,9 @@
     $('zap-box').classList.remove('visible');
     this.request = null;
     this.target = null;
+    if (this.tl) this.tl.stop();
+    this.tl = null;
+    this.timelineAt = null;
     $('player').classList.add('hidden');
     this.app.onPlayerClosed(request);
   };
@@ -463,6 +531,7 @@
   Player.prototype.suspend = function () {
     if (!this.isOpen()) return;
     this.saveProgress();
+    this.timelineAt = this.tl ? this.tl.continueAt() : null;
     this.suspendedAt = this.resumePosition();
     this.loadToken++;
     this.stopBreaks();
@@ -475,6 +544,10 @@
   };
 
   Player.prototype.onKey = function (key) {
+    if (this.tl) {
+      this.tl.onKeyDown(key);
+      return;
+    }
     var live = isLive(this.request);
     var digit = CT.Keys.digit(key);
     if (digit >= 0) {
@@ -541,6 +614,11 @@
     this.showOsd();
   };
 
+  /** Key releases: the timeline player seeks on release and tells a long OK from a short one. */
+  Player.prototype.onKeyUp = function (key) {
+    if (this.tl) this.tl.onKeyUp(key);
+  };
+
   /** AUDIO/MTS or green (▲ outside live): the next broadcast audio track (Anténa renditions, spec/apps.md "Audio choice for Anténa"). */
   Player.prototype.nextAudio = function () {
     if (!this.target) return;
@@ -571,6 +649,10 @@
 
   Player.prototype.saveProgress = function () {
     if (!this.isOpen() || !this.target || this.backend.position() <= 0) return;
+    if (this.tl) {
+      this.tl.saveProgress(this.app.resumeStore);
+      return;
+    }
     var progress = this.progressSeconds();
     if (progress === null || progress < 0) return;
     this.app.resumeStore.save(this.request.resumeKey, progress, this.request.lengthSeconds);
@@ -631,6 +713,10 @@
 
   Player.prototype.showOsd = function () {
     var self = this;
+    if (this.tl) {
+      this.tl.showBar();
+      return;
+    }
     $('osd').classList.add('visible');
     this.updateOsd();
     clearTimeout(this.osdTimer);
@@ -640,7 +726,7 @@
   };
 
   Player.prototype.updateOsd = function () {
-    if (!this.isOpen() || !this.target) return;
+    if (!this.isOpen() || !this.target || this.tl) return;
     var live = this.target.kind === 'live';
     var position = this.backend.position();
     var duration = this.backend.duration();

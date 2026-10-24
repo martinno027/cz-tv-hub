@@ -52,4 +52,11 @@ test('only finished Anténa recordings carry a recording id for breaks', async (
   assert.equal(growing.recordingId, null);
   const live = await planner.plan({ kind: 'dvbLive', channelId: 'c', title: 't' });
   assert.equal(live.recordingId, null);
+  // "Od začátku" of a growing DVR recording seeks to 0 explicitly; a finished one and live do not need to
+  assert.equal(growing.startPositionMs, 0);
+  assert.equal(growing.alwaysSeek, true);
+  assert.equal(finished.alwaysSeek, false);
+  assert.equal(live.alwaysSeek, false);
+  const resumed = await planner.plan({ kind: 'dvbRecorded', channelId: 'c', title: 't', recordingId: 'r1', fromStart: true, resumeSeconds: 90 });
+  assert.equal(resumed.startPositionMs, 90000);
 });

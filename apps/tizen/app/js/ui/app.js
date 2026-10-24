@@ -95,6 +95,10 @@
 
       CT.Keys.register();
       document.addEventListener('keydown', function (e) { self.onKeyDown(e); });
+      document.addEventListener('keyup', function (e) {
+        var key = CT.Keys.name(e);
+        if (key && self.player.isOpen()) self.player.onKeyUp(key);
+      });
       document.addEventListener('visibilitychange', function () {
         if (document.hidden) {
           self.player.suspend();
@@ -116,6 +120,7 @@
       setInterval(function () { self.refresh(); }, REFRESH_MS);
       setInterval(function () { self.tick(); }, 1000);
       this.tick();
+      if (CT.Demo.enabled) CT.Demo.afterStart(this);
     },
 
     /** The UI is laid out for 1920×1080 (the TV); a desktop browser window scales it to fit. */
