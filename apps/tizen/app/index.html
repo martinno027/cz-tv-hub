@@ -51,6 +51,10 @@
             <div class="choice-title">Kanály</div>
             <div class="choice-detail">Které kanály se zobrazují v Živě a v TV průvodci, a v jakém pořadí</div>
           </div>
+          <div class="choice" data-section="profile">
+            <div class="choice-title">Profil</div>
+            <div id="profile-choice-detail" class="choice-detail">Nepřihlášen</div>
+          </div>
           <div class="choice" data-section="server">
             <div class="choice-title">Server</div>
             <div class="choice-detail">Brána Anténa (DVB-T2) na Raspberry Pi: adresa a klíč</div>
@@ -60,9 +64,34 @@
         <div id="set-section-channels" class="set-section">
           <h1 class="page-title">Kanály</h1>
           <p class="hint">Které kanály a v jakém pořadí tato televize ukazuje v Živě a v TV průvodci. Internetové a
-            anténní kanály jdou libovolně promíchat. OK na názvu kanál skryje nebo zobrazí, ▲ ▼ ho posunou. Platí jen
-            pro tuto televizi.</p>
+            anténní kanály jdou libovolně promíchat. OK na názvu kanál skryje nebo zobrazí, ▲ ▼ ho posunou.
+            <span id="set-channels-scope">Platí jen pro tuto televizi.</span></p>
           <div id="set-channels"></div>
+        </div>
+
+        <div id="set-section-profile" class="set-section">
+          <h1 class="page-title">Profil</h1>
+          <p class="hint">Nastavení kanálů a náhledů uložené v profilu na bráně Raspberry: po přihlášení platí na
+            každé televizi s tímto profilem. Rozkoukané pořady („Pokračovat“) zůstávají na každé televizi zvlášť.</p>
+          <div id="pf-none" class="hint"></div>
+          <div id="pf-out">
+            <div class="buttons">
+              <div id="pf-mode-login" class="button">Přihlásit se</div>
+              <div id="pf-mode-create" class="button">Vytvořit profil</div>
+            </div>
+            <label class="field">Jméno<input id="pf-name" type="text" autocomplete="off" spellcheck="false"></label>
+            <label class="field">Heslo<input id="pf-password" type="password" autocomplete="off"
+              spellcheck="false"></label>
+            <label id="pf-again-field" class="field">Heslo znovu<input id="pf-again" type="password"
+              autocomplete="off" spellcheck="false"></label>
+            <div class="buttons"><div id="pf-submit" class="button">Přihlásit</div></div>
+          </div>
+          <div id="pf-in">
+            <div id="pf-signed"></div>
+            <div id="pf-state"></div>
+            <div class="buttons"><div id="pf-logout" class="button">Odhlásit</div></div>
+          </div>
+          <div id="pf-message"></div>
         </div>
 
         <div id="set-section-server" class="set-section">
@@ -148,6 +177,7 @@
   <script src="js/core/player-title.js"></script>
   <script src="js/core/channel-numbers.js"></script>
   <script src="js/core/psp.js"></script>
+  <script src="js/core/profile.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
   <!-- Optional, written only into the build by build.py (version, build number, commit, build time). -->

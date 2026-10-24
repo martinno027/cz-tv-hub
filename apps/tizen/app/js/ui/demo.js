@@ -6,6 +6,9 @@
  * Poslanecká sněmovna: synthetic playlists (stream 1 on, the others "not processed now" 404), and playback gets a
  * local URL that does not exist, so the demo never contacts the Chamber's CDN.
  * `?demo&psp=13` = streams 1 and 3 on; `?demo&psp=0` = none on.
+ * "Profil": an in-memory fake of the gateway's profile API (forgotten on reload, so a TV signed in before the reload
+ * gets the 401 path); profile "Demo" with password "1234" exists (ČT2 hidden, thumbnails off).
+ * `?demo&profile=offline` = reading and saving a profile fail as if the gateway were down (login still works).
  */
 (function (root) {
   'use strict';
@@ -90,8 +93,75 @@
     return { status: response.status, body: body };
   }
 
+  var PROFILE_OFFLINE = /[?&]profile=offline\b/.test(root.location.search);
+  var profiles = [{ name: 'Demo', password: '1234', version: 1, tokens: [],
+    settings: { v: 1, channelPrefs: { order: [], hidden: ['ct:CH_2'], sourcesOff: [] }, thumbnails: false } }];
+  var loginFailures = {}; // name key → [times]
+  var tokenCount = 0;
+
+  function answer(status, body) {
+    return new Promise(function (resolve) {
+      setTimeout(function () { resolve({ status: status, body: body === null ? '' : JSON.stringify(body) }); }, 300);
+    });
+  }
+
+  function profileByKey(key) {
+    return profiles.filter(function (p) { return CT.Profile.nameKey(p.name) === key; })[0] || null;
+  }
+
+  function signedInAnswer(p, status) {
+    var token = 'demo-token-' + (++tokenCount);
+    p.tokens.push(token);
+    return answer(status, { token: token, name: p.name, settings: p.settings, version: p.version });
+  }
+
+  /** The gateway's /dvb/profiles… routes (spec/dvb-gateway.md "Profiles"), with its Czech error texts. */
+  function profileApi(request) {
+    var url = request.url;
+    var body = CT.Json.parse(request.body || '') || {};
+    var token = (request.headers || {})['X-Cztvhub-Profile'];
+    var owner = profiles.filter(function (p) { return p.tokens.indexOf(token) >= 0; })[0] || null;
+    if (/\/dvb\/profiles$/.test(url) && request.method === 'POST') {
+      var name = CT.Profile.normalizeName(body.name);
+      if (name === null || !CT.Profile.validPassword(body.password)) return answer(400, { error: 'Neplatné jméno nebo heslo' });
+      if (profileByKey(CT.Profile.nameKey(name))) return answer(409, { error: 'Profil s tímto jménem už existuje' });
+      if (profiles.length >= 20) return answer(507, { error: 'Profilů je už 20, další se nevejde' });
+      var created = { name: name, password: body.password, version: 1, tokens: [], settings: body.settings || { v: 1 } };
+      profiles.push(created);
+      return signedInAnswer(created, 201);
+    }
+    if (/\/dvb\/profiles\/login$/.test(url) && request.method === 'POST') {
+      var key = CT.Profile.nameKey(body.name) || '';
+      var now = Date.now();
+      var recent = (loginFailures[key] || []).filter(function (t) { return now - t < 10 * 60 * 1000; });
+      loginFailures[key] = recent;
+      if (recent.length >= 5 && now - recent[recent.length - 1] < 60 * 1000) {
+        return answer(429, { error: 'Příliš mnoho pokusů, zkuste to za minutu' });
+      }
+      var p = profileByKey(key);
+      if (!p || p.password !== body.password) {
+        recent.push(now);
+        return answer(401, { error: 'Nesprávné jméno nebo heslo' });
+      }
+      return signedInAnswer(p, 200);
+    }
+    if (!owner) return answer(401, { error: 'Profil byl odhlášen', code: 'profileSignedOut' });
+    if (/\/dvb\/profile\/logout$/.test(url)) {
+      owner.tokens = owner.tokens.filter(function (t) { return t !== token; });
+      return answer(204, null);
+    }
+    if (PROFILE_OFFLINE) return Promise.reject(new Error('network error'));
+    if (request.method === 'PUT') {
+      owner.settings = body.settings;
+      owner.version += 1;
+      return answer(200, { version: owner.version, updated: new Date().toISOString() });
+    }
+    return answer(200, { name: owner.name, settings: owner.settings, version: owner.version, updated: new Date().toISOString() });
+  }
+
   function transport(request) {
     var url = request.url;
+    if (/\/dvb\/profiles?(\/|$)/.test(url)) return profileApi(request);
     if (url.indexOf('pspcr-ott-live.ssl.cdn.cra.cz') >= 0) {
       return new Promise(function (resolve) { setTimeout(function () { resolve(pspPlaylist(url)); }, 300); });
     }
@@ -304,6 +374,8 @@
     blobTransport: blobTransport,
     backend: function (cb) { return new DemoBackend(cb); },
     afterStart: afterStart,
+    /** The fake gateway's profiles, to play "another TV" from the browser console (change settings, version += 1). */
+    profiles: profiles,
     /** Playback URL of a Chamber stream in the demo: local and absent (nothing plays, nothing leaves the PC). */
     pspPlayUrl: function (stream) {
       return 'demo-psp-' + stream.id + '.m3u8';

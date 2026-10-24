@@ -9,6 +9,7 @@
   var TABS = ['live', 'guide', 'settings'];
   var REFRESH_MS = 30 * 1000;
   var PSP_TICK_MS = 1000;
+  var PROFILE_RETRY_MS = 60 * 1000;
 
   function $(id) {
     return document.getElementById(id);
@@ -74,6 +75,7 @@
     dvbState: null,
     dialog: null,
     channelPrefs: null,
+    profile: null, // "Profil" (CT.Profile.ProfileSync)
     dvbThumbs: false, // the gateway has thumbnails on (from /dvb/status)
     images: null, // guide images (CT and gateway thumbnails), memory only
 
@@ -104,9 +106,12 @@
       };
       this.resumeStore = new CT.ResumeStore(localBackend('cztvhub.resume'));
       this.channelPrefs = CT.ChannelPrefsStore.load();
+      this.profile = this.makeProfile();
       this.player = new CT.Player(this);
       this.numberEntry = new CT.NumberEntry(function (n) { self.playNumber(n); });
       this.setDvbConfig(CT.Demo.enabled ? CT.Demo.dvbConfig() : CT.SettingsStore.config(), true);
+      this.profile.sync(); // app start: send what is pending, else read another TV's change
+      setInterval(function () { self.profile.retry(); }, PROFILE_RETRY_MS);
 
       CT.Keys.register();
       document.addEventListener('keydown', function (e) { self.onKeyDown(e); });
@@ -138,6 +143,42 @@
       this.tick();
       this.pspTick();
       if (CT.Demo.enabled) CT.Demo.afterStart(this);
+    },
+
+    /**
+     * "Profil": the stores always hold the active settings (this TV's or the profile's); ProfileSync keeps this TV's
+     * own aside while signed in and sends every change to the gateway.
+     */
+    makeProfile: function () {
+      var self = this;
+      return new CT.Profile.ProfileSync({
+        store: CT.ProfileStore,
+        client: function () {
+          return self.dvbConfig ? new CT.Profile.ProfileClient(self.dvbConfig, self.transport) : null;
+        },
+        current: function () {
+          return { channelPrefs: self.channelPrefs, thumbnails: CT.ThumbsSwitch.on() };
+        },
+        apply: function (settings) { self.applySettings(settings); },
+        onChange: function () {
+          if (self.tab === 'settings') self.screens.settings.renderProfile();
+        },
+        onSignedOut: function () {
+          self.toast(CT.Profile.MESSAGES.SIGNED_OUT);
+          self.screens.settings.profileSignedOut();
+        }
+      });
+    },
+
+    /** Other settings become this TV's current ones (signing in or out, another TV changed the profile). */
+    applySettings: function (settings) {
+      this.channelPrefs = settings.channelPrefs;
+      CT.ChannelPrefsStore.save(settings.channelPrefs);
+      CT.ThumbsSwitch.set(settings.thumbnails);
+      this.renderLive();
+      this.screens.guide.reload();
+      this.screens.guide.refreshDetail();
+      if (this.tab === 'settings') this.screens.settings.renderThumbs();
     },
 
     /**
@@ -338,12 +379,13 @@
       this.playItem(list[number - 1]);
     },
 
-    /** Stores new "Kanály" prefs and redraws Živě and the guide. */
+    /** Stores new "Kanály" prefs and redraws Živě and the guide; signed in, they go to the profile too. */
     setChannelPrefs: function (prefs) {
       this.channelPrefs = prefs;
       CT.ChannelPrefsStore.save(prefs);
       this.renderLive();
       this.screens.guide.reload();
+      this.profile.changed();
     },
 
     showTab: function (tab) {
@@ -356,6 +398,7 @@
       });
       var screen = this.screens[tab];
       if (screen.show) screen.show();
+      if (tab === 'settings') this.profile.sync(); // Nastavení opens: pending sent, else another TV's change read
       this.applyFocus();
     },
 

@@ -71,6 +71,9 @@ zvolený den; nic se nepřehrává. Přenosy Poslanecké sněmovny jsou v ukázc
 `?demo&psp=13` = vysílají 1 a 3), na CDN sněmovny se ukázka nikdy neptá. Ovládání: šipky, Enter, Esc/Backspace = Zpět, PageUp/PageDown = o stránku řádků.
 `?demo&timeline` rovnou otevře lištu anténní nahrávky nad `spec/fixtures/dvb/dvb_timeline.json` (přehrávání jen
 simulované, poloha běží s hodinami), `?demo&timeline=growing` totéž pro ještě rostoucí okno („Teď“).
+Nastavení → Profil mluví v ukázce s vymyšlenou bránou v paměti (profil **Demo**, heslo **1234**); po obnovení
+stránky brána profily zapomene, takže přihlášená ukázka projde odhlášením (401). `?demo&profile=offline` = čtení
+a ukládání profilu selže jako při nedostupné bráně (stav „Čeká na uložení“).
 
 ## Instalace do televize (bez obchodu Samsung)
 

@@ -9,6 +9,7 @@
   var KEY = 'cztvhub.dvb';
   var PREFS_KEY = 'cztvhub.channelPrefs';
   var THUMBS_KEY = 'cztvhub.thumbs'; // only this TV's switch; the images themselves are never stored
+  var PROFILE_KEY = 'cztvhub.profile'; // "Profil": name, session token, settings documents; never the password
 
   function read() {
     try {
@@ -78,7 +79,32 @@
     }
   };
 
-  /** "Kanály": hidden channels and their order, on this TV only (spec/apps.md). */
+  /**
+   * "Profil" next to the gateway key (spec/apps.md): {name, token, version, pending, active, local} while signed in
+   * (ProfileSync), nothing when signed out. The channel prefs and the thumbnails switch above always hold the active
+   * settings; `local` keeps this TV's own ones aside while signed in.
+   */
+  CT.ProfileStore = {
+    load: function () {
+      try {
+        var raw = root.localStorage.getItem(PROFILE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    save: function (saved) {
+      try {
+        if (saved) root.localStorage.setItem(PROFILE_KEY, JSON.stringify(saved));
+        else root.localStorage.removeItem(PROFILE_KEY);
+      } catch (e) {
+        // See SettingsStore.save(): signed in until the app closes.
+      }
+    }
+  };
+
+  /** "Kanály": hidden channels and their order on this TV (the profile's while signed in; spec/apps.md). */
   CT.ChannelPrefsStore = {
     load: function () {
       try {
