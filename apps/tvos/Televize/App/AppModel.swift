@@ -11,6 +11,8 @@ struct PlayerSession: Identifiable {
     let controller: PlayerController
     /// Live only: ▲/▼ and digits switch channels (spec/apps.md "Channel numbers and zapping").
     var zapper: ChannelZapper?
+    /// A `b…` recording in its channel's timeline (spec/apps.md "Anténa timeline player"): own bar and keys.
+    var timeline: TimelineController?
 }
 
 /// What playing a channel live needs: a fresh source (also after a failure) and the info bar title.
@@ -170,6 +172,10 @@ final class AppModel {
     func playAntennaRecording(id: String, event: DVBEvent, finished: Bool, resumeAt: TimeInterval? = nil,
                               channelName: String? = nil) {
         guard let client = antenna?.client else { return }
+        if TimelineIDs.isContinuous(id) {
+            playAntennaTimeline(id: id, event: event, resumeAt: resumeAt, channelName: channelName, client: client)
+            return
+        }
         let url = client.recordingURL(id: id)
         let title = event.title
         var adBreaks: (@Sendable () async throws -> [AdBreak])?
@@ -181,14 +187,30 @@ final class AppModel {
         }
     }
 
+    /// A continuous-recording programme (`b…`, airing or ended) in its channel's timeline: "Od začátku" at the
+    /// programme start − 30 s, "Pokračovat" at start + progress, through the window's map.
+    private func playAntennaTimeline(id: String, event: DVBEvent, resumeAt: TimeInterval?, channelName: String?,
+                                     client: DVBClient) {
+        let timeline = TimelineController(
+            client: client, programmeID: id,
+            startTime: TimelineRules.startTime(programmeStart: event.start, resumeAt: resumeAt),
+            channelName: channelName ?? event.title
+        )
+        open(progressAt: { [weak timeline] position in timeline?.progress(at: position) },
+             title: .programme(event.title, channel: channelName, episode: event.subtitle), timeline: timeline) {
+            try await timeline.resolve()
+        }
+    }
+
     private static func prepare(_ client: DVBClient, url: URL, title: String, mode: PlaybackSource.Mode) async throws -> PlaybackSource {
         try await client.preparePlaylist(url)
         return PlaybackSource(url: url, title: title, mode: mode, headers: client.config.authorizationHeaders)
     }
 
     private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil, resumeTarget: ResumeTarget? = nil,
+                      progressAt: (@MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)? = nil,
                       title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
-                      zapFrom channel: MixedChannel? = nil, _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
+                      timeline: TimelineController? = nil, zapFrom channel: MixedChannel? = nil, _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
             log.info("play ignored: still resolving the previous selection")
             return
@@ -206,9 +228,14 @@ final class AppModel {
                 log.info("resolved \(source.title, privacy: .public) mode=\(String(describing: source.mode), privacy: .public) host=\(source.url.host() ?? "", privacy: .public)")
                 let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks,
                                                   progress: resumeTarget.map { ($0, resume) },
+                                                  progressAt: progressAt.map { (resume, $0) },
                                                   title: title, liveTitle: liveTitle)
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
                 var session = PlayerSession(controller: controller)
+                if let timeline {
+                    timeline.attach(controller)
+                    session.timeline = timeline
+                }
                 if let channel, source.mode == .live {
                     // The list as it is now (kept current by the main screens); a settings change applies to
                     // the next player. Only a first start without it waits for the list in the background.
@@ -320,11 +347,11 @@ extension AppModel {
                 if case .recording(let id) = AntennaAction.decide(event, now: now) { return (event, id) }
                 return nil
             }
-            if let (event, id) = recorded.last { playAntennaRecording(id: id, event: event, finished: true) }
+            if let (event, id) = recorded.last { playAntennaRecording(id: id, event: event, finished: true, channelName: channel.name) }
         case "dvbstartover":
             for event in events {
                 if case .airing(let id?) = AntennaAction.decide(event, now: now) {
-                    playAntennaRecording(id: id, event: event, finished: false)
+                    playAntennaRecording(id: id, event: event, finished: false, channelName: channel.name)
                 }
             }
         default:
