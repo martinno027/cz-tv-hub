@@ -1,21 +1,27 @@
 import CTCore
 import SwiftUI
 
-/// "Nastavení": a choice of two sections, "Kanály" (channels shown on this TV) and "Server" (the DVB-T2
-/// gateway). The chosen one opens full screen; the remote's Menu/‹ returns to the choice (spec/apps.md).
+/// "Nastavení": a choice of three sections, "Kanály" (channels shown on this TV), "Profil" (settings in a profile on
+/// the gateway) and "Server" (the DVB-T2 gateway). The chosen one opens full screen; the remote's Menu/‹ returns to the
+/// choice (spec/apps.md).
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case channels = "Kanály"
+        case profile = "Profil"
         case server = "Server"
         var id: String { rawValue }
 
-        var detail: String {
+        @MainActor
+        func detail(_ model: AppModel) -> String {
             switch self {
             case .channels: "Které kanály se zobrazují v Živě a v TV průvodci, a v jakém pořadí"
+            case .profile: model.profile.profileName.map { "Přihlášen: \($0)" } ?? "Nepřihlášen"
             case .server: "Brána Anténa (DVB-T2) na Raspberry Pi: adresa a klíč"
             }
         }
     }
+
+    @Environment(AppModel.self) private var model
 
     @State private var open: Section?
     /// Focus returns to the item of the section just closed.
@@ -34,7 +40,7 @@ struct SettingsView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(section.rawValue).font(.title2.weight(.bold))
-                        Text(section.detail).font(.callout).foregroundStyle(.secondary)
+                        Text(section.detail(model)).font(.callout).foregroundStyle(.secondary)
                     }
                     .padding(32)
                     .frame(width: 1000, alignment: .leading)
@@ -48,11 +54,13 @@ struct SettingsView: View {
             SettingsPage(section: section)
                 .onAppear { lastOpened = section }
         }
+        // Nastavení opens: a pending profile change is sent, a newer profile version applied.
+        .task { await model.profile.refresh() }
         #if DEBUG
-        // `-settingsSection channels|server` opens that section, for simulator screenshots.
+        // `-settingsSection channels|profile|server` opens that section, for simulator screenshots.
         .onAppear {
             if let raw = UserDefaults.standard.string(forKey: "settingsSection") {
-                open = raw == "server" ? .server : .channels
+                open = Section.allCases.first { "\($0)" == raw } ?? .channels
             }
         }
         #endif
@@ -71,6 +79,8 @@ private struct SettingsPage: View {
             switch section {
             case .channels:
                 ChannelSettingsSection()
+            case .profile:
+                ProfileSettingsSection()
             case .server:
                 ServerSettingsSection()
             }

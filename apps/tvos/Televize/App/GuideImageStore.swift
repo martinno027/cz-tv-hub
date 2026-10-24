@@ -45,10 +45,15 @@ final class GuideImageStore {
     /// This TV's switch "Náhledy anténních pořadů" (Nastavení → Server), default on.
     var tvAllows: Bool {
         didSet {
+            guard tvAllows != oldValue else { return }
             UserDefaults.standard.set(tvAllows, forKey: Self.tvSwitchKey)
             if !tvAllows { clearThumbnails() }
+            if !isApplying { onTVSwitchChange(tvAllows) }
         }
     }
+    /// The viewer flipped the switch (not `applyTVSwitch`): signed in to a profile it is sent to the gateway.
+    @ObservationIgnored var onTVSwitchChange: (Bool) -> Void = { _ in }
+    @ObservationIgnored private var isApplying = false
     /// Bumped when the wanted (focused) image is ready, so the detail shows it.
     private(set) var revision = 0
 
@@ -65,6 +70,13 @@ final class GuideImageStore {
 
     init() {
         tvAllows = UserDefaults.standard.object(forKey: Self.tvSwitchKey) as? Bool ?? true
+    }
+
+    /// The switch from a profile (or the TV's own coming back); not reported to `onTVSwitchChange`.
+    func applyTVSwitch(_ value: Bool) {
+        isApplying = true
+        tvAllows = value
+        isApplying = false
     }
 
     /// New (or no) gateway: forget its thumbnails and ask it again.
