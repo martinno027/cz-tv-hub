@@ -21,6 +21,10 @@ of "done".
 - The worker key reaches only the worker routes. *Wrong:* the worker key can list channels or play live.
 - `/admin` requires its own password; state-changing requests require the `X-Cztvhub-Admin` header and a same-origin
   `Origin`. *Wrong:* a POST that works from a foreign page, or the admin password equal to the app key.
+- Profiles (`/dvb/profile*`) need the app key as a header (not the cookie) plus a valid session token; deleting a
+  profile or setting a new password on `/admin` ends all its sessions; unknown name and wrong password answer the same
+  text after the same work; 5 failures per name lock it for a minute. *Wrong:* a profile call that works with the
+  cookie alone, a session that survives "Nové heslo", a response that tells which names exist.
 - A feature with a missing key or password is off. *Wrong:* an empty `[admin] password` meaning "no login".
 
 ### Network
@@ -41,6 +45,9 @@ of "done".
 
 - Keys and passwords only in `/etc/cztvhub/cztvhub.conf` (0600, user `cztvhub`) and the platform keychains / encrypted
   prefs on the TVs. *Wrong:* a key in a log line, a URL, a playlist, a committed file or a screenshot in the repo.
+- Profile passwords only as PBKDF2-SHA256 (200 000 iterations, salt per profile) and session tokens only as SHA-256
+  in `profiles.json` (0600, atomic writes); the TVs keep only the profile name and token in secure storage, never the
+  password. *Wrong:* a password or token in a log line, in `profiles.json` in clear, or in the TV's plain preferences.
 - The apps send the key only to the gateway: a path taken from a gateway response (the timeline's `playlist`) is
   accepted only as a gateway path (`/…`, not `//…` or a full URL). *Wrong:* a client that follows any URL with the
   key in a header or cookie.
@@ -50,7 +57,8 @@ of "done".
 ### Robustness
 
 - Input from TVHeadend, CT and the apps is parsed defensively; sizes are capped (request bodies, thumbnail reads,
-  bulk admin requests). *Wrong:* an unbounded read or a crash on an unexpected field.
+  bulk admin requests, profile documents 64 KB, 20 profiles, 10 sessions each; JSON with NaN, lone surrogates or deep
+  nesting is refused). *Wrong:* an unbounded read or a crash on an unexpected field.
 - Irreversible admin actions are logged (who/what/result). *Wrong:* recordings deleted without a log line.
 
 ## Runs

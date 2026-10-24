@@ -248,6 +248,46 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   Select-all, the bulk buttons and "Zkrátit názvy" act only on visible channels; a filter change drops the selection
   of channels it hides.
 
+## Profiles (T08, `src/cztvhub/dvb/profiles.py`)
+A household member can keep the TV apps' settings in a **profile** on the Pi and load them on any TV by signing in
+with name + password. Only settings travel (channel order/hidden/sources and the other Nastavení switches, below),
+never positions ("Pokračovat"), the gateway address or key, recordings or anything about viewing.
+- **Storage**: `<state_dir>/profiles.json` (written atomically, `0600`, user `cztvhub`), at most **20 profiles**.
+  Per profile: `name` (as typed, trimmed), the password as **PBKDF2-HMAC-SHA256** (`hashlib.pbkdf2_hmac`, random
+  16-byte salt, 200 000 iterations, both stored), `settings` (the document below), `version` (integer, +1 per
+  save), `created`, `updated`, and **sessions**: at most 10 per profile (the oldest dropped), each only the SHA-256
+  of its token plus `created`/`lastUsed`. No password or token is ever stored or logged in clear.
+- **Name**: 1–32 characters after trimming, no control characters; unique ignoring case and diacritics
+  ("Jana" = "jána"). **Password**: 4–64 characters (a TV remote types slowly; this is a household, not the internet).
+- **Settings document** (version 1, ≤ 64 KB, else `413`): `{"v": 1, "channelPrefs": {"order": [...], "hidden":
+  [...], "sourcesOff": [...]}, "thumbnails": true}` — `channelPrefs` exactly as `spec/apps.md` "Kanály" stores it,
+  `thumbnails` = the TV switch "Náhledy anténních pořadů". The gateway checks only the shape (object, the size, `v`)
+  and stores the rest as it came, so a newer app can add fields an older one keeps (apps keep unknown fields).
+- **API** (all `/dvb/*`: the app key is required first, here only as the `Authorization: Bearer` header — the
+  cookie alone gets `403`, so a foreign web page cannot use the TV's cookie; the worker key gets `403`). Passwords are
+  NFC-normalised when set and at login (TV keyboards may send a decomposed "á"); login attempts for one name run one
+  at a time and an unknown name costs the same PBKDF2 work as a wrong password; at most 2 PBKDF2 at once; the
+  session dropped at the 11th sign-in is the one unused longest. The session token goes in the
+  header `X-Cztvhub-Profile: <token>` (fetch/XHR on every platform; AVPlay never needs it).
+  - `POST /dvb/profiles` `{"name", "password", "settings"}` → `201 {"token", "name", "settings", "version"}`;
+    `409 {"error": "Profil s tímto jménem už existuje"}`, `400` bad name/password/settings, `507` 20 profiles already.
+  - `POST /dvb/profiles/login` `{"name", "password"}` → `200 {"token", "name", "settings", "version"}`; wrong name
+    or password → `401 {"error": "Nesprávné jméno nebo heslo"}` (the same text for both). After **5 failures in 10
+    minutes** for one name, further attempts for that name answer `429 {"error": "Příliš mnoho pokusů, zkuste to za
+    minutu"}` with `Retry-After: 60` for one minute (in memory; a restart forgets it).
+  - `GET /dvb/profile` → `{"name", "settings", "version", "updated"}`; `PUT /dvb/profile` `{"settings"}` →
+    `{"version", "updated"}` (last write wins; the apps re-read on start and when Nastavení opens);
+    `POST /dvb/profile/logout` → `204` (deletes this session only).
+  - A missing, unknown or revoked token → `401 {"error": "Profil byl odhlášen", "code": "profileSignedOut"}`
+    (no `WWW-Authenticate`). The apps sign out locally **only on this `code`**: a 401 of the app key (wrong or changed
+    gateway key, `WWW-Authenticate: Bearer`, no such code) is shown as a gateway error and keeps the profile.
+  - Request bodies are capped (64 KB settings, 1 KB login), JSON only; times ISO-8601 UTC.
+- **`/admin` tab "Profily"**: name, created, last change, number of signed-in TVs; **Smazat** (with its sessions)
+  and **Nové heslo** (sets a password typed by the admin and ends all sessions of that profile); **Nový profil**
+  (name + password, default settings). Each of these is logged (`admin: profile <name>: deleted | new password |
+  created`, never the password). State changes need the admin header and same-origin `Origin` as every `/admin` POST.
+- Profiles exist whenever the gateway runs (`[dvb] enabled`, the app key); no extra config key.
+
 ## EPG history (`src/cztvhub/dvb/epgstore.py`)
 The gateway remembers the EPG events it sees (every 30 min the next 3 days, plus every `/dvb/epg` answer) in
 `<state dir>/epg-history.json`: titles, times, genre only. For the not-yet-started part of a fetched window

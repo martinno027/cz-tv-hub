@@ -1,0 +1,123 @@
+{
+ "_doc": "Profiles (spec/apps.md 'Profil', spec/dvb-gateway.md 'Profiles'). names: trim, NFC, 1-32 code points, no control characters; key = lower case without diacritics (uniqueness). passwords: 4-64 code points. document: applying a profile document to the TV and exporting it again keeps unknown fields; missing fields get the defaults. sync: a reducer; settings are labels (A, B, ...), each step gives the event and the state after it.",
+ "names": [
+  {"name": "  Jana ", "valid": true, "normalized": "Jana", "key": "jana"},
+  {"name": "jána", "valid": true, "normalized": "jána", "key": "jana"},
+  {"name": "Petr Novák", "valid": true, "normalized": "Petr Novák", "key": "petr novak"},
+  {"name": "ŽOFIE", "valid": true, "normalized": "ŽOFIE", "key": "zofie"},
+  {"name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": true, "normalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  {"name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "valid": false},
+  {"name": "", "valid": false},
+  {"name": "   ", "valid": false},
+  {"name": "a\tb", "valid": false},
+  {"name": "a\u0007b", "valid": false}
+ ],
+ "passwords": [
+  {"password": "123", "valid": false},
+  {"password": "1234", "valid": true},
+  {"password": "heslo s mezerou", "valid": true},
+  {"password": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp", "valid": true},
+  {"password": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp", "valid": false}
+ ],
+ "document": [
+  {
+   "name": "unknown fields survive apply + export",
+   "incoming": {"v": 1, "channelPrefs": {"order": ["ct:CH_2", "dvb:a"], "hidden": ["ct:CH_4"], "sourcesOff": ["psp"], "futurePref": 3}, "thumbnails": false, "future": {"x": 1}},
+   "applied": {"channelPrefs": {"order": ["ct:CH_2", "dvb:a"], "hidden": ["ct:CH_4"], "sourcesOff": ["psp"]}, "thumbnails": false},
+   "changeThumbnails": true,
+   "exported": {"v": 1, "channelPrefs": {"order": ["ct:CH_2", "dvb:a"], "hidden": ["ct:CH_4"], "sourcesOff": ["psp"], "futurePref": 3}, "thumbnails": true, "future": {"x": 1}}
+  },
+  {
+   "name": "missing fields get the defaults",
+   "incoming": {"v": 1},
+   "applied": {"channelPrefs": {"order": [], "hidden": [], "sourcesOff": []}, "thumbnails": true},
+   "changeThumbnails": false,
+   "exported": {"v": 1, "channelPrefs": {"order": [], "hidden": [], "sourcesOff": []}, "thumbnails": false}
+  },
+  {
+   "name": "a newer document version is read by its known fields",
+   "incoming": {"v": 2, "channelPrefs": {"order": ["dvb:b"], "hidden": [], "sourcesOff": []}, "thumbnails": true},
+   "applied": {"channelPrefs": {"order": ["dvb:b"], "hidden": [], "sourcesOff": []}, "thumbnails": true},
+   "changeThumbnails": true,
+   "exported": {"v": 2, "channelPrefs": {"order": ["dvb:b"], "hidden": [], "sourcesOff": []}, "thumbnails": true}
+  }
+ ],
+ "sync": [
+  {
+   "name": "sign in, change, push, sign out restores the TV's own settings",
+   "start": {"profile": null, "active": "A", "local": null, "pending": false, "version": null},
+   "steps": [
+    {"event": {"type": "signIn", "name": "Jana", "settings": "P", "version": 3},
+     "state": {"profile": "Jana", "active": "P", "local": "A", "pending": false, "version": 3}},
+    {"event": {"type": "change", "settings": "P2"},
+     "state": {"profile": "Jana", "active": "P2", "local": "A", "pending": true, "version": 3}},
+    {"event": {"type": "pushed", "version": 4},
+     "state": {"profile": "Jana", "active": "P2", "local": "A", "pending": false, "version": 4}},
+    {"event": {"type": "signOut"},
+     "state": {"profile": null, "active": "A", "local": null, "pending": false, "version": null}}
+   ]
+  },
+  {
+   "name": "create keeps the current settings and remembers them as the TV's own",
+   "start": {"profile": null, "active": "A", "local": null, "pending": false, "version": null},
+   "steps": [
+    {"event": {"type": "create", "name": "Petr", "version": 1},
+     "state": {"profile": "Petr", "active": "A", "local": "A", "pending": false, "version": 1}},
+    {"event": {"type": "change", "settings": "B"},
+     "state": {"profile": "Petr", "active": "B", "local": "A", "pending": true, "version": 1}},
+    {"event": {"type": "pushed", "version": 2},
+     "state": {"profile": "Petr", "active": "B", "local": "A", "pending": false, "version": 2}},
+    {"event": {"type": "signOut"},
+     "state": {"profile": null, "active": "A", "local": null, "pending": false, "version": null}}
+   ]
+  },
+  {
+   "name": "signed out: a change is only local",
+   "start": {"profile": null, "active": "A", "local": null, "pending": false, "version": null},
+   "steps": [
+    {"event": {"type": "change", "settings": "B"},
+     "state": {"profile": null, "active": "B", "local": null, "pending": false, "version": null}}
+   ]
+  },
+  {
+   "name": "a failed push stays pending; a remote version is not applied over it",
+   "start": {"profile": "Jana", "active": "P", "local": "A", "pending": false, "version": 3},
+   "steps": [
+    {"event": {"type": "change", "settings": "P2"},
+     "state": {"profile": "Jana", "active": "P2", "local": "A", "pending": true, "version": 3}},
+    {"event": {"type": "pushFailed"},
+     "state": {"profile": "Jana", "active": "P2", "local": "A", "pending": true, "version": 3}},
+    {"event": {"type": "remote", "settings": "R", "version": 5},
+     "state": {"profile": "Jana", "active": "P2", "local": "A", "pending": true, "version": 3}},
+    {"event": {"type": "pushed", "version": 6},
+     "state": {"profile": "Jana", "active": "P2", "local": "A", "pending": false, "version": 6}}
+   ]
+  },
+  {
+   "name": "another TV changed the profile: a new version is applied, the same one is not",
+   "start": {"profile": "Jana", "active": "P", "local": "A", "pending": false, "version": 3},
+   "steps": [
+    {"event": {"type": "remote", "settings": "P", "version": 3},
+     "state": {"profile": "Jana", "active": "P", "local": "A", "pending": false, "version": 3}},
+    {"event": {"type": "remote", "settings": "R", "version": 4},
+     "state": {"profile": "Jana", "active": "R", "local": "A", "pending": false, "version": 4}}
+   ]
+  },
+  {
+   "name": "401: signed out, the TV's own settings back, pending dropped",
+   "start": {"profile": "Jana", "active": "P2", "local": "A", "pending": true, "version": 3},
+   "steps": [
+    {"event": {"type": "unauthorized"},
+     "state": {"profile": null, "active": "A", "local": null, "pending": false, "version": null}, "message": "signedOut"}
+   ]
+  },
+  {
+   "name": "signing in to another profile while signed in keeps the TV's own settings",
+   "start": {"profile": "Jana", "active": "P", "local": "A", "pending": false, "version": 3},
+   "steps": [
+    {"event": {"type": "signIn", "name": "Petr", "settings": "Q", "version": 7},
+     "state": {"profile": "Petr", "active": "Q", "local": "A", "pending": false, "version": 7}}
+   ]
+  }
+ ]
+}
