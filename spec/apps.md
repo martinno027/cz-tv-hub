@@ -241,8 +241,9 @@ the device (no account, no sync, no analytics); only positions are stored, never
   recordings start at `progress`, Anténa timeline at the map position of `start + progress`. A CT programme that began < 3 h ago is entirely in the buffer, so the resume point is too.
 
 ## "Kanály" (hide and reorder channels on this TV)
-In **Nastavení → Kanály** the viewer hides channels and changes their order, **on this device only** (like
-"Pokračovat": no sync, no account; another TV keeps its own). Applies to **Živě** and the **TV průvodce** alike.
+In **Nastavení → Kanály** the viewer hides channels and changes their order **on this device**, or, when the TV is
+signed in to a **profile** ("Profil" below), in that profile on the Pi (another TV signed in to the same profile
+gets the same; "Pokračovat" never leaves the device). Applies to **Živě** and the **TV průvodce** alike.
 Separate from the gateway's `/admin` page: a channel switched off there is not received at all; here a channel is just
 not shown on this TV.
 - **Keys**: CT internet channel `ct:<API id>` (`ct:CH_1`); Anténa channel `dvb:<gateway channel id>`; Chamber of
@@ -271,8 +272,9 @@ not shown on this TV.
   (`git rev-list --count HEAD`), short commit hash (`+` appended when built from uncommitted changes) and the build
   time (Prague), all stamped at build time (tvOS build phase into Info.plist, Gradle `BuildConfig`, Samsung
   `build.py` into a generated script; the Samsung browser demo shows "vývojová verze"). Nothing is fetched at run time.
-- **Nastavení is a choice of two sections**: the Nastavení screen shows only two large items, **Kanály** (first) and
-  **Server**, each with a one-line description. Selecting one opens that section **full screen** (no tab bar row, no
+- **Nastavení is a choice of three sections**: the Nastavení screen shows only three large items, **Kanály**
+  (first), **Profil** (description "Přihlášen: <jméno>" or "Nepřihlášen") and **Server**, each with a one-line
+  description. Selecting one opens that section **full screen** (no tab bar row, no
   other section): Kanály = this list; Server = the Anténa gateway (address, key, "Uložit a ověřit", "Odebrat bránu",
   discovery in the local network; "O aplikaci" at its end). The remote's **Back** (Siri Remote Menu/‹, Android
   Back, Samsung Return) returns to the choice, with focus on the item just left; Back on the choice leaves Nastavení
@@ -287,6 +289,46 @@ not shown on this TV.
   "Všechny kanály jsou skryté. Zobrazíte je v Nastavení → Kanály."
 - Golden cases: `spec/fixtures/channel_prefs_cases.json` (`arrange` and `move` on mixed lists; the input list is
   already filtered by the sources that are on), tested in all three apps.
+
+## "Profil" (T08: settings in a profile on the Pi)
+Nastavení → **Profil** lets a household member keep this TV's settings in a profile on the gateway
+(`spec/dvb-gateway.md` "Profiles") and load them on any TV by signing in. A signed-in TV **stays signed in** (app
+restarts included) until **Odhlásit**, or until the gateway says the session is gone.
+- **What travels** = the settings document `{"v": 1, "channelPrefs": <"Kanály" stored JSON>, "thumbnails": <the
+  switch "Náhledy anténních pořadů">}`; fields the app does not know are kept and sent back unchanged. Never the
+  gateway address/key, never "Pokračovat", never the password: the TV stores only the profile name and the session
+  token, both in the platform's secure storage (Keychain / encrypted prefs / Samsung: next to the gateway key).
+- **Needs the gateway**: without one the section says "Profily se ukládají na bránu Raspberry. Nejdřív ji nastavte
+  v Nastavení → Server." **Odebrat bránu** while signed in signs out locally first.
+- **Signed out** the section offers **Přihlásit se** (Jméno, Heslo, `Přihlásit`) and **Vytvořit profil** (Jméno,
+  Heslo, Heslo znovu, `Vytvořit`; the new profile gets **this TV's current settings**). Password fields are masked;
+  "Hesla se neshodují", and the gateway's Czech `error` text for 400/401/409/429/507, shown under the form.
+- **Signed in** it shows "Přihlášen: <jméno>", a state line ("Nastavení je uložené v profilu" / "Čeká na uložení —
+  brána není dostupná") and **Odhlásit**.
+- **Sync** (`spec/fixtures/profile_cases.json` "sync", a reducer over events, the same in all three apps):
+  - **Sign in**: the TV's own current settings are kept aside on the device (`local`), the profile's settings
+    become the active ones. **Create**: `local` = the current settings, which the profile also starts with.
+  - **While signed in every change** (Kanály: hide/show, move, sources, Obnovit výchozí; the thumbnails switch) is
+    applied at once on the TV and sent with `PUT /dvb/profile` after **1 s** without another change (`pending` until
+    it succeeded). A failed send keeps `pending` and is retried on app start, when Nastavení opens and every 60 s.
+  - **On app start and when Nastavení opens** (signed in): with `pending` the TV sends first; otherwise it reads
+    `GET /dvb/profile` and applies it when its `version` differs from the last one seen (another TV changed it).
+  - **Odhlásit**: `POST /dvb/profile/logout` (failure ignored), then `local` becomes active again and the token is
+    deleted. **`401` with `"code": "profileSignedOut"` from any profile call** does the same (a 401 of the app key,
+    without that code, is only shown as a gateway error) and says once "Profil byl odhlášen (smazaný nebo nové
+    heslo). Platí zase nastavení této televize."
+- **Details shared by all three apps**:
+  - Before sending, the app checks name and password itself: "Jméno musí mít 1 až 32 znaků." / "Heslo musí mít 4 až
+    64 znaků." (the gateway's own 400 text otherwise). Passwords are sent as typed; the gateway normalises them (NFC).
+  - The state line says "Čeká na uložení — brána není dostupná" only after a send **failed** (also for a change still
+    pending from before a restart), never during the 1 s wait.
+  - A change made while a `PUT` is on its way is sent again right after it (the reducer's `pushed` alone would lose it).
+  - **Odebrat bránu** while signed in: a best-effort `POST /dvb/profile/logout` (not awaited), then the local sign-out.
+  - Signed in, the Kanály intro says "Ukládá se do profilu <jméno>." instead of the app's usual "this TV only" intro
+    (which stays as it is when signed out).
+  - The profile calls carry the app key as the `Authorization: Bearer` header (the gateway refuses the cookie there).
+- Golden cases: `spec/fixtures/profile_cases.json` (`names`, `passwords`, `document`, `sync`), tested in all three apps
+  and, for names/passwords, in the gateway.
 
 ## "Poslanecká sněmovna" (live streams of the Chamber of Deputies, T06, approved 2026-10-24)
 A third source, **on by default**, with five live-only channels the Chamber publishes on psp.cz ("Živé vysílání").

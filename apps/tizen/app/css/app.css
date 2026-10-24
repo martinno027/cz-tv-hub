@@ -548,7 +548,7 @@ main {
   overflow: hidden;
 }
 
-/* Nastavení: a choice of two sections (Kanály, Server); the chosen one opens full screen */
+/* Nastavení: a choice of three sections (Kanály, Profil, Server); the chosen one opens full screen */
 #set-choice {
   margin-top: 40px;
 }
@@ -709,6 +709,30 @@ main {
 }
 
 #set-status.error {
+  color: #ff9c8f;
+}
+
+/* Nastavení → Profil: the mode row (Přihlásit se / Vytvořit profil), the form or the signed-in name */
+#pf-out .button.selected:not(.focused) {
+  border-color: var(--focus);
+}
+
+#pf-signed {
+  font-size: 36px;
+  margin: 30px 0 10px;
+}
+
+#pf-state, #pf-message {
+  font-size: 26px;
+  margin-top: 16px;
+  min-height: 34px;
+}
+
+#pf-state.ok {
+  color: #8fe3a0;
+}
+
+#pf-state.error, #pf-message.error {
   color: #ff9c8f;
 }
 

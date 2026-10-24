@@ -73,7 +73,7 @@ data class ChannelPrefs(
         const val SOURCE_CT = "ct"
         const val SOURCE_DVB = "dvb"
         const val SOURCE_PSP = "psp"
-        private val SOURCES = listOf(SOURCE_CT, SOURCE_DVB, SOURCE_PSP)
+        val SOURCES = listOf(SOURCE_CT, SOURCE_DVB, SOURCE_PSP)
 
         /** Reset ("Obnovit výchozí pořadí") clears order and hidden and switches every source on. */
         val DEFAULT = ChannelPrefs()

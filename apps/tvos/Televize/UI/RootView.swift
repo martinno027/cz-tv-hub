@@ -44,6 +44,8 @@ struct RootView: View {
         .overlay(alignment: .topTrailing) {
             if tab != .settings { NumberEntryBadge(entry: model.numberEntry) }
         }
+        // Profile: pending changes sent and a newer version read at start, failed sends again every 60 s.
+        .task { await model.runProfileSync() }
         .task(id: VisibleKey(prefs: model.channelPrefs.prefs, gateway: model.gateway)) {
             // Channel numbers: kept current for the screens, the zapping list and number entry.
             while !Task.isCancelled {
@@ -92,6 +94,13 @@ struct RootView: View {
             }
             if let address = arguments.string(forKey: "gatewayAddress"), let key = arguments.string(forKey: "gatewayKey") {
                 model.setGateway(GatewayConfig(address: address, key: key))
+            }
+            // `-profileName Jana -profilePassword …` signs in to a dev gateway's profile (simulator checks only).
+            if let name = arguments.string(forKey: "profileName"), let password = arguments.string(forKey: "profilePassword"),
+               !model.profile.isSignedIn {
+                do { try await model.profile.signIn(name: name, password: password) } catch {
+                    model.alertMessage = AppModel.message(for: error)
+                }
             }
             switch arguments.string(forKey: "tab") {
             case "guide": tab = .guide

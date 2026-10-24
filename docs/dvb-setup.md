@@ -275,6 +275,13 @@ V nastavení aplikace zadejte:
 
 Bez nastavení je skupina „Anténa“ skrytá.
 
+**Profily** (Nastavení → Profil): každý člen domácnosti si může na Raspberry uložit své nastavení kanálů (pořadí,
+skryté kanály, zapnuté zdroje) a přepínač náhledů pod jménem a heslem a načíst ho na kterékoli televizi
+přihlášením. Přihlášená televize ukládá každou změnu hned do profilu a zůstane přihlášená, dokud ji někdo
+neodhlásí; po odhlášení platí zase vlastní nastavení televize. Pozice „Pokračovat“ zůstávají v televizi. V
+administraci je záložka **Profily**: seznam, nový profil, nové heslo a smazání (obojí odhlásí všechny televize
+s tím profilem). Heslo aspoň 4 znaky; na Raspberry je uložené jen jako otisk (PBKDF2), televize si ho neukládá.
+
 ## Řešení potíží
 
 - `curl -H "Authorization: Bearer <klíč>" http://127.0.0.1:8098/dvb/status` na Raspberry ukáže tunery,

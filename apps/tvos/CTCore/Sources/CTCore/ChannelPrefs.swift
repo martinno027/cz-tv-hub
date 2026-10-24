@@ -100,6 +100,8 @@ public final class ChannelPrefsStore {
     @ObservationIgnored private let backend: ResumeBackend
 
     public private(set) var prefs: ChannelPrefs
+    /// A change by the viewer (not by `replace`): signed in to a profile it is sent to the gateway.
+    @ObservationIgnored public var onChange: (ChannelPrefs) -> Void = { _ in }
 
     public init(backend: ResumeBackend = UserDefaults.standard) {
         self.backend = backend
@@ -112,9 +114,24 @@ public final class ChannelPrefsStore {
         change(&next)
         next.order = Array(next.order.prefix(ChannelPrefs.maxKeys))
         next.hidden = Array(next.hidden.suffix(ChannelPrefs.maxKeys))
-        guard next != prefs else { return }
+        guard store(next) else { return }
+        onChange(next)
+    }
+
+    /// Settings from a profile (or the TV's own coming back); not reported to `onChange`.
+    public func replace(_ value: ChannelPrefs) {
+        var next = value
+        next.order = Array(next.order.prefix(ChannelPrefs.maxKeys))
+        next.hidden = Array(next.hidden.suffix(ChannelPrefs.maxKeys))
+        store(next)
+    }
+
+    @discardableResult
+    private func store(_ next: ChannelPrefs) -> Bool {
+        guard next != prefs else { return false }
         prefs = next
         backend.set(try? JSONEncoder().encode(next), forKey: Self.storageKey)
+        return true
     }
 
     // MARK: arranged list

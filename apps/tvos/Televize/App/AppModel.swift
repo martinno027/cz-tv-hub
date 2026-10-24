@@ -33,8 +33,10 @@ final class AppModel {
     let resume: ResumeStore
     /// ČT images and Anténa programme stills for the guide detail, memory only.
     let images = GuideImageStore()
-    /// Channels hidden / reordered in Nastavení → Kanály, on this device only.
+    /// Channels hidden / reordered in Nastavení → Kanály, on this device or in the signed-in profile.
     let channelPrefs: ChannelPrefsStore
+    /// Nastavení → Profil: this TV's settings in a profile on the gateway (spec/apps.md "Profil").
+    let profile: ProfileSyncController
     /// "Is it on now?" of the Chamber of Deputies' streams, checked only while Živě or the guide is on screen.
     let parliament = PSPLiveMonitor()
 
@@ -61,8 +63,45 @@ final class AppModel {
         planner = PlaybackPlanner(client: client)
         resume = ResumeStore()
         channelPrefs = ChannelPrefsStore()
+        profile = ProfileSyncController(
+            current: ProfileDocument(channelPrefs: channelPrefs.prefs, thumbnails: images.tvAllows),
+            credentials: ProfileKeychain()
+        )
+        wireProfile()
         setGateway(GatewayStore.load(), persist: false)
         numberEntry = NumberEntry { [weak self] number in self?.playLive(number: number) }
+    }
+
+    // MARK: profile
+
+    private func wireProfile() {
+        let channelPrefs = channelPrefs
+        let images = images
+        profile.apply = { document in
+            channelPrefs.replace(document.channelPrefs)
+            images.applyTVSwitch(document.thumbnails)
+        }
+        profile.onMessage = { [weak self] message in self?.alertMessage = message.text }
+        channelPrefs.onChange = { [weak self] prefs in
+            guard let self else { return }
+            profile.settingsChanged(channelPrefs: prefs, thumbnails: images.tvAllows)
+        }
+        images.onTVSwitchChange = { [weak self] value in
+            guard let self else { return }
+            profile.settingsChanged(channelPrefs: channelPrefs.prefs, thumbnails: value)
+        }
+        // A session dropped at start (lost Keychain item) brings the TV's own settings back.
+        profile.apply(profile.state.active)
+    }
+
+    /// App start (and the app back in front): pending changes are sent, a newer profile version applied; a failed
+    /// send is tried again every 60 s.
+    func runProfileSync() async {
+        await profile.refresh()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(ProfileSyncController.retryInterval))
+            await profile.retryPending()
+        }
     }
 
     // MARK: channel numbers
@@ -153,6 +192,8 @@ final class AppModel {
         if persist {
             if let config { GatewayStore.save(config) } else { GatewayStore.delete() }
         }
+        // Odebrat bránu while signed in signs out locally first (spec/apps.md "Profil").
+        profile.setAPI(config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly()) })
         gateway = config
         antenna = config.map { AntennaStore(client: DVBClient(config: $0)) }
         images.setGateway(config)

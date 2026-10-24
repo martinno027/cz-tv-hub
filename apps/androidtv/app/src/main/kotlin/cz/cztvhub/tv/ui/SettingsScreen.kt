@@ -63,18 +63,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** The two Nastavení sections (spec/apps.md: "Nastavení is a choice of two sections"). */
-enum class SettingsSection { CHANNELS, SERVER }
+/** The three Nastavení sections (spec/apps.md: "Nastavení is a choice of three sections"). */
+enum class SettingsSection { CHANNELS, PROFILE, SERVER }
 
 /**
- * "Nastavení": a choice of two large items, "Kanály" (hide/reorder on this TV) first, then "Server" (the household
- * DVB gateway for "Anténa", and "O aplikaci"). The chosen section is shown full screen (MainScreen hides its tab row
- * while [open] is set); Back returns to the choice with focus on the item just left.
+ * "Nastavení": a choice of three large items, "Kanály" (hide/reorder on this TV) first, then "Profil" (settings in
+ * a profile on the gateway) and "Server" (the household DVB gateway for "Anténa", and "O aplikaci"). The chosen
+ * section is shown full screen (MainScreen hides its tab row while [open] is set); Back returns to the choice with
+ * focus on the item just left.
  */
 @Composable
 fun SettingsScreen(viewModel: MainViewModel, open: SettingsSection?, onOpen: (SettingsSection?) -> Unit) {
     val requesters = remember { SettingsSection.entries.associateWith { FocusRequester() } }
     var lastLeft by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    // Nastavení opened (spec/apps.md "Profil"): send a pending change or read a newer profile version.
+    LaunchedEffect(Unit) { viewModel.syncProfile() }
 
     if (open != null) {
         BackHandler {
@@ -83,7 +86,13 @@ fun SettingsScreen(viewModel: MainViewModel, open: SettingsSection?, onOpen: (Se
         }
         Column(Modifier.fillMaxSize()) {
             Text(
-                stringResource(if (open == SettingsSection.CHANNELS) R.string.settings_tab_channels else R.string.settings_tab_server),
+                stringResource(
+                    when (open) {
+                        SettingsSection.CHANNELS -> R.string.settings_tab_channels
+                        SettingsSection.PROFILE -> R.string.settings_tab_profile
+                        SettingsSection.SERVER -> R.string.settings_tab_server
+                    },
+                ),
                 style = MaterialTheme.typography.headlineMedium,
             )
             Spacer(Modifier.height(8.dp))
@@ -92,6 +101,7 @@ fun SettingsScreen(viewModel: MainViewModel, open: SettingsSection?, onOpen: (Se
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 16.dp)) {
                         ChannelsSection(viewModel)
                     }
+                SettingsSection.PROFILE -> ProfileSettings(viewModel)
                 SettingsSection.SERVER -> ServerSettings(viewModel)
             }
         }
@@ -123,6 +133,12 @@ fun SettingsScreen(viewModel: MainViewModel, open: SettingsSection?, onOpen: (Se
             stringResource(R.string.settings_channels_detail),
             Modifier.focusRequester(requesters.getValue(SettingsSection.CHANNELS)),
         ) { onOpen(SettingsSection.CHANNELS) }
+        val profile by viewModel.profiles.state.collectAsState()
+        SectionItem(
+            stringResource(R.string.settings_tab_profile),
+            profile.profile?.let { stringResource(R.string.profile_signed_in, it) } ?: stringResource(R.string.profile_signed_out),
+            Modifier.focusRequester(requesters.getValue(SettingsSection.PROFILE)),
+        ) { onOpen(SettingsSection.PROFILE) }
         SectionItem(
             stringResource(R.string.settings_tab_server),
             stringResource(R.string.settings_server_detail),
@@ -213,6 +229,8 @@ private fun ServerSettings(viewModel: MainViewModel) {
             }) { Text(stringResource(R.string.settings_save)) }
             if (configured != null) {
                 Button(onClick = {
+                    // Signed in: sign out on this TV first (spec/apps.md "Profil"), the TV's own settings apply again.
+                    viewModel.profiles.signOutLocally()
                     settings.clear()
                     key = ""
                     message = null
@@ -238,7 +256,14 @@ private fun ServerSettings(viewModel: MainViewModel) {
 }
 
 @Composable
-private fun Field(label: String, value: String, hint: String, secret: Boolean = false, onChange: (String) -> Unit) {
+internal fun Field(
+    label: String,
+    value: String,
+    hint: String,
+    secret: Boolean = false,
+    keyboardType: KeyboardType = KeyboardType.Uri,
+    onChange: (String) -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     // Read-only until OK is pressed, so walking past a field with the D-pad never pops up the keyboard.
     var editing by remember { mutableStateOf(false) }
@@ -254,7 +279,7 @@ private fun Field(label: String, value: String, hint: String, secret: Boolean = 
             textStyle = MaterialTheme.typography.titleMedium.copy(color = Palette.text),
             cursorBrush = SolidColor(Palette.accent),
             keyboardOptions = KeyboardOptions(
-                keyboardType = if (secret) KeyboardType.Password else KeyboardType.Uri,
+                keyboardType = if (secret) KeyboardType.Password else keyboardType,
                 imeAction = ImeAction.Next,
             ),
             keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),

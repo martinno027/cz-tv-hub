@@ -43,7 +43,8 @@ struct ChannelSettingsSection: View {
         ScrollViewReader { proxy in
         ScrollView {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Které kanály tato televize ukazuje v Živě a v TV průvodci, a v jakém pořadí. Platí jen pro toto zařízení.")
+            Text("Které kanály tato televize ukazuje v Živě a v TV průvodci, a v jakém pořadí. "
+                 + (model.profile.profileName.map { "Ukládá se do profilu \($0)." } ?? "Platí jen pro toto zařízení."))
                 .font(.callout)
                 .foregroundStyle(.secondary)
 

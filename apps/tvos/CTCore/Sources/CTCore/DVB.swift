@@ -317,9 +317,18 @@ public struct DVBClient: Sendable {
         try await send(config.url(path), timeout: timeout)
     }
 
-    private func send(_ url: URL, timeout: TimeInterval) async throws -> HTTPResponse {
+    /// Any method with a body and extra headers (profiles); same key and error handling as `get`.
+    func send(method: String, path: String, body: Data?, headers: [String: String]) async throws -> HTTPResponse {
+        try await send(config.url(path), timeout: timeout, method: method, body: body, headers: headers)
+    }
+
+    private func send(_ url: URL, timeout: TimeInterval, method: String = "GET", body: Data? = nil,
+                      headers: [String: String] = [:]) async throws -> HTTPResponse {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
+        request.httpMethod = method
+        request.httpBody = body
         for (field, value) in config.authorizationHeaders { request.setValue(value, forHTTPHeaderField: field) }
+        for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         do {
             return try await transport.send(request)
