@@ -20,8 +20,14 @@ public struct GatewayConfig: Sendable, Equatable, Codable {
     /// Adds `http://` and the default port when missing. Returns nil for unusable input.
     public init?(address: String, key: String) {
         let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty, let url = Self.baseURL(address: address) else { return nil }
+        self.init(baseURL: url, key: trimmedKey)
+    }
+
+    /// The address as typed → `http(s)://host:port` (default port added, path and query dropped); nil when unusable.
+    public static func baseURL(address: String) -> URL? {
         var text = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !trimmedKey.isEmpty else { return nil }
+        guard !text.isEmpty else { return nil }
         if !text.contains("://") { text = "http://" + text }
         guard var parts = URLComponents(string: text), let host = parts.host, !host.isEmpty,
               parts.scheme == "http" || parts.scheme == "https" else { return nil }
@@ -29,8 +35,7 @@ public struct GatewayConfig: Sendable, Equatable, Codable {
         parts.path = ""
         parts.query = nil
         parts.fragment = nil
-        guard let url = parts.url else { return nil }
-        self.init(baseURL: url, key: trimmedKey)
+        return parts.url
     }
 
     /// "host:port" for showing in settings.
