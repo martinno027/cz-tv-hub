@@ -43,8 +43,26 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # The Tailscale bridge AAR (apps/tailnet/build.py android, run by Gradle) needs Go and the runner's NDK.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tailnet/go.mod
+          cache-dependency-path: apps/tailnet/go.sum
       - run: ./gradlew --no-daemon test
         working-directory: apps/androidtv
+
+  tailnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tailnet/go.mod
+          cache-dependency-path: apps/tailnet/go.sum
+      - run: go vet -tags ts_omit_logtail ./...
+        working-directory: apps/tailnet
+      - run: go test -tags ts_omit_logtail ./...
+        working-directory: apps/tailnet
 
   tizen:
     runs-on: ubuntu-latest

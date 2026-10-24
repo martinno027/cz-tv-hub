@@ -152,6 +152,22 @@ Needs `JAVA_HOME` (Android Studio's JBR) and `ANDROID_HOME` (the SDK) when not s
 </details>
 
 <details>
+<summary>Tailscale bridge — <code>python3 apps/tailnet/build.py android|tvos|all</code>; tests <code>cd apps/tailnet && go test -tags ts_omit_logtail ./...</code></summary>
+
+Builds the Go library that puts Apple TV and Android TV into the tailnet without the Tailscale app (`spec/apps.md`
+"Tailscale v aplikaci"): `dist/android/tailnet.aar` (gomobile, pinned in `go.mod`, installed into `apps/tailnet/.bin`)
+and `dist/tvos/<sdk>/libtailnet.a` + `dist/tvos/include` (C library built with `GOOS=ios` against the tvOS SDKs). The
+Gradle build and the Xcode build phase call it; it does nothing when the outputs are newer than every source.
+Needs Go (it fetches the version in `go.mod` by itself); android also the NDK (`ANDROID_NDK_HOME` or the newest in the
+SDK) and a JDK (`JAVA_HOME`, else Android Studio's JBR); tvos Xcode with the tvOS platform.
+
+Can go wrong: Go has no official tvOS target — a Go or Xcode update can break the tvOS link (the error then names
+the platform of `go.o`); the first build downloads Go modules and takes a few minutes; a failed build deletes its
+half-written output, so a rerun builds again instead of using it.
+
+</details>
+
+<details>
 <summary>Samsung — <code>cd apps/tizen && node --test test/*.test.js</code>; <code>python3 apps/tizen/build.py [--gateway ADDR --key-file FILE] [--install TV_IP]</code></summary>
 
 Tests include the Chromium 56 syntax guard. UI check in a browser: serve the repo root and open
