@@ -160,13 +160,72 @@ prefer seeking by wall-clock using `#EXT-X-PROGRAM-DATE-TIME` (AVPlayerItem `see
 `Timeline.Window.windowStartTimeMs`) to `start − M`; fall back to the computed offset.
 Golden cases: `spec/fixtures/decisions.json` (unit-test both the action and the offset).
 
+## Anténa timeline player (T05)
+A recorded Anténa programme of the continuous recording (`b…` id = matching
+`^b[A-Za-z0-9_]{1,40}-\d{9,11}-\d{9,11}$`, the gateway's `RECORDING_ID_RE`; never a bare leading `b`: TVHeadend DVR
+uuids are hex and can start with `b`) (airing or ended) plays in a **window of its
+channel's recording** (`spec/dvb-gateway.md` "Channel timeline": programme ± 3 h, at most 12 h), not as the bare
+programme, so the viewer can go before the EPG start (EPG times are often off) and on into the neighbouring
+programmes, as far as the recording reaches. TVHeadend DVR recordings (uuid ids), ČT and live keep the native
+player as before; "Od začátku" of a growing DVR recording seeks to 0 explicitly (players start a growing playlist
+at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
+- **Open**: `GET /dvb/timeline/<id>` (JSON), then play its `playlist` (accepted only as a gateway path: starts with
+  `/`, not `//`; the key goes with every request). A failed JSON or playlist fetch for `previous`/`next` keeps the
+  old window playing and shows the gateway's Czech text in the bar. "Od začátku" starts at programme start
+  − 30 s, "Pokračovat" at programme start + progress, both through the map below (the playlist's `EXT-X-START`
+  is only the fallback). An ended programme without an offer starts like "Od začátku".
+- **Map** position ↔ wall clock through `pieces` (golden `spec/fixtures/timeline_cases.json` `map`): a position on
+  a boundary belongs to the later piece, a time in a gap maps to the next piece's start, outside the window clamps.
+  Every platform uses this map (also where the player knows `PROGRAM-DATE-TIME`), so all three show the same times.
+  A growing window (`complete: false`) re-fetches the JSON every 60 s; beyond its last piece the time runs on with
+  the position.
+- **Own player bar** instead of the native controls (all three apps): shown at the start and on any key or pause
+  for 5 s (stays while paused), bottom of the screen:
+  - the second line as now (channel · episode), the **title = the programme at the playhead** (`programmeAt`, from
+    the JSON's `programmes`; in a gap the channel name). It changes while playing and while seeking.
+  - a bar across the width = the window **on a wall-clock axis** (from the first to the last recorded time; on a
+    position axis gaps would have no width): recorded pieces filled, gaps empty, programme boundaries as ticks, the
+    programme at the playhead highlighted, the played part up to the playhead.
+  - above the playhead its **wall clock**: `Dnes 21:14:30`, `Včera 23:59:59`, `čt 22. 10. 10:05:00` (`labels`;
+    the calendar day in Prague compared with now, `H:MM:SS` without a leading zero). Under the bar's ends the
+    window's first and last recorded times `H:MM`, with the day label in front only when that day is not the
+    playhead's (`edges`). A growing window's right end is "Teď" while its last piece ends within 30 s of now.
+  - while a seek is being chosen (held key or swipe) the playhead and its label move, the video seeks on release.
+- **Keys** (while the bar is hidden the first key only shows it, except play/pause, Back, the audio keys, and OK
+  while "Přeskočit reklamu" is shown):
+  - **OK / play-pause** = pause/play. **Back** closes the player as before.
+  - **← / →** = −10 s / +10 s (released within 0.5 s); **held** = scrub: offset `60 × held s` up to 3 s, then
+    `+600 × s` (`hold`: 5 s held = 23 min); seek on release. Without a key-up event the release counts 0.8 s after the
+    last repeat. **⏪ / ⏩** scrub the same way but count at least 1 s (a tap = 60 s). tvOS: clickpad left/right click = the same, a horizontal swipe on the touch surface
+    scrubs (about 10 min per full swipe); Android TV `DPAD_LEFT/RIGHT` (+ `MEDIA_REWIND/FAST_FORWARD` as held);
+    Samsung ◀/▶ (+ ⏪/⏩).
+  - **▲ / ▼** = start of this programme / of the next one (`jump`: ▲ more than 10 s in goes to its start, else to
+    the previous programme's start; nothing there = nothing happens). The target goes through the map; when the
+    mapped position is within 10 s of the playhead (a start inside a recording gap), ▲ takes the programme before.
+    A target outside the window follows the edge rule (`previous`/`next`, else clamp). No zapping in this player.
+  - **Audio**: long press OK opens the list of audio renditions (tvOS: long press of the clickpad; Android TV:
+    long press `DPAD_CENTER`; Samsung keeps AUDIO/MTS and the green key, plus long OK). The default stays Czech.
+  - **Přeskočit reklamu** as before (`spec/ad-breaks.md`): breaks of the programme at the playhead (when it has an
+    id, `breaks: true` and has ended, also inside a growing window), their positions (from that programme's playlist start = programme start − 30 s)
+    converted to wall clock and then through the map.
+- **Edges** (`edge`): a seek target before 0 opens `previous` (if any, else stays at 0); a target at/after the end
+  of a complete window, or playback reaching it, opens `next` (else stays). A growing window's end is the live edge
+  (stays). The new window is opened with its own JSON and continues at the target's wall clock (mapped in the new
+  window); the bar stays on screen across the switch. At most one switch at a time.
+- **Pokračovat**: the programme at the playhead (with an id) is the one remembered; progress = wall clock −
+  programme start (`resume`; before the start = 0). Positions stored before T05 counted from 30 s before the start;
+  they now resume 30 s later (accepted).
+- Golden cases: `spec/fixtures/timeline_cases.json` (`map`, `edge`, `hold`, `labels`, `edges`, `programmeAt`,
+  `jump`, `resume`), tested in all three apps.
+
 ## "Pokračovat" (resume where the viewer stopped)
 Each TV remembers, **on the device only**, how far it got in a programme, and offers to continue there. Nothing leaves
 the device (no account, no sync, no analytics); only positions are stored, never stream URLs or video.
 - **Key**: CT programme `ct:<idec>`; "Anténa" recording `dvb:<recording id>`. Live (`Živě`) is never remembered.
 - **Progress** = seconds from the programme's start: archive (VOD) → player position; "Zpět v čase" (timeshift) →
   wall-clock of the shown frame − programme start (on players without wall-clock, position − (planned at − W) style
-  estimate); Anténa recording (finished or growing) → player position.
+  estimate); Anténa continuous recording (`b…`) → wall clock of the playhead (timeline map) − programme start;
+  TVHeadend DVR recording → player position.
 - **Saving**: every 10 s while playing and when the player closes or the app goes to the background.
 - **Rules** (`resume_cases.json`): `programme length` = end − start. Offer when `progress ≥ 60 s` and
   `progress < length − 120 s`. When `progress ≥ length − 120 s` the programme counts as watched and the entry is
@@ -177,8 +236,8 @@ the device (no account, no sync, no analytics); only positions are stored, never
   `Pokračovat od …` / `Od začátku`. Without an offer the behaviour is unchanged. Label format `m:ss` below an hour,
   else `h:mm:ss`.
 - **Playing a resume**: the decision rules decide the source as usual (by time); then CT timeshift seeks by wall clock
-  to `start + progress` (fallback offset `max(0, (start + progress) − (now − W))`), CT archive and Anténa recordings
-  start at `progress`. A CT programme that began < 3 h ago is entirely in the buffer, so the resume point is too.
+  to `start + progress` (fallback offset `max(0, (start + progress) − (now − W))`), CT archive and TVHeadend DVR
+  recordings start at `progress`, Anténa timeline at the map position of `start + progress`. A CT programme that began < 3 h ago is entirely in the buffer, so the resume point is too.
 
 ## "Kanály" (hide and reorder channels on this TV)
 In **Nastavení → Kanály** the viewer hides channels and changes their order, **on this device only** (like

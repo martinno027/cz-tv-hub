@@ -41,6 +41,9 @@ of "done".
 
 - Keys and passwords only in `/etc/cztvhub/cztvhub.conf` (0600, user `cztvhub`) and the platform keychains / encrypted
   prefs on the TVs. *Wrong:* a key in a log line, a URL, a playlist, a committed file or a screenshot in the repo.
+- The apps send the key only to the gateway: a path taken from a gateway response (the timeline's `playlist`) is
+  accepted only as a gateway path (`/…`, not `//…` or a full URL). *Wrong:* a client that follows any URL with the
+  key in a header or cookie.
 - The public repo has nothing about the household (`tools/check_public.py`). *Wrong:* a hostname, an IP, a name in a
   commit message, branch name or doc.
 
@@ -54,3 +57,4 @@ of "done".
 
 | Date | Task | Scope | Findings |
 | ---- | ---- | ----- | -------- |
+| 2026-10-24 | T05 | Channel timeline (`/dvb/timeline`, views, apps' timeline players) | Key required (401), worker key 403/404, media outside the window 404, no playlist over a whole recording; open timeline views capped at 4 per channel; view keys were never pruned (fixed); apps accept the JSON's playlist only as a gateway path (added to the checklist). |

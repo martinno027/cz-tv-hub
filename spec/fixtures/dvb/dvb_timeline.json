@@ -1,0 +1,20 @@
+{
+  "id": "bnova1-1792832400-1792834200",
+  "channel": "nova1",
+  "playlist": "/dvb/timeline/bnova1-1792832400-1792834200.m3u8",
+  "complete": true,
+  "programme": {"start": "2026-10-24T09:00:00Z", "end": "2026-10-24T09:30:00Z"},
+  "pieces": [
+    {"position": 0, "time": "2026-10-24T06:00:00Z", "duration": 10800},
+    {"position": 10800, "time": "2026-10-24T09:05:00Z", "duration": 10500.5}
+  ],
+  "programmes": [
+    {"id": "bnova1-1792821600-1792832400", "title": "Ranní show", "subtitle": "", "start": "2026-10-24T06:00:00Z", "end": "2026-10-24T09:00:00Z", "breaks": false},
+    {"id": "bnova1-1792832400-1792834200", "title": "Zprávy", "subtitle": "Ranní vydání", "start": "2026-10-24T09:00:00Z", "end": "2026-10-24T09:30:00Z", "breaks": true},
+    {"id": null, "title": "Teleshopping", "subtitle": "", "start": "2026-10-24T09:30:00Z", "end": "2026-10-24T10:00:00Z", "breaks": false},
+    {"id": "bnova1-1792836000-1792845000", "title": "Film: Testovací obrazec", "subtitle": "", "start": "2026-10-24T10:00:00Z", "end": "2026-10-24T12:30:00Z", "breaks": false}
+  ],
+  "previous": "bnova1-1792810800-1792821600",
+  "next": null,
+  "unknownFieldIsIgnored": {"x": 1}
+}

@@ -190,6 +190,11 @@ záznamu, takže nic nechybí ani na hranicích pořadů a „Živě“ se u nah
 (o pár vteřin později, bez dalšího tuneru). Ukládají se všechny zvukové stopy (čeština, původní znění, komentář
 pro nevidomé); v aplikacích je výběr zvuku v přehrávači. Titulky se zatím neukládají.
 
+Nahraný pořad se v aplikacích přehrává **v okně záznamu kanálu**: od 3 hodin před začátkem pořadu do 3 hodin po jeho
+konci (nejvýš 12 hodin). Jde tak dojet před začátek podle programu (časy v programu často nesedí) i do sousedních
+pořadů; u kraje okna aplikace sama otevře další, takže se dá projít celý uložený záznam. Na časové ose je skutečné
+datum a čas vysílání. Jeden playlist přes celý záznam kanálu brána nenabízí a nic z toho nejde stáhnout.
+
 - **Uchovávat nahrávky nejvýše** 1–14 dní (výchozí `retention_days` z konfigurace). Starší záznam se smaže vždy.
 - **Když dochází místo**: na disku zůstává rezerva 10 % (nejméně 5 GB). Když by volné místo kleslo pod ni, smaže se
   nejstarších 10 minut z kanálu, který má uloženo nejvíc hodin – každý nahrávaný kanál tak drží zhruba stejný

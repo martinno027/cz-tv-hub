@@ -152,19 +152,56 @@ Approved by the user on 2026-10-23 (CLAUDE.md hard rules, `docs/legal-notes.md`;
   `GET /dvb/recording/b….m3u8` only for a real EPG programme of an offered channel (exact times, from TVHeadend or the
   EPG history; at most 12 h): from 30 s before the start to 60 s after the end; `EVENT` with a fixed target of 3 s
   while airing, `VOD` + `ENDLIST` once ended. `#EXT-X-PROGRAM-DATE-TIME` on every segment, `#EXT-X-DISCONTINUITY`
-  (+ new `#EXT-X-MAP`) across runs and gaps > 1 s. Positions (resume, ad breaks) count from the playlist start.
+  (+ new `#EXT-X-MAP`) across runs and gaps > 1 s. Positions (ad breaks) count from the playlist start. While
+  airing (`EVENT`) the media playlists carry `#EXT-X-START:TIME-OFFSET=0,PRECISE=YES` (also the TVHeadend DVR's
+  growing recordings): without it players start a growing playlist at its live edge, so "Od začátku" of an airing
+  programme played live (AVPlayer ignored the app's seek to 0, tvOS simulator 2026-10-24).
+- **Channel timeline** (approved by the user on 2026-10-24; legal-guard: approve with changes): the apps play a
+  recorded programme (airing or ended) inside a bounded window of its channel's recording, so the viewer can go
+  before its EPG start (EPG times are often off) and on into the neighbouring programmes, as far as the recording
+  reaches, one window at a time:
+  - `GET /dvb/timeline/<b… id>` (JSON) and `GET /dvb/timeline/<b… id>.m3u8` (playlist, master or media as for
+    programmes, served under a view like them). The id must be a real EPG programme of an offered, recorded channel
+    validated exactly like `/dvb/recording/b…` (state `recording` or `completed`); the client never sends start/end.
+  - **Window** = from `start − 3 h` to `end + 3 h` of that programme (`TIMELINE_MARGIN`), at most **12 h** in total
+    (`MAX_PROGRAMME`; a longer programme gets equal smaller margins, never below 0), clipped to what is recorded
+    and to now. `EVENT` (fixed target 3 s, growing) while the window's end is in the future, `VOD` + `ENDLIST` after.
+    `#EXT-X-START:TIME-OFFSET=<position of programme start − 30 s, ≥ 0>,PRECISE=YES` so a player without a seek
+    starts at the programme. Discontinuities, `#EXT-X-MAP`, `#EXT-X-PROGRAM-DATE-TIME` and the audio renditions as
+    for programmes.
+  - JSON: `{"id", "channel", "playlist": "/dvb/timeline/<id>.m3u8", "complete": bool, "programme": {"start", "end"},
+    "pieces": [{"position": 0.0, "time": "…Z", "duration": 1234.5}], "programmes": [{"id": "b…" | null, "title",
+    "subtitle", "start", "end", "breaks": bool}], "previous": "b…" | null, "next": "b…" | null}`.
+    `pieces` = the recorded stretches in playlist order (a new piece after every discontinuity: new run or gap > 1
+    s), `position` = sum of `EXTINF` before it in the playlist, `time` = the program date-time of its first segment,
+    `duration` = its `EXTINF` sum; the last piece of a growing window keeps growing (re-fetch the JSON every 60 s).
+    `programmes` = the EPG programmes overlapping the window (from TVHeadend or the EPG history), `id` when the
+    programme is a valid `b…` id, i.e. one `/dvb/timeline` accepts (`breaks` = `[ads]` breaks stored for it);
+    zero-length EPG events are no programmes. `previous` = the programme with a valid
+    `b…` id airing 1 s before the window's first recorded media, else the latest such programme starting before it;
+    `null` when nothing is recorded before the window. `next` = the same after the window's last recorded media, only
+    once the window is complete and something is recorded after it. The app opens `previous`/`next` with its own
+    `/dvb/timeline/<id>` (a new window) and continues at the same wall clock.
+  - Same key, same view rules (below); the worker key and thumbnails never use timelines. At most **4 timeline views
+    per channel and key** at a time; opening a fifth drops the one requested longest ago (the app key is
+    shared by all TVs of the household, so this counts per channel for the whole household; 2 until
+    2026-10-24, raised for that reason). Errors as for programmes (`404` not available).
 - **Audio choice**: with one audio track the playlist is the muxed media playlist (as before). With more, a master
   playlist: `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud"` per track (`NAME`, `LANGUAGE` as RFC 5646, `DEFAULT=YES` on the
   first Czech non-audio-description track, `CHARACTERISTICS="public.accessibility.describes-video"` on audio
   description) and one video variant. The gateway cuts each rendition out of the same muxed fragments
   (`fmp4.split_init` / `split_segment`, after the A/V-sync and open-GOP fixes), so the tracks stay in sync.
+  Every rendition lists the same segments: in a run with fewer tracks a missing rendition plays that run's first
+  track (before 2026-10-24 it left those segments out, so its positions differed from the video's).
 - **Live**: `/dvb/live/<id>.m3u8` of a channel being recorded (a segment in the last 20 s) is served from the
   recording: the last ~40 s, fixed target 3 s, `MEDIA-SEQUENCE`/`DISCONTINUITY-SEQUENCE`, a few seconds behind the
   broadcast, no extra tuner. Other channels use the on-demand tuner session as before.
 - **Views**: playlists and media of the recording are served only under `/dvb/v/<view id>/…` (same key): a view is one
-  programme or the live window of one channel, kept 4 h after its last request. Media outside the view's range,
-  unknown views and anything else answer `404`; there is no listing, no static file serving of `buffer_dir` and no
-  playlist spanning "everything" (legal-guard).
+  programme, the live window of one channel, or a **timeline window** of one channel (anchored on a real EPG
+  programme of an offered, recorded channel; programme ± 3 h, at most 12 h in total, clipped to what is recorded and
+  to now); the next window is a new view requested by the app near the edge. Kept 4 h after its last request. Media
+  outside the view's range, unknown views and anything else answer `404`; there is no listing, no static file
+  serving of `buffer_dir` and no playlist spanning a channel's whole recording (legal-guard, approved 2026-10-24).
 - **Thumbnails** of `b…` recordings come from one segment of the recording (init + segment, ffmpeg pipes), same rules.
 - **Ad breaks** (`spec/ad-breaks.md`): ended `b…` programmes of `[ads] channels` are analysable; the worker gets its
   own views (`owner=worker`), one programme at a time (another one only after 2 min without requests).
@@ -277,9 +314,10 @@ on"). Implemented in `src/cztvhub/dvb/thumbs.py`.
 ## App behaviour for "Anténa" programmes
 Channels appear as a second group "Anténa" in Živě and in the TV guide (rows after the CT internet channels).
 1. future → not playable ("Pořad ještě nezačal").
-2. airing → choice "Živě" (`/dvb/live/…`) or "Od začátku" (`/dvb/recording/<id>.m3u8` if `recording.state == recording`;
-   otherwise only Živě).
+2. airing → choice "Živě" (`/dvb/live/…`) or "Od začátku" (if `recording.state == recording`; otherwise only Živě).
 3. ended with `recording.state == completed` → play the recording.
+   A `b…` recording (continuous recording) plays in the channel timeline (`/dvb/timeline/<id>`, `spec/apps.md`
+   "Anténa timeline player"); a TVHeadend DVR recording (uuid) plays `/dvb/recording/<id>.m3u8`.
 4. ended without a usable recording → dimmed, "Pořad nebyl nahrán".
 Settings: gateway address (Bonjour-discovered on the LAN, or typed tailnet name) + key, stored in the platform keychain /
 encrypted prefs. Without settings the "Anténa" group is hidden.

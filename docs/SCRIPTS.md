@@ -118,7 +118,8 @@ Needs `JAVA_HOME` (Android Studio's JBR) and `ANDROID_HOME` (the SDK) when not s
 <summary>Samsung — <code>cd apps/tizen && node --test test/*.test.js</code>; <code>python3 apps/tizen/build.py [--gateway ADDR --key-file FILE] [--install TV_IP]</code></summary>
 
 Tests include the Chromium 56 syntax guard. UI check in a browser: serve the repo root and open
-`apps/tizen/app/index.html?demo` (`&channels=60` for a big guide). `build.py` packages `dist/Televize.wgt` with the
+`apps/tizen/app/index.html?demo` (`&channels=60` for a big guide; `&timeline` opens the Anténa timeline player bar over
+`spec/fixtures/dvb/dvb_timeline.json`, `&timeline=growing` as a growing window; the demo player is a clock-driven fake). `build.py` packages `dist/Televize.wgt` with the
 Tizen Studio CLI; `--gateway`/`--key-file` preset the gateway in that build only.
 
 Can go wrong: the preset key ends up in the built package — never share or commit `dist/`.
