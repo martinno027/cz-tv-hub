@@ -3,6 +3,7 @@ package cz.cztvhub.core.dvb
 import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.HouseholdDefaults
+import cz.cztvhub.core.ProgrammePage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -144,6 +145,44 @@ object DvbParser {
             next = root.str("next")?.takeIf(TimelineRules::isTimelineId),
         )
     }
+
+    /**
+     * `GET /dvb/details` (T15): `match` null or no object = no match; a match without a title is none either. A
+     * rating below [ProgrammePage.MIN_VOTES] votes is dropped, a poster that is no gateway image path too
+     * (the app never loads a URL it was sent).
+     */
+    fun parseDetails(status: Int, body: String): ProgrammeDetails {
+        val root = ok(status, body)
+        val attribution = root.str("attribution")
+        val o = root["match"] as? JsonObject ?: return ProgrammeDetails(null, attribution)
+        val title = o.str("title") ?: return ProgrammeDetails(null, attribution)
+        val rating = (o["rating"] as? JsonObject)?.let { r ->
+            val value = r.num("value") ?: return@let null
+            val votes = r.num("votes")?.takeIf { it >= ProgrammePage.MIN_VOTES && it == Math.floor(it) }
+                ?: return@let null
+            TmdbRating(value, votes.toInt())
+        }
+        val genres = (o["genres"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content?.ifBlank { null } }
+        return ProgrammeDetails(
+            TmdbMatch(
+                kind = o.str("kind").orEmpty(),
+                title = title,
+                originalTitle = o.str("originalTitle"),
+                year = o.num("year")?.toInt()?.takeIf { it in 1800..3000 },
+                overview = o.str("overview"),
+                genres = genres,
+                runtimeMinutes = o.num("runtimeMinutes")?.toInt()?.takeIf { it > 0 },
+                rating = rating,
+                poster = o.str("poster")?.takeIf(::isPosterPath),
+                tmdbId = o.str("tmdbId"),
+            ),
+            attribution,
+        )
+    }
+
+    /** A poster path from the gateway's own lookup: `/dvb/details/image/<size>/<file>`, nothing else. */
+    fun isPosterPath(path: String): Boolean =
+        path.startsWith("/dvb/details/image/") && ".." !in path && "//" !in path && '?' !in path && '#' !in path
 
     /** The gateway's Czech `error` text from a JSON error body, if any. */
     fun errorText(body: String): String? = (parse(body))?.str("error")

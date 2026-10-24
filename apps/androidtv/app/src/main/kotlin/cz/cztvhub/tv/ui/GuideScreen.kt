@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -61,7 +62,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Button
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -84,6 +86,7 @@ import cz.cztvhub.core.PspState
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
+import cz.cztvhub.core.dvb.ProgrammeDetails
 import cz.cztvhub.core.dvb.RecordingState
 import cz.cztvhub.tv.OfficialAppLauncher
 import cz.cztvhub.tv.R
@@ -162,8 +165,11 @@ private class GuideSelection {
     /** The day strip's highlight while no cell is focused: the picked chip, "Dnes" on open. */
     var chip by mutableStateOf<LocalDate?>(null)
     var notice by mutableStateOf<String?>(null)
-    var choice by mutableStateOf<Selection.Choice?>(null)
+    /** The open programme page (T15) and the broadcast day of the grid it was opened from. */
+    var page by mutableStateOf<OpenPage?>(null)
 }
+
+private data class OpenPage(val model: ProgrammePageModel, val day: LocalDate)
 
 /** "TV průvodce": EPG grid with channels as rows and time on the horizontal axis. */
 @Composable
@@ -182,21 +188,23 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         }
     }
     val resume = LocalContext.current.tvApp.resume
+    val currentDay by rememberUpdatedState(day)
     val onSelect: (Entry) -> Unit = remember(selection, resume) {
         val act: (Selection) -> Unit = { action ->
             when (action) {
                 is Selection.Notice -> selection.notice = action.text
-                is Selection.Choice -> selection.choice = action
                 is Selection.Play -> currentOnPlay(action.request)
             }
         }
         val select: (Entry) -> Unit = { entry ->
             val now = Instant.now()
-            if (entry is PspEntry && entry.isAiring(now)) {
+            when {
                 // Right before playback: a fresh enough answer, else one more check (spec/apps.md).
-                viewModel.checkPsp(entry.stream.id) { state -> act(entry.select(Instant.now(), psp = state)) }
-            } else {
-                act(entry.select(now, resume::offer))
+                entry is PspEntry && entry.isAiring(now) ->
+                    viewModel.checkPsp(entry.stream.id) { state -> act(entry.select(Instant.now(), psp = state)) }
+                entry is PspEntry -> act(entry.select(now))
+                // Every programme opens its page (T15), also future and not recorded ones.
+                else -> entry.page(now, resume::offer)?.let { selection.page = OpenPage(it, currentDay) }
             }
         }
         select
@@ -320,31 +328,34 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     }
     }
 
-    selection.choice?.let { picked ->
-        val play: (PlayRequest) -> () -> Unit = { request ->
-            {
-                selection.choice = null
-                onPlay(request)
+    selection.page?.let { open ->
+        val entry = open.model.entry
+        // Back from the player: buttons and "Pokračovat" again from what it saved (on its pause, before this).
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+            selection.page?.let { current ->
+                current.model.entry.page(Instant.now(), resume::offer)?.let { selection.page = current.copy(model = it) }
             }
         }
-        PlayChoiceDialog(
-            title = if (picked.live != null) {
-                stringResource(R.string.choice_title, picked.entry.title)
-            } else {
-                picked.entry.title
+        val details by produceState<ProgrammeDetails?>(null, entry, open.day) { value = viewModel.details(entry, open.day) }
+        val poster = remember(details) { details?.match?.poster?.let(viewModel::poster) }
+        ProgrammePageDialog(
+            page = open.model,
+            now = now,
+            details = details,
+            images = images,
+            guideImage = remember(entry, imageOf) { imageOf(entry) },
+            poster = poster,
+            notice = selection.notice,
+            // The page stays under the player (spec/apps.md).
+            onPlay = { request ->
+                selection.notice = null
+                onPlay(request)
             },
-            onDismiss = { selection.choice = null },
-            resumeLabel = picked.resumeLabel,
-            onResume = picked.resume?.let(play),
-            onFromStart = picked.fromStart?.let(play),
-            onLive = picked.live?.let(play),
-            // CT's official app only helps with CT's own programmes.
-            onOpenApp = if (picked.entry is CtEntry) {
-                {
-                    selection.choice = null
-                    onOpenApp()
-                }
-            } else null,
+            onOpenApp = onOpenApp,
+            onDismiss = {
+                selection.page = null
+                selection.notice = null
+            },
         )
     }
 }
@@ -512,7 +523,7 @@ private fun DetailPanel(
 }
 
 @Composable
-private fun stateLabel(entry: Entry, now: Instant, psp: PspState): String = when (entry) {
+internal fun stateLabel(entry: Entry, now: Instant, psp: PspState): String = when (entry) {
     is CtEntry -> when {
         entry.isAiring(now) -> stringResource(R.string.on_air_badge)
         else -> when (Decisions.decide(entry.programme, now).action) {
@@ -920,52 +931,6 @@ private fun ProgrammeCell(
             }
         }
     }
-}
-
-@Composable
-private fun PlayChoiceDialog(
-    title: String,
-    onDismiss: () -> Unit,
-    resumeLabel: String?,
-    onResume: (() -> Unit)?,
-    onFromStart: (() -> Unit)?,
-    onLive: (() -> Unit)?,
-    onOpenApp: (() -> Unit)?,
-) {
-    val first = remember { FocusRequester() }
-    // The first offered option gets the focus: "Pokračovat od …", else "Od začátku", else "Živě".
-    val firstOption = onResume ?: onFromStart ?: onLive
-    fun focusFirst(option: () -> Unit) = if (option === firstOption) Modifier.focusRequester(first) else Modifier
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier
-                .background(Palette.surface, RoundedCornerShape(16.dp))
-                .padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (onResume != null && resumeLabel != null) {
-                    Button(onClick = onResume, modifier = focusFirst(onResume)) {
-                        Text(stringResource(R.string.choice_resume, resumeLabel))
-                    }
-                }
-                if (onFromStart != null) {
-                    Button(onClick = onFromStart, modifier = focusFirst(onFromStart)) {
-                        Text(stringResource(R.string.choice_from_start))
-                    }
-                }
-                if (onLive != null) {
-                    Button(onClick = onLive, modifier = focusFirst(onLive)) { Text(stringResource(R.string.choice_live)) }
-                }
-                if (onOpenApp != null) {
-                    Button(onClick = onOpenApp) { Text(stringResource(R.string.open_ivysilani)) }
-                }
-            }
-        }
-    }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
 }
 
 /**

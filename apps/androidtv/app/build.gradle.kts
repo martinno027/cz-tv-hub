@@ -79,3 +79,15 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
 }
+
+// TmdbLogoTest compares the logo drawable with the official file in the nearest `spec/assets`, read in place:
+// declared as test inputs so a changed file reruns the tests instead of reusing the last result.
+val specAssets: File = generateSequence(rootDir.absoluteFile) { it.parentFile }
+    .map { it.resolve("spec/assets") }
+    .firstOrNull { it.isDirectory }
+    ?: throw GradleException("spec/assets not found in any parent of $rootDir")
+
+tasks.withType<Test>().configureEach {
+    inputs.dir(specAssets).withPropertyName("specAssets")
+    inputs.file("src/main/res/drawable/tmdb_logo_short.xml").withPropertyName("tmdbLogo")
+}

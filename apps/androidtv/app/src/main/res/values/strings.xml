@@ -12,7 +12,6 @@
     <string name="state_vod">Přehrát z archivu</string>
     <string name="state_startover">Zpět v čase</string>
     <string name="state_unavailable">Pravděpodobně nedostupné</string>
-    <string name="choice_title">%1$s právě běží</string>
     <string name="choice_from_start">Od začátku</string>
     <string name="choice_live">Živě</string>
     <string name="choice_resume">Pokračovat od %1$s</string>

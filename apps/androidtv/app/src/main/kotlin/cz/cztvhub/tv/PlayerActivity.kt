@@ -319,6 +319,12 @@ class PlayerActivity : ComponentActivity() {
         startTimelineRefresh()
     }
 
+    // Also on pause: the guide's programme page recomputes "Pokračovat" in its onResume, which runs before onStop.
+    override fun onPause() {
+        super.onPause()
+        saveProgress()
+    }
+
     override fun onStop() {
         super.onStop()
         saveProgress()

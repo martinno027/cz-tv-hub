@@ -6,13 +6,16 @@ import androidx.lifecycle.viewModelScope
 import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.Days
+import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.OnAir
 import cz.cztvhub.core.OnAirLike
 import cz.cztvhub.core.Programme
 import cz.cztvhub.core.PspState
+import cz.cztvhub.core.dvb.DetailsQuery
 import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbEvent
 import cz.cztvhub.core.dvb.DvbThumbnails
+import cz.cztvhub.core.dvb.ProgrammeDetails
 import cz.cztvhub.tv.tvApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -96,6 +99,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val client = app.dvb()?.client ?: return null
         val id = DvbThumbnails.recordingId(event, _dvb.value?.thumbnails == true, antennaThumbnails.value) ?: return null
         return client.thumbnailUrl(id) to client.config.authHeaders
+    }
+
+    /**
+     * TMDb facts for the programme page (T15, spec/apps.md), from the gateway only: null without a gateway, for
+     * a Poslanecká sněmovna stream, on `404` (details off, unknown programme) or any failure. [day] = the broadcast
+     * day of the guide grid the CT programme came from.
+     */
+    suspend fun details(entry: Entry, day: LocalDate): ProgrammeDetails? {
+        val client = app.dvb()?.client ?: return null
+        val query = when (entry) {
+            is CtEntry -> DetailsQuery.Ct(entry.channel.slug, day, entry.programme.idec)
+            is DvbEntry -> DetailsQuery.Dvb(entry.event.id)
+            is PspEntry -> return null
+        }
+        return withContext(Dispatchers.IO) {
+            try {
+                client.details(query)
+            } catch (_: CtException) {
+                null
+            }
+        }
+    }
+
+    /** A TMDb poster through the gateway (a gateway path, with the key); memory only like thumbnails. */
+    fun poster(path: String): ImageRequest? {
+        val client = app.dvb()?.client ?: return null
+        return client.posterUrl(path)?.let { ImageRequest(it, client.config.authHeaders, gateway = true) }
     }
 
     private val _now = MutableStateFlow(Instant.now())
