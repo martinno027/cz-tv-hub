@@ -14,12 +14,15 @@ import threading
 import time
 import urllib.parse
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .. import api as ct_api
+from ..channels import CHANNELS as CT_CHANNELS
 from ..config import Config
 from . import breaks as ads
+from . import details as tmdb
 from .archive import Archive, ArchiveError, parse_recording_id
 from .buffer import BufferStore
 from .recorder import RecorderManager
@@ -61,6 +64,13 @@ VOD_WAIT_SECONDS = 5.0  # short finished recordings are fully remuxed by then an
 ZAP_IDLE_SECONDS = 8.0  # a live session nobody polled for this long no longer has a viewer
 THUMB_RETRY_AFTER = 5  # seconds; both ffmpeg slots stayed busy (several TVs prefetching)
 THUMB_DVR_SECONDS = 5.0  # one DVR list for all thumbnail requests; a deleted recording is gone within this
+DETAILS_PATH = "/dvb/details"
+DETAILS_IMAGE_RE = re.compile(rf"^/dvb/details/image/w342/({tmdb.POSTER_FILE})$")
+EVENT_ID_RE = re.compile(r"^[A-Za-z0-9:_-]{1,128}$")  # TVHeadend event ids, "dvr:<uuid>"
+IDEC_RE = re.compile(r"^[A-Za-z0-9]{1,32}$")
+CT_SCHEDULE_SECONDS = 600.0  # the CT schedule of a day, for /dvb/details?source=ct
+CT_DAYS_BACK, CT_DAYS_AHEAD = 7, 2  # the apps' guide range (spec/apps.md "TV průvodce")
+POSTER_RETRY_AFTER = 5
 JSON = "application/json; charset=utf-8"
 M3U8 = "application/vnd.apple.mpegurl"
 MEDIA_TYPES = {".m4s": "video/iso.segment", ".mp4": "video/mp4"}
@@ -132,6 +142,14 @@ class DvbGateway:
         self._thumb_dvr: list[DvrEntry] = []
         self._thumb_dvr_at = float("-inf")
         self._thumb_dvr_lock = threading.Lock()
+        if cfg.tmdb.enabled:
+            self.details: tmdb.Details | None = tmdb.Details(cfg.tmdb.key, self.dvb.state_dir, now=now, log=log)
+        else:
+            self.details = None
+            tmdb.remove_cache(self.dvb.state_dir, log)  # no key, nothing from TMDb kept
+        self.fetch_schedules = ct_api.fetch_schedules
+        self._ct_schedules: dict[tuple[str, date], tuple[float, list[ct_api.Programme]]] = {}
+        self._ct_lock = threading.Lock()
 
     # -- lifecycle -------------------------------------------------------------------------
     def start(self) -> None:
@@ -203,6 +221,10 @@ class DvbGateway:
             return self.epg(query.get("date"))
         if path == "/dvb/defaults":
             return json_response(200, self.defaults.get())
+        if path == DETAILS_PATH:
+            return self.programme_details(query)
+        if m := DETAILS_IMAGE_RE.match(path):
+            return self.details_poster(m.group(1))
         if m := HLS_RE.match(path):
             return self.media(m.group(1), m.group(2), headers.get("Range"))
         if path.startswith(VIEW_PREFIX):
@@ -566,6 +588,88 @@ class DvbGateway:
         # open-GOP HEVC: keyframe after its leading pictures again (ffmpeg HLS muxer bug, fmp4.py)
         data = fmp4.fix_leading_pictures(data, session.hevc_track)
         return fmp4.shift_fragments(data, session.shifts)
+
+    # -- programme details (details.py) ----------------------------------------------------
+    def programme_details(self, query: Mapping[str, str]) -> Response:
+        """TMDb facts of a programme the gateway knows by id (spec/dvb-gateway.md "Programme details"):
+        never a title a client sends."""
+        if self.details is None:
+            raise HttpError(404, "Podrobnosti nejsou zapnuté")
+        source = query.get("source")
+        if source == "dvb":
+            programme = self._dvb_programme(query.get("id") or "")
+        elif source == "ct":
+            programme = self._ct_programme(query.get("channel") or "", query.get("date") or "",
+                                           query.get("idec") or "")
+        else:
+            raise HttpError(400, "Parametr source musí být dvb nebo ct")
+        return json_response(200, self.details.lookup(programme))
+
+    def _dvb_programme(self, event_id: str) -> tmdb.Programme:
+        if not EVENT_ID_RE.match(event_id):
+            raise HttpError(400, "Chybí nebo je neplatné id pořadu")
+        offered = {c.uuid for c in self._channel_list()}  # hidden channels have no programmes
+        found = next((e for e in self.history.between(0, 2 ** 62) if e.event_id == event_id), None)
+        if found is None:
+            today = epg.broadcast_day(datetime.fromtimestamp(self.now(), timezone.utc))
+            first, last = epg.allowed_days(today, max(self.dvb.retention_days, self.archive.max_days()))
+            found = next((e for e in self.client.epg_events(epg.day_bounds(first)[0], epg.day_bounds(last)[1])
+                          if e.event_id == event_id), None)
+        if found is None:  # a past programme known only from its DVR entry (epg.build_epg ids)
+            found = next((e for e in self.client.dvr_entries("grid")
+                          if e.broadcast == event_id or "dvr:" + e.uuid == event_id), None)
+        if found is None or found.channel not in offered:
+            raise HttpError(404, "Pořad nenalezen")
+        return tmdb.Programme(found.title, description=found.description, genres=tuple(found.genre))
+
+    def _ct_programme(self, slug: str, day_param: str, idec: str) -> tmdb.Programme:
+        if slug not in {c.slug for c in CT_CHANNELS}:
+            raise HttpError(404, "Neznámý kanál")
+        try:
+            day = date.fromisoformat(day_param)
+        except ValueError:
+            raise HttpError(400, "Neplatné datum (YYYY-MM-DD)")
+        if not IDEC_RE.match(idec):
+            raise HttpError(400, "Chybí nebo je neplatný idec")
+        today = epg.broadcast_day(datetime.fromtimestamp(self.now(), timezone.utc))
+        if not (today - timedelta(days=CT_DAYS_BACK)) <= day <= (today + timedelta(days=CT_DAYS_AHEAD)):
+            raise HttpError(400, "Datum je mimo rozsah průvodce")
+        found = next((p for p in self._ct_schedule(slug, day) if p.idec == idec), None)
+        if found is None:
+            raise HttpError(404, "Pořad nenalezen")
+        return tmdb.Programme(found.title, episode=found.episode, description=found.description, genre=found.genre)
+
+    def _ct_schedule(self, slug: str, day: date) -> list[ct_api.Programme]:
+        """One CT channel's day, cached 10 min (the same API call as the add-on's guide)."""
+        with self._ct_lock:
+            hit = self._ct_schedules.get((slug, day))
+            if hit and time.monotonic() - hit[0] < CT_SCHEDULE_SECONDS:
+                return hit[1]
+        try:
+            programmes = self.fetch_schedules([slug], day).get(slug, [])
+        except ct_api.StreamError as exc:
+            self.log(f"dvb: details: CT schedule {slug} {day.isoformat()}: {exc}")
+            raise HttpError(502, "Program ČT se nepodařilo načíst")
+        with self._ct_lock:
+            now = time.monotonic()
+            self._ct_schedules = {k: v for k, v in self._ct_schedules.items() if now - v[0] < CT_SCHEDULE_SECONDS}
+            self._ct_schedules[(slug, day)] = (now, programmes)
+        return programmes
+
+    def details_poster(self, file: str) -> Response:
+        """A poster of one of the gateway's own TMDb matches; any other file is unknown."""
+        if self.details is None:
+            raise HttpError(404, "Podrobnosti nejsou zapnuté")
+        try:
+            found = self.details.poster(file)
+        except tmdb.TmdbBusy:
+            return error(503, tmdb.TmdbBusy.user_message, {"Retry-After": str(POSTER_RETRY_AFTER)})
+        except tmdb.TmdbError as exc:
+            self.log(f"dvb: details: {exc}")
+            raise HttpError(502, "Plakát se nepodařilo načíst")
+        if found is None:
+            raise HttpError(404, "Plakát není k dispozici")
+        return Response(200, found[0], found[1], {"Cache-Control": "private, no-store"})
 
     # -- profiles (profiles.py) ------------------------------------------------------------
     def _profile_route(self, method: str, path: str, headers: Mapping[str, str], body: bytes) -> Response:
