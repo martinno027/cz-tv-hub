@@ -66,26 +66,76 @@ public enum ResumeRules {
     }
 }
 
+/// What a "Pokračovat" entry shows in the Archiv tab's "Pokračovat ve sledování" row (spec/apps.md "Archiv"), kept
+/// on the device only. `start` and `channel` let the row play the entry at once without the guide.
+public struct ResumeCard: Sendable, Equatable, Codable {
+    public enum Source: String, Sendable, Codable {
+        case ct, dvb
+    }
+
+    /// The programme or episode.
+    public var title: String
+    /// The show the episode belongs to; empty for a programme on its own.
+    public var showTitle: String
+    /// The card image as the card had it: a ČT image URL or a gateway path.
+    public var image: String?
+    public var source: Source
+    /// The programme's start (the decision rules and the timeline player need it to play the entry).
+    public var start: Date?
+    /// ČT: the channel id ("CH_1"); Anténa: the channel name for the player's second line.
+    public var channel: String?
+
+    public init(title: String, showTitle: String = "", image: String? = nil, source: Source, start: Date? = nil,
+                channel: String? = nil) {
+        self.title = title
+        self.showTitle = showTitle
+        self.image = image
+        self.source = source
+        self.start = start
+        self.channel = channel
+    }
+
+    /// A guide programme: its episode as the title and the programme as the show, else the programme alone.
+    public static func programme(title: String, episode: String, image: String?, source: Source, start: Date,
+                                 channel: String?) -> ResumeCard {
+        let episode = episode.trimmingCharacters(in: .whitespacesAndNewlines)
+        return episode.isEmpty
+            ? ResumeCard(title: title, image: image, source: source, start: start, channel: channel)
+            : ResumeCard(title: episode, showTitle: title, image: image, source: source, start: start, channel: channel)
+    }
+}
+
 /// What the player saves progress for: the store key, the programme's start and its length.
 public struct ResumeTarget: Sendable, Equatable {
     public let key: String
     public let programmeStart: Date
     public let length: TimeInterval
+    /// What the Archiv row shows for it; nil keeps what an earlier save stored.
+    public let card: ResumeCard?
 
-    public init(key: String, programmeStart: Date, length: TimeInterval) {
+    public init(key: String, programmeStart: Date, length: TimeInterval, card: ResumeCard? = nil) {
         self.key = key
         self.programmeStart = programmeStart
         self.length = length
+        self.card = card
     }
 
-    public static func ct(_ programme: Programme) -> ResumeTarget {
-        ResumeTarget(key: ResumeRules.ctKey(idec: programme.idec), programmeStart: programme.start,
-                     length: programme.end.timeIntervalSince(programme.start))
+    public static func ct(_ programme: Programme, card: ResumeCard? = nil) -> ResumeTarget {
+        let channel = Channels.bySlug(programme.channel)
+        return ResumeTarget(key: ResumeRules.ctKey(idec: programme.idec), programmeStart: programme.start,
+                            length: programme.end.timeIntervalSince(programme.start),
+                            card: card ?? .programme(title: programme.title, episode: programme.episodeTitle,
+                                                     image: programme.imageURL?.absoluteString, source: .ct,
+                                                     start: programme.start, channel: channel?.id))
     }
 
-    public static func antenna(recordingID: String, event: DVBEvent) -> ResumeTarget {
+    public static func antenna(recordingID: String, event: DVBEvent, channelName: String? = nil,
+                               card: ResumeCard? = nil) -> ResumeTarget {
         ResumeTarget(key: ResumeRules.dvbKey(recordingID: recordingID), programmeStart: event.start,
-                     length: event.end.timeIntervalSince(event.start))
+                     length: event.end.timeIntervalSince(event.start),
+                     card: card ?? .programme(title: event.title, episode: event.subtitle,
+                                              image: ArchiveImage.thumbnail(recordingID: recordingID).stored,
+                                              source: .dvb, start: event.start, channel: channelName))
     }
 }
 
@@ -93,12 +143,18 @@ public struct ResumeEntry: Sendable, Equatable, Codable {
     public let progressSeconds: TimeInterval
     public let lengthSeconds: TimeInterval
     public let savedAt: Date
+    /// T13 on: what the Archiv row shows (`title`, `showTitle`, `image`, `source`); missing in entries saved before.
+    public let card: ResumeCard?
 
-    public init(progressSeconds: TimeInterval, lengthSeconds: TimeInterval, savedAt: Date) {
+    public init(progressSeconds: TimeInterval, lengthSeconds: TimeInterval, savedAt: Date, card: ResumeCard? = nil) {
         self.progressSeconds = progressSeconds
         self.lengthSeconds = lengthSeconds
         self.savedAt = savedAt
+        self.card = card
     }
+
+    /// The row's title; nil (left out of the row) for entries from before T13.
+    public var title: String? { card?.title }
 }
 
 /// Key-value storage for the store; `UserDefaults` in the app, an in-memory one in tests.
@@ -145,7 +201,8 @@ public final class ResumeStore {
         case .clear:
             guard all.removeValue(forKey: target.key) != nil else { return }
         case .offer(let seconds):
-            all[target.key] = ResumeEntry(progressSeconds: seconds, lengthSeconds: target.length, savedAt: clock())
+            all[target.key] = ResumeEntry(progressSeconds: seconds, lengthSeconds: target.length, savedAt: clock(),
+                                          card: target.card ?? all[target.key]?.card)
         }
         write(all)
     }
@@ -157,6 +214,9 @@ public final class ResumeStore {
     }
 
     public var count: Int { entries().count }
+
+    /// "Pokračovat ve sledování" (spec/apps.md "Archiv"): entries with a title, newest first, at most 20.
+    public func continueRow() -> [(key: String, entry: ResumeEntry)] { ArchiveRules.continueRow(entries()) }
 
     // MARK: storage
 

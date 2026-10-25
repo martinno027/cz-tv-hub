@@ -1,0 +1,440 @@
+{
+ "_doc": "Archive (spec/dvb-gateway.md 'Archive', spec/apps.md 'Archiv'). categories: ČT category slugs for one of our recorded shows, from its stored TMDb match (kind + genre ids) or, without one, its DVB genre and title. normalise: the key that makes an iVysílání show and our recordings one card. merge: card source and order. continueRow: which resume entries the row shows, in order (max 20).",
+ "categories": [
+  {
+   "name": "movie comedy",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     35
+    ]
+   },
+   "categories": [
+    "3947-filmy"
+   ]
+  },
+  {
+   "name": "movie documentary",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     99
+    ]
+   },
+   "categories": [
+    "4003-dokumenty"
+   ]
+  },
+  {
+   "name": "animated family movie",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     16,
+     10751
+    ]
+   },
+   "categories": [
+    "3947-filmy",
+    "4118-pro-deti"
+   ]
+  },
+  {
+   "name": "history war movie",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     36,
+     10752
+    ]
+   },
+   "categories": [
+    "3947-filmy",
+    "4079-historie"
+   ]
+  },
+  {
+   "name": "music film",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     10402,
+     18
+    ]
+   },
+   "categories": [
+    "3947-filmy",
+    "4029-kultura"
+   ]
+  },
+  {
+   "name": "tv drama",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     18,
+     80
+    ]
+   },
+   "categories": [
+    "3976-serialy"
+   ]
+  },
+  {
+   "name": "tv documentary",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     99
+    ]
+   },
+   "categories": [
+    "4003-dokumenty"
+   ]
+  },
+  {
+   "name": "tv news",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     10763
+    ]
+   },
+   "categories": [
+    "4124-zpravodajstvi"
+   ]
+  },
+  {
+   "name": "tv reality",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     10764
+    ]
+   },
+   "categories": [
+    "4068-zabava"
+   ]
+  },
+  {
+   "name": "tv kids animation",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     10762,
+     16
+    ]
+   },
+   "categories": [
+    "3976-serialy",
+    "4118-pro-deti"
+   ]
+  },
+  {
+   "name": "no match: film",
+   "dvb": {
+    "genre": "Film / drama",
+    "title": "Hněv Titánů"
+   },
+   "categories": [
+    "3947-filmy"
+   ]
+  },
+  {
+   "name": "no match: film with an episode number is a series",
+   "dvb": {
+    "genre": "Film / drama",
+    "title": "Kobra 11 IV (13)"
+   },
+   "categories": [
+    "3976-serialy"
+   ]
+  },
+  {
+   "name": "no match: news",
+   "dvb": {
+    "genre": "Zprávy",
+    "title": "Televizní noviny"
+   },
+   "categories": [
+    "4124-zpravodajstvi"
+   ]
+  },
+  {
+   "name": "no match: education",
+   "dvb": {
+    "genre": "Vzdělávání / věda",
+    "title": "Příroda"
+   },
+   "categories": [
+    "4003-dokumenty"
+   ]
+  },
+  {
+   "name": "no match: leisure",
+   "dvb": {
+    "genre": "Volný čas",
+    "title": "Receptář"
+   },
+   "categories": [
+    "4055-rady-a-recepty"
+   ]
+  },
+  {
+   "name": "no match, no genre",
+   "dvb": {
+    "genre": "",
+    "title": "Teleshopping"
+   },
+   "categories": []
+  }
+ ],
+ "normalise": [
+  {
+   "title": "Ordinace v růžové zahradě 2",
+   "key": "ordinacevruzovezahrade2"
+  },
+  {
+   "title": "ORDINACE V RŮŽOVÉ ZAHRADĚ 2",
+   "key": "ordinacevruzovezahrade2"
+  },
+  {
+   "title": "Mistři zastavárny VI (14)",
+   "key": "mistrizastavarny"
+  },
+  {
+   "title": "Kobra 11 IV (13)",
+   "key": "kobra11"
+  },
+  {
+   "title": "Film: Hněv Titánů",
+   "key": "hnevtitanu"
+  }
+ ],
+ "merge": [
+  {
+   "name": "same show in both: one card, iVysílání first",
+   "ct": [
+    {
+     "id": "ct:1",
+     "title": "Ordinace v růžové zahradě 2"
+    }
+   ],
+   "rec": [
+    {
+     "title": "Ordinace v růžové zahradě 2 (412)"
+    }
+   ],
+   "cards": [
+    {
+     "id": "ct:1",
+     "source": "both"
+    }
+   ]
+  },
+  {
+   "name": "only ours",
+   "ct": [],
+   "rec": [
+    {
+     "title": "Mistři zastavárny VI (14)"
+    },
+    {
+     "title": "Mistři zastavárny VI (15)"
+    }
+   ],
+   "cards": [
+    {
+     "id": "rec:mistrizastavarny",
+     "source": "rec"
+    }
+   ]
+  },
+  {
+   "name": "different titles stay apart",
+   "ct": [
+    {
+     "id": "ct:2",
+     "title": "Vyprávěj"
+    }
+   ],
+   "rec": [
+    {
+     "title": "Vyprávěj příběh"
+    }
+   ],
+   "cards": [
+    {
+     "id": "ct:2",
+     "source": "ct"
+    },
+    {
+     "id": "rec:vypravejpribeh",
+     "source": "rec"
+    }
+   ]
+  }
+ ],
+ "continueRow": [
+  {
+   "name": "newest first, entries without a title left out, at most 20",
+   "entries": [
+    {
+     "key": "ct:1",
+     "savedAt": "2026-10-24T10:00:00Z",
+     "title": "1/26 Od začátku"
+    },
+    {
+     "key": "dvb:b1-1-2",
+     "savedAt": "2026-10-25T08:00:00Z",
+     "title": "Mistři zastavárny VI (14)"
+    },
+    {
+     "key": "ct:2",
+     "savedAt": "2026-10-25T09:00:00Z"
+    }
+   ],
+   "row": [
+    "dvb:b1-1-2",
+    "ct:1"
+   ]
+  },
+  {
+   "name": "22 entries: only the 20 newest",
+   "entries": [
+    {
+     "key": "ct:1",
+     "savedAt": "2026-10-02T01:00:00Z",
+     "title": "Díl 1"
+    },
+    {
+     "key": "ct:2",
+     "savedAt": "2026-10-03T02:00:00Z",
+     "title": "Díl 2"
+    },
+    {
+     "key": "ct:3",
+     "savedAt": "2026-10-04T03:00:00Z",
+     "title": "Díl 3"
+    },
+    {
+     "key": "ct:4",
+     "savedAt": "2026-10-05T04:00:00Z",
+     "title": "Díl 4"
+    },
+    {
+     "key": "ct:5",
+     "savedAt": "2026-10-06T05:00:00Z",
+     "title": "Díl 5"
+    },
+    {
+     "key": "ct:6",
+     "savedAt": "2026-10-07T06:00:00Z",
+     "title": "Díl 6"
+    },
+    {
+     "key": "ct:7",
+     "savedAt": "2026-10-08T07:00:00Z",
+     "title": "Díl 7"
+    },
+    {
+     "key": "ct:8",
+     "savedAt": "2026-10-09T08:00:00Z",
+     "title": "Díl 8"
+    },
+    {
+     "key": "ct:9",
+     "savedAt": "2026-10-10T09:00:00Z",
+     "title": "Díl 9"
+    },
+    {
+     "key": "ct:10",
+     "savedAt": "2026-10-11T10:00:00Z",
+     "title": "Díl 10"
+    },
+    {
+     "key": "ct:11",
+     "savedAt": "2026-10-12T11:00:00Z",
+     "title": "Díl 11"
+    },
+    {
+     "key": "ct:12",
+     "savedAt": "2026-10-13T12:00:00Z",
+     "title": "Díl 12"
+    },
+    {
+     "key": "ct:13",
+     "savedAt": "2026-10-14T13:00:00Z",
+     "title": "Díl 13"
+    },
+    {
+     "key": "ct:14",
+     "savedAt": "2026-10-15T14:00:00Z",
+     "title": "Díl 14"
+    },
+    {
+     "key": "ct:15",
+     "savedAt": "2026-10-16T15:00:00Z",
+     "title": "Díl 15"
+    },
+    {
+     "key": "ct:16",
+     "savedAt": "2026-10-17T16:00:00Z",
+     "title": "Díl 16"
+    },
+    {
+     "key": "ct:17",
+     "savedAt": "2026-10-18T17:00:00Z",
+     "title": "Díl 17"
+    },
+    {
+     "key": "ct:18",
+     "savedAt": "2026-10-19T18:00:00Z",
+     "title": "Díl 18"
+    },
+    {
+     "key": "ct:19",
+     "savedAt": "2026-10-20T19:00:00Z",
+     "title": "Díl 19"
+    },
+    {
+     "key": "ct:20",
+     "savedAt": "2026-10-01T20:00:00Z",
+     "title": "Díl 20"
+    },
+    {
+     "key": "ct:21",
+     "savedAt": "2026-10-02T21:00:00Z",
+     "title": "Díl 21"
+    },
+    {
+     "key": "ct:22",
+     "savedAt": "2026-10-03T22:00:00Z",
+     "title": "Díl 22"
+    }
+   ],
+   "row": [
+    "ct:19",
+    "ct:18",
+    "ct:17",
+    "ct:16",
+    "ct:15",
+    "ct:14",
+    "ct:13",
+    "ct:12",
+    "ct:11",
+    "ct:10",
+    "ct:9",
+    "ct:8",
+    "ct:7",
+    "ct:6",
+    "ct:5",
+    "ct:4",
+    "ct:3",
+    "ct:22",
+    "ct:2",
+    "ct:21"
+   ]
+  }
+ ]
+}

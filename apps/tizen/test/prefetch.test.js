@@ -101,6 +101,22 @@ test('loader: requests that left the window are dropped, running ones finish', a
   assert.equal(p.l.get('ct:1'), 'blob:ct:1');
 });
 
+test('loader: Archiv card loads (keep) survive the guide\'s next window, plain loads do not', async () => {
+  const p = loader({ limits: { ct: 1, gw: 1 } });
+  p.l.prefetch([ct(1)]);
+  let card = null;
+  p.l.load(Object.assign(ct('card'), { keep: true }), (url) => { card = url; });
+  p.l.load(ct('focused'), () => {});
+  p.l.prefetch([ct(2)]); // the guide moved on (also while another tab is shown)
+  answer(p, 'ct:1', 200);
+  await tick();
+  assert.deepEqual(p.pending.map((x) => x.req.key), ['ct:card']);
+  answer(p, 'ct:card', 200);
+  await tick();
+  assert.equal(card, 'blob:ct:card');
+  assert.deepEqual(p.pending.map((x) => x.req.key), ['ct:2']);
+});
+
 test('loader: a 404 is not asked again (finished recording) or for 60 s (growing recording)', async () => {
   const p = loader();
   p.l.prefetch([gw('done'), gw('rec', false)]);

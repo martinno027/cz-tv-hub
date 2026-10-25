@@ -27,6 +27,8 @@ final class TimelineController {
     let channelName: String
 
     @ObservationIgnored private let client: DVBClient
+    /// What the Archiv row shows for the programme the player was opened for (its show's title and image).
+    @ObservationIgnored private let firstCard: ResumeCard?
     @ObservationIgnored private weak var controller: PlayerController?
     @ObservationIgnored private var player: AVPlayer? { controller?.player }
     /// Wall clock the next resolve starts at (the programme start − 30 s, "Pokračovat", or a window hand-off).
@@ -54,8 +56,9 @@ final class TimelineController {
     /// A full swipe across the touch surface scrubs about this far.
     static let swipeSeconds: Double = 600
 
-    init(client: DVBClient, programmeID: String, startTime: Date, channelName: String) {
+    init(client: DVBClient, programmeID: String, startTime: Date, channelName: String, firstCard: ResumeCard? = nil) {
         self.client = client
+        self.firstCard = firstCard
         self.firstID = programmeID
         self.startTime = startTime
         self.channelName = channelName
@@ -159,8 +162,13 @@ final class TimelineController {
     /// "Pokračovat": the programme at the playhead (with an id) and the seconds since its start.
     func progress(at position: Double) -> (target: ResumeTarget, progress: TimeInterval)? {
         guard let programme = programme(at: position), let id = programme.id, let time = time(at: position) else { return nil }
+        // the opened programme with what the archive showed, the neighbours with their own title and still
+        let card = firstCard != nil && id == firstID ? firstCard : .programme(
+            title: programme.title, episode: programme.subtitle,
+            image: ArchiveImage.thumbnail(recordingID: id).stored, source: .dvb, start: programme.start,
+            channel: channelName)
         let target = ResumeTarget(key: ResumeRules.dvbKey(recordingID: id), programmeStart: programme.start,
-                                  length: programme.length)
+                                  length: programme.length, card: card)
         return (target, TimelineRules.resumeProgress(time: time, programmeStart: programme.start))
     }
 

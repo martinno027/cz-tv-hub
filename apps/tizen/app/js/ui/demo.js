@@ -13,6 +13,11 @@
  * `?demo&defaults=none` = no default (version 0). Change CT.Demo.defaults from the console and open Nastavení.
  * Programme page: /dvb/details answers from memory, a synthetic match (rating, original title, a generated poster)
  * for every Anténa "Film: …" programme and "no match" for everything else (CT programmes included).
+ * Archiv: /dvb/archive… answers from spec/fixtures/dvb/dvb_archive_{home,category,search,show_series,show_movie}.json
+ * when they are there, else from generated shows in memory (`?demo&archive=memory` always uses those,
+ * `?demo&archive=ctdown` plays iVysílání not answering: the gateway's text, only our recordings): rows,
+ * categories with 3 pages, search by title, a film and a series with seasons, pages and our recorded episodes (one
+ * of them is the sample timeline, so it opens the Anténa player).
  */
 (function (root) {
   'use strict';
@@ -187,6 +192,7 @@
     if (/\/dvb\/profiles?(\/|$)/.test(url)) return profileApi(request);
     if (/\/dvb\/defaults$/.test(url)) return answer(200, defaults);
     if (/\/dvb\/details\?/.test(url)) return details(url);
+    if (/\/dvb\/archive(\/|\?|$)/.test(url)) return archive(url);
     if (url.indexOf('pspcr-ott-live.ssl.cdn.cra.cz') >= 0) {
       return new Promise(function (resolve) { setTimeout(function () { resolve(pspPlaylist(url)); }, 300); });
     }
@@ -223,6 +229,173 @@
       return Promise.resolve({ status: 200, body: '{"state": "done", "breaks": [{"start": 400, "end": 700}]}' });
     }
     return Promise.resolve({ status: 200, body: '#EXTM3U' });
+  }
+
+  // --- Archiv ---
+  var ARCHIVE_MEMORY = /[?&]archive=(memory|ctdown)\b/.test(root.location.search);
+  // `?demo&archive=ctdown`: iVysílání "does not answer" (200 with the gateway's text, only our recordings; ČT pages 502)
+  var CT_DOWN = /[?&]archive=ctdown\b/.test(root.location.search);
+  var CT_DOWN_TEXT = 'iVysílání teď neodpovídá';
+  var SAMPLE_RECORDING = 'bnova1-1792832400-1792834200'; // the sample timeline's programme
+  var CATEGORIES = [['3947-filmy', 'Filmy'], ['3976-serialy', 'Seriály'], ['4003-dokumenty', 'Dokumenty'],
+    ['4124-zpravodajstvi', 'Zpravodajství'], ['4118-pro-deti', 'Pro děti'], ['4068-zabava', 'Zábava'],
+    ['4079-historie', 'Historie'], ['4732-archiv', 'Archiv']];
+  var SHOW_TITLES = ['Most!', 'Pelíšky', 'Vyprávěj', 'Četnické humoresky', 'Hercule Poirot', 'Návštěvníci',
+    'Arabela', 'Chalupáři', 'Kocour Modroočko', 'Byl jednou jeden život', 'Ordinace v růžové zahradě 2',
+    'Mistři zastavárny', 'Hněv Titánů', 'Testovací obrazec', 'Dokument o anténách', 'Kulturní magazín',
+    'Večerníček', 'Zprávy', 'Krotitelé dluhů', 'Pošta pro tebe'];
+
+  /** A generated card: films are every third, a TMDb rating on some, sources mixed (globe, antenna, both). */
+  function demoCard(n, salt) {
+    var title = SHOW_TITLES[(n + salt) % SHOW_TITLES.length] + (n >= SHOW_TITLES.length ? ' ' + (Math.floor(n / SHOW_TITLES.length) + 1) : '');
+    var movie = n % 3 === 1 && n % 7 !== 5;
+    var source = ['ct', 'both', 'ct', 'rec'][n % 4];
+    var card = { id: (source === 'rec' ? 'rec:' : 'ct:') + 'demo' + salt + '-' + n, source: source, title: title,
+      kind: movie ? 'movie' : 'series', year: 1975 + (n * 7 + salt) % 50, genres: [],
+      image: source === 'rec' && n % 8 === 3 ? '/dvb/recording/' + SAMPLE_RECORDING + '/thumb.jpg'
+        : n % 5 === 2 ? '/dvb/details/image/w342/demo-poster.jpg' : 'https://img.example.invalid/archiv-' + salt + '-' + n + '.jpg',
+      rating: n % 2 === 0 ? { value: 5 + (n * 37 % 45) / 10, votes: n % 6 === 0 ? 12 : 300 + n * 17 } : null };
+    card.tmdb = (!!card.rating && card.rating.votes >= 20) || n % 5 === 2;
+    if (n % 7 === 5) { // as ČT's search gives them: no kind, no year
+      card.kind = null;
+      delete card.year;
+    }
+    if (!movie) card.episodeCount = 3 + n % 40;
+    else card.durationMinutes = 85 + n % 40;
+    return card;
+  }
+
+  function demoCards(salt, from, count) {
+    var cards = [];
+    for (var i = from; i < from + count; i++) cards.push(demoCard(i, salt));
+    return cards;
+  }
+
+  function demoHome() {
+    var rows = [{ id: 'recordings', title: 'Naše nahrávky', cards: demoCards(3, 0, 6).map(function (c, i) {
+      return Object.assign({}, c, { id: 'rec:nahravka' + i, source: 'rec', image: '/dvb/recording/' + SAMPLE_RECORDING + '/thumb.jpg', rating: null });
+    }), more: false }];
+    CATEGORIES.forEach(function (c, i) { rows.push({ id: c[0], title: c[1], cards: demoCards(i + 1, 0, 12), more: true }); });
+    return { rows: rows };
+  }
+
+  function demoCategory(slug, genre, sort, page) {
+    var c = CATEGORIES.filter(function (x) { return x[0] === slug; })[0] || [slug, slug === 'recordings' ? 'Naše nahrávky' : slug];
+    var salt = CATEGORIES.indexOf(c) + 1 + (genre ? Number(genre) : 0) + (sort === 'newest' ? 5 : sort === 'az' ? 9 : 0);
+    var cards = demoCards(salt, (page - 1) * 24, 24);
+    if (sort === 'az') cards.sort(function (a, b) { return a.title.localeCompare(b.title, 'cs'); });
+    return { title: c[1], genres: slug === 'recordings' ? [] : [{ id: '1', title: 'Komedie' }, { id: '2', title: 'Drama' },
+      { id: '3', title: 'Krimi' }, { id: '4', title: 'Pohádky' }], cards: cards, nextPage: page < 3 ? page + 1 : null };
+  }
+
+  function demoSearch(q, page) {
+    var plain = function (t) { return t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); };
+    var all = demoCards(0, 0, 60).filter(function (c) { return plain(c.title).indexOf(plain(q)) >= 0; });
+    return { cards: all.slice((page - 1) * 20, page * 20), nextPage: all.length > page * 20 ? page + 1 : null };
+  }
+
+  function demoEpisodes(season, page, count) {
+    var episodes = [];
+    for (var i = 0; i < count; i++) {
+      var n = (page - 1) * 15 + i + 1;
+      var aired = Date.parse('2019-01-09T19:20:00Z') + ((season - 1) * 30 + n) * 7 * 24 * 3600 * 1000;
+      episodes.push({ source: 'ct', idec: 'demo-' + season + '-' + n, title: n + '/26 Díl číslo ' + n,
+        description: 'Smyšlený popis dílu z ukázky.', durationSeconds: 3180, aired: new Date(aired).toISOString(),
+        channel: n % 4 === 0 ? 'ČT2' : 'ČT1', playable: n % 5 !== 0 });
+    }
+    return episodes;
+  }
+
+  function demoShow(id, season, page) {
+    var n = Number((/-(\d+)$/.exec(id) || [0, 0])[1]);
+    var salt = Number((/demo(\d+)-/.exec(id) || [0, 0])[1]);
+    var card = /^rec:nahravka/.test(id) ? Object.assign(demoCard(n, 3), { id: id, source: 'rec', kind: 'series' }) : demoCard(n, salt);
+    var recorded = { title: 'Nahráno z antény', episodes: [
+      { source: 'rec', recordingId: SAMPLE_RECORDING, title: card.title + ' (14)', description: 'Naše nahrávka z ukázky.',
+        durationSeconds: 1800, aired: '2026-10-24T05:00:00Z', channel: 'Nova HD', playable: true },
+      { source: 'rec', recordingId: 'bnova1-1792700000-1792703000', title: card.title + ' (13)', description: '',
+        durationSeconds: 3000, aired: '2026-10-22T19:00:00Z', channel: 'Nova HD', playable: false }
+    ] };
+    var groups = [];
+    if (card.kind === 'movie') {
+      if (card.source !== 'rec') {
+        groups.push({ title: 'Díly', season: null, nextPage: null, episodes: [{ source: 'ct', idec: 'demo-film-' + n + '1', title: card.title,
+          description: '', durationSeconds: (card.durationMinutes || 95) * 60, aired: '2025-12-24T19:00:00Z', channel: 'ČT1', playable: true }] });
+      }
+      if (card.source !== 'ct') groups.push(recorded);
+      return { card: card, description: 'Smyšlený popis filmu z ukázky. ' + card.title + ' se odehrává v testovacím obrazci.',
+        creators: 'Režie: Jan Ukázkový.', countries: ['Česko'], seasons: [], groups: groups };
+    }
+    var s = season ? Number(String(season).replace(/\D/g, '').slice(-1)) || 1 : 1;
+    var p = page || 1;
+    if (card.source !== 'rec') {
+      groups.push({ title: s + '. řada', season: season || String(s), nextPage: p === 1 ? 2 : null, episodes: demoEpisodes(s, p, p === 1 ? 15 : 11) });
+    }
+    if (card.source !== 'ct' && p === 1) groups.push(recorded);
+    return { card: card, description: 'Smyšlený popis seriálu z ukázky: ' + card.title + ' v několika řadách. ' +
+      'Popis je delší, aby bylo vidět, jak stránka seriálu zkrátí text na tři řádky a díly zůstanou na obrazovce celé.',
+    creators: 'Režie: Jan Ukázkový. Hrají: Jana Smyšlená a další.', countries: ['Česko', 'Slovensko'],
+    seasons: card.source === 'rec' ? [] : [{ id: '1', title: '1. řada' }, { id: '2', title: '2. řada' }, { id: '3', title: '3. řada' }],
+    groups: groups };
+  }
+
+  /** A fixture file when there is one (and not `archive=memory`), else the generated answer. */
+  function fixtureOr(name, generated) {
+    if (CT_DOWN) {
+      var down = generated();
+      if (down.rows) down.rows = down.rows.slice(0, 1);
+      if (down.cards) down.cards = down.cards.filter(function (c) { return c.source !== 'ct'; });
+      down.error = CT_DOWN_TEXT;
+      return answer(200, down);
+    }
+    if (ARCHIVE_MEMORY) return answer(200, generated());
+    return load(name).then(function (r) { return r; }, function () { return answer(200, generated()); });
+  }
+
+  function archive(url) {
+    var path = url.replace(/^https?:\/\/[^/]+/, '');
+    var param = function (name) {
+      var m = new RegExp('[?&]' + name + '=([^&]*)').exec(path);
+      return m ? decodeURIComponent(m[1]) : null;
+    };
+    var page = Number(param('page') || 1);
+    if (/^\/dvb\/archive(\?|$)/.test(path)) return fixtureOr('dvb/dvb_archive_home.json', demoHome);
+    var cat = /^\/dvb\/archive\/category\/([^?]+)/.exec(path);
+    if (cat) {
+      var slug = decodeURIComponent(cat[1]);
+      var generated = function () { return demoCategory(slug, param('genre'), param('sort'), page); };
+      return CT_DOWN || (page === 1 && !param('genre') && param('sort') === 'popular')
+        ? fixtureOr('dvb/dvb_archive_category.json', generated) : answer(200, generated());
+    }
+    if (/^\/dvb\/archive\/search\?/.test(path)) {
+      var q = param('q') || '';
+      var searched = function () { return demoSearch(q, page); };
+      return CT_DOWN ? fixtureOr(null, searched) : answer(200, searched());
+    }
+    var show = /^\/dvb\/archive\/show\/([^?]+)/.exec(path);
+    if (show) {
+      var id = decodeURIComponent(show[1]);
+      var made = function () { return demoShow(id, param('season'), page); };
+      if (CT_DOWN && /^ct:/.test(id)) {
+        // in both sources: our recorded episodes and the text; iVysílání only: 502 with the text
+        var mixed = made();
+        if (mixed.card.source !== 'both') return answer(502, { error: CT_DOWN_TEXT });
+        mixed.groups = mixed.groups.filter(function (g) { return !g.episodes.some(function (e) { return e.source === 'ct'; }); });
+        mixed.seasons = [];
+        mixed.error = CT_DOWN_TEXT;
+        return answer(200, mixed);
+      }
+      if (param('season') || page > 1 || !/^ct:/.test(id) || /^ct:demo/.test(id)) return answer(200, made());
+      return load('dvb/dvb_archive_show_series.json').then(function (r) {
+        var body = JSON.parse(r.body);
+        if (body.card && body.card.id === id) return r;
+        return load('dvb/dvb_archive_show_movie.json').then(function (m) {
+          var movie = JSON.parse(m.body);
+          return movie.card && movie.card.id === id ? m : answer(200, made());
+        });
+      }, function () { return answer(200, made()); });
+    }
+    return answer(404, { error: 'Nenalezeno' });
   }
 
   var TIMELINE_GROWING = /[?&]timeline=growing\b/.test(root.location.search);

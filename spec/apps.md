@@ -247,6 +247,58 @@ sněmovna streams keep playing live at once). **Back** returns to the guide with
 - Golden cases: `spec/fixtures/programme_page_cases.json` (buttons for each state; the rating line incl. plurals),
   all three apps.
 
+## Archiv (T13, draft for the owner's review)
+A fourth tab **Archiv** (Živě · TV průvodce · Archiv · Nastavení) on all three apps: iVysílání and our recordings in
+shared categories, from the gateway's `/dvb/archive` (`spec/dvb-gateway.md` "Archive"). Without a configured gateway
+the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Nastavení → Server." (owner, 2026-10-25).
+- **Home**: a search field on top (the TV's keyboard; results after 0.5 s without typing, at least 2 characters), then
+  rows of cards: **"Pokračovat ve sledování"** (below), "Naše nahrávky", then the 14 categories incl. ČT's "Archiv" (Filmy, Seriály, Dokumenty, Zpravodajství, Sport, Pro děti,
+  Zábava, Historie, Příroda, …) as the gateway orders them. A card: image (landscape), title, year · "film"/"seriál",
+  "★ 7,4" for a TMDb rating (≥ 20 votes; the rating line rules of `programme_page_cases.json`), a source icon (globe
+  = iVysílání, antenna = our recording, both icons for `both`). The TMDB logo + attribution sentence small at the
+  bottom of the tab whenever a card shows TMDb data. The end of a row (or ›) opens the whole category: sub-genre
+  chips and the sort (Nejsledovanější · Naposledy vysílané · A–Z) on top, a grid below, more pages as the focus nears the end.
+- **Show page**: the programme page of T15 extended for shows: image, title, facts (source · year · kind · countries
+  · episode count), TMDb rating, description, creators; for a film the buttons as T15 (`Přehrát` / `Pokračovat od …`
+  / `Zpět`); for a series season chips and the episode list (`1/26 Od začátku · 53 min · ČT1 9. 1.`), each episode
+  `Přehrát` or `Pokračovat od …` (resume keys as today: `ct:<idec>`, `dvb:<recording id>`); not playable → dimmed with
+  ČT's text when played. The extra group "Nahráno z antény" lists our recorded episodes of the show.
+- **Playing**: iVysílání episodes through the existing archive path (`idec` → VOD on the TV; DRM-only → ČT's text);
+  our recordings through the Anténa timeline player (T05). Back returns to the page, then to the row.
+- **"Pokračovat ve sledování"** (owner, 2026-10-25, v1): the row lists this TV's "Pokračovat" entries
+  (`spec/apps.md` "Pokračovat") newest first, at most 20, from both sources and from the guide alike. To show them
+  every resume entry saved from T13 on also keeps, on the device only, `title` (programme or episode), `showTitle`,
+  `image` (the card image URL or gateway path), `source` (`ct` / `dvb`) and `savedAt`; entries without `title` (saved
+  before T13) are left out of the row (they still offer "Pokračovat" in the guide). Selecting a card plays at once
+  from the saved position (as "Pokračovat od …"); long OK / menu offers "Odebrat z řady" (deletes the entry). Nothing
+  of it leaves the TV; profiles do not carry it (T08).
+- **Shared details (T13, from the first implementation)**:
+  - Each row ends with a "Vše ›" tile that opens the whole category. Return/Back on search results first clears
+    the search. Source label in the facts: "iVysílání" / "Z antény" / "iVysílání a z antény". An episode date gets
+    the year when it is not this year (`9. 1. 2005`).
+  - An episode with a "Pokračovat" offer: OK plays from the position; long OK / menu offers "Přehrát od začátku"
+    (this exact label). A series page has no Zpět button (Back/Menu/Return); a film page ends with `Zpět` as T15.
+  - `creators` is one display string ("Režie: … Hrají: …"), shown as it comes (no extra "Tvůrci:" label).
+  - Resume entries of ČT programmes also keep `start` and `channel` (CT API id), so a programme that began < 3 h ago
+    resumes from the timeshift buffer by the decision rules (also from the "Pokračovat ve sledování" row); without
+    them (older entries, archive episodes) it is VOD by idec. An episode's `channel` display name ("ČT1") maps to the
+    CT channel the same way.
+  - The TMDB attribution: the answer's `attribution` when present (the gateway sends it whenever cards carry TMDb
+    data), else TMDb's standard sentence. Card images only as an `https` ČT URL, `/dvb/details/image/w342/…` or
+    `/dvb/recording/<id>/thumb.jpg` (the latter follows the TV's thumbnails switch); anything else dropped.
+  - Texts (all three apps): search hint "Hledat v archivu"; "Archiv se nepodařilo načíst"; "Archiv je zatím
+    prázdný"; "Nic nenalezeno"; the chip for all sub-genres "Vše"; episode counts with the three plural
+    forms "1 díl / 2–4 díly / 5 dílů" (golden in each app's tests). Number keys (channel numbers) are off on Archiv,
+    so the search field gets digits.
+  - Film buttons follow T15: `Pokračovat od …` first when there is an offer, then `Přehrát` (the film's first
+    iVysílání episode, else its first episode), `Zpět`.
+  - The TMDB logo/sentence shows when any card on screen has `"tmdb": true` (the gateway decides).
+  - An episode's playback channel is its `channelId` (CT API id `CH_1` … or `null`; the gateway sends it); when it is
+    `null` the display name `channel` is mapped the same way ("ČT1" → `CH_1`); still unknown → VOD by idec only.
+- **Not in v1**: favourites, profiles' watch history.
+- Golden cases: `spec/fixtures/archive_cases.json` (genre mapping, title merging, card source/order), all three apps
+  where they decide something (merging is the gateway's; the apps test card/line rendering rules).
+
 ## "Pokračovat" (resume where the viewer stopped)
 Each TV remembers, **on the device only**, how far it got in a programme, and offers to continue there. Nothing leaves
 the device (no account, no sync, no analytics); only positions are stored, never stream URLs or video.

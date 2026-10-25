@@ -33,6 +33,8 @@ final class AppModel {
     let resume: ResumeStore
     /// ČT images and Anténa programme stills for the guide detail, memory only.
     let images = GuideImageStore()
+    /// Card images of the Archiv tab, memory only.
+    let archiveImages = ArchiveImageStore()
     /// Channels hidden / reordered in Nastavení → Kanály, on this device or in the signed-in profile.
     let channelPrefs: ChannelPrefsStore
     /// Nastavení → Profil: this TV's settings in a profile on the gateway (spec/apps.md "Profil").
@@ -67,11 +69,14 @@ final class AppModel {
     /// The gateway as saved in Nastavení → Server (the address typed there).
     private(set) var savedGateway: GatewayConfig?
     private(set) var antenna: AntennaStore?
-    /// `/dvb/details` for the programme page (memory-only transport), and its answers for a while.
-    @ObservationIgnored private var detailsClient: DVBClient?
+    /// `/dvb/details` for the programme page and `/dvb/archive` for the Archiv tab (memory-only transport), and the
+    /// details' answers for a while.
+    @ObservationIgnored private(set) var detailsClient: DVBClient?
     @ObservationIgnored private var detailsCache: [ProgrammeDetailsQuery: (fetchedAt: Date, details: ProgrammeDetails?)] = [:]
     private static let detailsMaxAge: TimeInterval = 10 * 60
     private static let detailsMaxEntries = 200
+    /// The Archiv tab's client (memory-only transport); nil without a gateway or while the Tailscale bridge starts.
+    var archiveClient: DVBClient? { gateway == nil ? nil : detailsClient }
     /// "Připojovat přes Tailscale" (spec/apps.md "Tailscale v aplikaci").
     let tailnet = TailnetController()
     /// App start with Tailscale on: the bridge starts before the first gateway request.
@@ -288,6 +293,8 @@ final class AppModel {
         detailsClient = client
         detailsCache = [:]
         images.setGateway(config)
+        let images = images
+        archiveImages.setGateway(config, thumbnailsAllowed: { images.gatewayAllows && images.tvAllows })
     }
 
     /// "Připojovat přes Tailscale" on or off; `address` is the gateway address on screen.
@@ -299,15 +306,18 @@ final class AppModel {
     /// Resolves the stream on the device right now, then opens the player. Every outcome is
     /// visible: the player, or a Czech alert. `resumeAt` ("Pokračovat") is seconds from the
     /// programme's start; programmes save their progress, live never does.
-    func play(_ request: PlaybackRequest, resumeAt: TimeInterval? = nil) {
+    func play(_ request: PlaybackRequest, resumeAt: TimeInterval? = nil, card: ResumeCard? = nil) {
         log.info("play \(String(describing: request), privacy: .public) resume=\(resumeAt ?? -1)")
         let planner = planner
         var target: ResumeTarget?
         var title: PlayerTitle?
         switch request {
         case .programme(let programme, let channel):
-            target = .ct(programme)
+            target = .ct(programme, card: card)
             title = .programme(programme.title, channel: channel.name, episode: programme.episodeTitle)
+        case .episode(let programme, let channel):
+            target = .ct(programme, card: card)
+            title = .programme(programme.title, channel: channel?.name, episode: programme.episodeTitle)
         case .live(let channel):
             playLive(.ct(channel))
             return
@@ -346,6 +356,64 @@ final class AppModel {
         }
     }
 
+    /// Offered "Pokračovat" position for a resume key (`ct:<idec>`, `dvb:<recording id>`) of a programme of
+    /// `length` seconds (the stored length when unknown).
+    func resumeOffer(key: String, length: TimeInterval?) -> TimeInterval? {
+        resume.offer(for: key, length: length.flatMap { $0 > 0 ? $0 : nil })
+    }
+
+    // MARK: archive
+
+    /// An iVysílání episode or one of our recordings from the Archiv tab, from `resumeAt` or the start.
+    func playArchive(_ episode: ArchiveEpisode, show: ArchiveCard, resumeAt: TimeInterval?) {
+        let image = show.image?.stored
+        switch episode.source {
+        case .ct(let idec):
+            let (programme, channel) = ArchiveRules.programme(
+                idec: idec, title: show.title, episode: episode.title == show.title ? "" : episode.title,
+                aired: episode.aired, duration: episode.durationSeconds, playable: episode.playable,
+                channel: episode.ctChannel)
+            let card = ResumeCard(title: episode.title.isEmpty ? show.title : episode.title,
+                                  showTitle: episode.title.isEmpty || episode.title == show.title ? "" : show.title,
+                                  image: image, source: .ct, start: episode.aired, channel: channel?.id)
+            play(.episode(programme, channel: channel), resumeAt: resumeAt, card: card)
+        case .rec(let id):
+            let start = episode.aired ?? Date()
+            let event = DVBEvent(id: id, channel: "", title: episode.title.isEmpty ? show.title : episode.title,
+                                 description: episode.description, start: start,
+                                 end: start.addingTimeInterval(max(episode.durationSeconds, 60)),
+                                 recording: DVBRecording(id: id, state: .completed))
+            let card = ResumeCard(title: event.title, showTitle: event.title == show.title ? "" : show.title,
+                                  image: image, source: .dvb, start: start, channel: episode.channel)
+            playAntennaRecording(id: id, event: event, finished: true, resumeAt: resumeAt,
+                                 channelName: episode.channel.isEmpty ? nil : episode.channel, card: card)
+        }
+    }
+
+    /// A card of "Pokračovat ve sledování": plays at once from the saved position.
+    func playContinue(key: String, entry: ResumeEntry) {
+        guard let card = entry.card else { return }
+        let resumeAt = entry.progressSeconds
+        let start = card.start ?? Date(timeIntervalSince1970: 0)
+        if key.hasPrefix("ct:") {
+            let idec = String(key.dropFirst(3))
+            let channel = card.channel.flatMap(Channels.byID)
+            let title = card.showTitle.isEmpty ? card.title : card.showTitle
+            let programme = Programme(channel: channel?.slug ?? "", idec: idec, title: title, start: start,
+                                      end: start.addingTimeInterval(entry.lengthSeconds), isPlayableNow: true,
+                                      episodeTitle: card.showTitle.isEmpty ? "" : card.title)
+            play(.episode(programme, channel: channel), resumeAt: resumeAt, card: card)
+        } else if key.hasPrefix("dvb:") {
+            let id = String(key.dropFirst(4))
+            let event = DVBEvent(id: id, channel: "", title: card.showTitle.isEmpty ? card.title : card.showTitle,
+                                 subtitle: card.showTitle.isEmpty ? "" : card.title, start: start,
+                                 end: start.addingTimeInterval(entry.lengthSeconds),
+                                 recording: DVBRecording(id: id, state: .completed))
+            playAntennaRecording(id: id, event: event, finished: Date() >= event.end, resumeAt: resumeAt,
+                                 channelName: card.channel, card: card)
+        }
+    }
+
     /// Live picture of an Anténa channel.
     func playAntennaLive(_ channel: DVBChannel) {
         playLive(.antenna(channel))
@@ -355,17 +423,18 @@ final class AppModel {
     /// start-over. Only finished recordings offer "Přeskočit reklamu" (spec/ad-breaks.md, v1).
     /// `resumeAt` ("Pokračovat") is seconds into the recording.
     func playAntennaRecording(id: String, event: DVBEvent, finished: Bool, resumeAt: TimeInterval? = nil,
-                              channelName: String? = nil) {
+                              channelName: String? = nil, card: ResumeCard? = nil) {
         guard let client = antenna?.client else { return }
         if TimelineIDs.isContinuous(id) {
-            playAntennaTimeline(id: id, event: event, resumeAt: resumeAt, channelName: channelName, client: client)
+            playAntennaTimeline(id: id, event: event, resumeAt: resumeAt, channelName: channelName, card: card,
+                                client: client)
             return
         }
         let url = client.recordingURL(id: id)
         let title = event.title
         var adBreaks: (@Sendable () async throws -> [AdBreak])?
         if finished { adBreaks = { try await client.adBreaks(recordingID: id) } }
-        open(adBreaks: adBreaks, resumeTarget: .antenna(recordingID: id, event: event),
+        open(adBreaks: adBreaks, resumeTarget: .antenna(recordingID: id, event: event, channelName: channelName, card: card),
              title: .programme(event.title, channel: channelName, episode: event.subtitle)) {
             try await client.preparePlaylist(url)
             return .antennaRecording(url: url, title: title, headers: client.config.authorizationHeaders, resumeAt: resumeAt)
@@ -375,11 +444,11 @@ final class AppModel {
     /// A continuous-recording programme (`b…`, airing or ended) in its channel's timeline: "Od začátku" at the
     /// programme start − 30 s, "Pokračovat" at start + progress, through the window's map.
     private func playAntennaTimeline(id: String, event: DVBEvent, resumeAt: TimeInterval?, channelName: String?,
-                                     client: DVBClient) {
+                                     card: ResumeCard?, client: DVBClient) {
         let timeline = TimelineController(
             client: client, programmeID: id,
             startTime: TimelineRules.startTime(programmeStart: event.start, resumeAt: resumeAt),
-            channelName: channelName ?? event.title
+            channelName: channelName ?? event.title, firstCard: card
         )
         open(progressAt: { [weak timeline] position in timeline?.progress(at: position) },
              title: .programme(event.title, channel: channelName, episode: event.subtitle), timeline: timeline) {

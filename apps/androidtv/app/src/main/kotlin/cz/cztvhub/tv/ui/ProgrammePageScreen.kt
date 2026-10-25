@@ -215,7 +215,7 @@ private fun PageButtons(page: ProgrammePageModel, onPlay: (PlayRequest) -> Unit,
 
 /** TMDb's official logo (spec/assets/tmdb-logo-short.svg, colours and shape unchanged), small. */
 @Composable
-private fun TmdbLogo() {
+internal fun TmdbLogo() {
     Image(
         painterResource(R.drawable.tmdb_logo_short),
         contentDescription = "TMDB",

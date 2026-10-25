@@ -101,4 +101,29 @@ class EntriesTest {
         val page = dvb("2026-10-17T17:30:00Z", "2026-10-17T19:00:00Z", null).page(now, offers)!!
         assertEquals(listOf(PageButton.LIVE), page.buttons())
     }
+
+    // T13: what "Pokračovat ve sledování" keeps with an entry played from the guide.
+    @Test fun guideEntriesKeepACardForTheContinueRow() {
+        val withEpisode = CtEntry(
+            ct1,
+            Programme("226411010101016", "Most!", Instant.parse("2026-10-17T17:30:00Z"), Instant.parse("2026-10-17T19:00:00Z"),
+                episodeTitle = "Kovboj", isPlayableNow = true),
+        )
+        val card = withEpisode.resumeCard("https://img.example.invalid/a.jpg")!!
+        assertEquals("Kovboj", card.title)
+        assertEquals("Most!", card.showTitle)
+        assertEquals("https://img.example.invalid/a.jpg", card.image)
+        assertEquals("ct", card.source)
+        assertEquals(Instant.parse("2026-10-17T17:30:00Z"), card.start)
+        assertEquals("CH_1", card.channelId)
+        val plain = ct("2026-10-17T17:30:00Z", "2026-10-17T19:00:00Z").resumeCard("http://img.example.invalid/a.jpg")!!
+        assertEquals("Pořad", plain.title)
+        assertNull(plain.showTitle)
+        assertNull("only https:// images", plain.image)
+        val recorded = dvb("2026-10-17T16:00:00Z", "2026-10-17T17:00:00Z", RecordingState.COMPLETED)
+            .resumeCard("http://10.0.2.2:18098/dvb/recording/r1/thumb.jpg")!!
+        assertEquals("a gateway path, never the gateway's URL", "/dvb/recording/r1/thumb.jpg", recorded.image)
+        assertEquals("dvb", recorded.source)
+        assertNull(dvb("2026-10-17T16:00:00Z", "2026-10-17T17:00:00Z", null).resumeCard(null)!!.image)
+    }
 }

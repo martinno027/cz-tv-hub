@@ -5,6 +5,8 @@ import android.content.Intent
 import android.view.KeyEvent
 import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.PlayRequest
+import cz.cztvhub.core.ResumeCard
+import cz.cztvhub.core.ResumeEntry
 import java.time.Instant
 
 /** A channel the live player can zap to: its "Kanály" key and name (spec/apps.md "Channel numbers and zapping"). */
@@ -54,6 +56,7 @@ object PlayRequests {
     private const val LENGTH = "lengthSeconds"
     private const val ZAP_KEYS = "zapKeys"
     private const val ZAP_NAMES = "zapNames"
+    private const val CARD = "resumeCard"
 
     /** Adds the visible channel list (in "Kanály" order) the live player zaps through. */
     fun withChannels(intent: Intent, channels: List<ZapChannel>): Intent = intent
@@ -66,6 +69,17 @@ object PlayRequests {
         if (keys.size != names.size) return emptyList()
         return keys.zip(names, ::ZapChannel)
     }
+
+    /**
+     * Adds what "Pokračovat ve sledování" keeps with the entry (T13): titles, the image URL or gateway path, the
+     * programme start and channel; the stored entry's own format, so it never holds a stream URL.
+     */
+    fun withCard(intent: Intent, card: ResumeCard?): Intent {
+        if (card == null) return intent
+        return intent.putExtra(CARD, ResumeEntry(0.0, 0.0, Instant.EPOCH, card).encode())
+    }
+
+    fun card(intent: Intent): ResumeCard? = intent.getStringExtra(CARD)?.let(ResumeEntry::decode)?.card
 
     fun intent(context: Context, request: PlayRequest): Intent {
         val intent = Intent(context, PlayerActivity::class.java)

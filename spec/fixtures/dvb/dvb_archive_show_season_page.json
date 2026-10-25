@@ -1,0 +1,121 @@
+{
+ "status": 200,
+ "body": {
+  "card": {
+   "id": "ct:10000000001",
+   "source": "both",
+   "title": "Zahradní seriál",
+   "kind": "series",
+   "image": "https://img.example.invalid/archive/card/10000000001.jpg",
+   "rating": null,
+   "genres": [
+    "Komedie"
+   ],
+   "episodeCount": 52,
+   "tmdb": false
+  },
+  "description": "Smyšlený seriál o jedné zahradě.",
+  "creators": "Režie: Jan Příklad. Hrají: Eva Vzorová, Petr Ukázka a další.",
+  "seasons": [
+   {
+    "id": "season:00000000000000000000aa01",
+    "title": "I. řada"
+   },
+   {
+    "id": "season:00000000000000000000aa02",
+    "title": "II. řada"
+   }
+  ],
+  "groups": [
+   {
+    "title": "II. řada",
+    "season": "season:00000000000000000000aa02",
+    "episodes": [
+     {
+      "source": "ct",
+      "idec": "208522161500021",
+      "title": "21/26 Druhá řada 21",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-05-21T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161500022",
+      "title": "22/26 Druhá řada 22",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-05-22T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161500023",
+      "title": "23/26 Druhá řada 23",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-05-23T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161500024",
+      "title": "24/26 Druhá řada 24",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-05-24T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161500025",
+      "title": "25/26 Druhá řada 25",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-05-25T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161500026",
+      "title": "26/26 Druhá řada 26",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-05-26T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     }
+    ],
+    "nextPage": null
+   },
+   {
+    "title": "Nahráno z antény",
+    "episodes": [
+     {
+      "source": "rec",
+      "recordingId": "b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792294200-1792296900",
+      "title": "Zahradní seriál (3)",
+      "description": "Třetí díl.",
+      "durationSeconds": 2700,
+      "aired": "2026-10-18T03:30:00Z",
+      "channel": "Nova HD",
+      "channelId": null,
+      "playable": true
+     }
+    ]
+   }
+  ]
+ }
+}

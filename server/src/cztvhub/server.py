@@ -47,7 +47,7 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
             if path.startswith("/dvb/"):
                 return self._dvb(path, query)
             if path == "/admin" or path.startswith("/admin/"):
-                return self._admin(path)
+                return self._admin(path, query=query)
             if path == "/health":
                 return self._send(200, b"ok\n")
             if path in ("/playlist.m3u", "/ct.m3u"):
@@ -92,10 +92,10 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
                 return self._send(413, TOO_LARGE, "application/json; charset=utf-8")
             return self.rfile.read(length)
 
-        def _admin(self, path, method="GET", body=b""):
+        def _admin(self, path, method="GET", body=b"", query=""):
             if admin is None:
                 return self._send(404, b"admin is off ([admin] password in the config)\n")
-            resp = admin.handle(method, path, self.headers, body)
+            resp = admin.handle(method, path, self.headers, body, dict(urllib.parse.parse_qsl(query)))
             self._send(resp.status, resp.body, resp.content_type, resp.headers)
 
         def _dvb(self, path, query, method="GET", body=b""):

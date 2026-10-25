@@ -313,9 +313,16 @@ na themoviedb.org, v Nastavení → API požádejte o klíč pro nekomerční po
 key = <váš klíč>
 ```
 
-Pak `sudo systemctl restart cztvhub`. Raspberry se TMDB ptá jen na pořad, který si v televizi otevřete (název, rok,
-film/seriál), výsledky si pamatuje nejvýš 30 dní a televize s TMDB nemluví nikdy přímo. Hodnocení je TMDB, ne ČSFD
-ani IMDb. Bez klíče stránka pořadu funguje, jen bez těchto údajů; smazáním klíče se smažou i zapamatované výsledky.
+Pak `sudo systemctl restart cztvhub`. Raspberry posílá TMDB jen očištěný název pořadu: u pořadu, který si
+v televizi otevřete, a na pozadí (nejvýš 30 dotazů za minutu) u pořadů, které ukazuje Archiv. Výsledky (hodnocení,
+žánry, rok, plakát) si ukládá a obnovuje po 5 měsících; dobu změníte v administraci na záložce **TMDb** (licence TMDB
+povoluje nejvýš 6 měsíců, delší doba je na vás). Tamtéž jde uložené výsledky prohlížet, obnovit nebo smazat.
+Televize s TMDB nemluví nikdy přímo. Hodnocení je TMDB, ne ČSFD ani IMDb. Bez klíče archiv i stránka pořadu
+fungují, jen bez těchto údajů; smazáním klíče se smažou i uložené výsledky.
+
+**Archiv** (záložka v aplikacích): pořady iVysílání a vaše nahrávky v kategoriích (Filmy, Seriály, Dokumenty…),
+hledání podle názvu a řada „Pokračovat ve sledování". Skládá ho Raspberry z veřejného API ČT a z vašich nahrávek;
+televize bez nastaveného serveru archiv neukáže.
 
 ## Řešení potíží
 

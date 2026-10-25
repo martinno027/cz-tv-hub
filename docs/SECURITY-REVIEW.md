@@ -45,9 +45,16 @@ of "done".
   the views the spec names. *Wrong:* a route that returns a whole recording or file listing.
 - Derived data stays as approved: thumbnails one still ≤ 480 px, memory only; ad breaks only timestamps and masks.
   *Wrong:* a cache on disk, a series of frames, a client-chosen seek for thumbnails.
-- Only title/year/type reach TMDb; `/dvb/details` takes a programme id, not free text; the poster proxy fetches only
-  TMDb image paths from its own lookups (`image.tmdb.org`, fixed sizes); the TMDb key never leaves the config.
-  *Wrong:* a details route that looks up any text a client sends, a poster route that fetches a client URL.
+- Only the cleaned title reaches TMDb (year and kind decide the match locally); `/dvb/details` takes a programme id,
+  the archive's background lookups take titles the gateway itself lists (recordings within retention on offered
+  channels, ČT's own listing), never client text; the poster proxy fetches only TMDb image paths from its own lookups
+  (`image.tmdb.org`, fixed sizes); the TMDb key never leaves the config. The store (`tmdb.sqlite`, 0600) is purged
+  by the `/admin` period, deleted without a key, and `/admin` shows it without any export. *Wrong:* a details route
+  that looks up any text a client sends, archive search text sent to TMDb, a poster route that fetches a client URL,
+  a download of the store.
+- Archive search text goes only to ČT's own search (`searchShows`, ≤ 100 characters, cached 10 min), with our honest
+  User-Agent; ČT is asked one request at a time with cached rows. *Wrong:* a faked browser, crawling whole
+  categories, search text in a log line.
 - CT internet streams are only redirected. *Wrong:* the server fetching or caching CT video.
 
 ### Secrets

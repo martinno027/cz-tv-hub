@@ -4,13 +4,13 @@ Only the gateway talks to TMDb, with the household's own key (``[tmdb] key``; no
 the gateway found in its own EPG or the CT schedule: TMDb gets the cleaned title, nothing else (the year and the
 kind only decide which result is accepted). A result counts only when its title equals ours and its year is within
 ±1 of the one the description states; anything less is "no match" (no rating is better than a wrong one).
-Results are kept in ``<state dir>/tmdb-cache.json`` (0600) for 30 days, at most 5000; posters only in memory.
-The key never appears in a log line, an exception or an answer.
+Results are kept in the TMDb store (``tmdbstore.py``, ``<state dir>/tmdb.sqlite``, 0600) with only what the rule
+lists; TMDb's titles, overview and runtime stay in memory, like the posters. Page lookups go before the archive's
+background lookups (``Limiter``). The key never appears in a log line, an exception or an answer.
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import time
@@ -19,19 +19,24 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
+
+from . import tmdbstore
+from .tmdbstore import Entry, TmdbStore
 
 API_BASE = "https://api.themoviedb.org/3/"
 IMAGE_BASE = "https://image.tmdb.org/t/p/w342/"  # the only host and size the poster proxy fetches from
 POSTER_PREFIX = "/dvb/details/image/w342/"
 LANGUAGE = "cs-CZ"
-CACHE_FILE = "tmdb-cache.json"
-CACHE_SECONDS = 30 * 86400  # TMDb terms 1.C allow at most 6 months (checked 2026-10-24)
-CACHE_MAX = 5000
 PER_MINUTE = 30
+BACKGROUND_PER_MINUTE = 20  # the archive's worker leaves the rest of the minute to page lookups
+RETRY_AFTER_DEFAULT = 60.0  # TMDb said 429 without a usable Retry-After
+RETRY_AFTER_MAX = 3600.0
+EXTRAS_MAX = 2000  # TMDb's titles/overview/runtime of matches, in memory only
 WAIT_SECONDS = 10.0  # for the one TMDb request at a time; a viewer waiting longer gets the page without details
 TIMEOUT = 10.0
 MIN_VOTES = 20
@@ -221,27 +226,59 @@ _OPENER = urllib.request.build_opener(_NoRedirect())
 
 
 class Limiter:
-    """At most one TMDb request at a time and ``per_minute`` per minute; over that, TmdbBusy at once."""
+    """At most one TMDb request at a time and ``per_minute`` per minute; over that, TmdbBusy at once.
+    Background requests (the archive's worker) never wait: they give way while a page lookup waits, keep to
+    ``background_per_minute`` and stop while TMDb asked us to wait (Retry-After)."""
 
     def __init__(self, per_minute: int = PER_MINUTE, wait: float = WAIT_SECONDS,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic, background_per_minute: int = BACKGROUND_PER_MINUTE):
         self.per_minute, self.wait, self.clock = per_minute, wait, clock
+        self.background_per_minute = min(background_per_minute, per_minute)
         self._lock = threading.Lock()
+        self._state = threading.Lock()
         self._sent: list[float] = []
+        self._waiting = 0  # page lookups waiting for the one request slot
+        self._paused_until = float("-inf")
 
-    def __enter__(self) -> "Limiter":
-        if not self._lock.acquire(timeout=self.wait):
-            raise TmdbBusy("another TMDb request is still running")
-        now = self.clock()
-        self._sent = [t for t in self._sent if now - t < 60.0]
-        if len(self._sent) >= self.per_minute:
+    def pause(self, seconds: float) -> None:
+        """TMDb answered 429: nothing goes out for that long."""
+        with self._state:
+            self._paused_until = max(self._paused_until, self.clock() + max(0.0, seconds))
+
+    def paused(self) -> bool:
+        with self._state:
+            return self.clock() < self._paused_until
+
+    @contextmanager
+    def slot(self, background: bool = False) -> Iterator["Limiter"]:
+        if background:
+            with self._state:
+                waiting = self._waiting
+            if waiting or not self._lock.acquire(blocking=False):
+                raise TmdbBusy("a page lookup goes first")
+        else:
+            with self._state:
+                self._waiting += 1
+            try:
+                got = self._lock.acquire(timeout=self.wait)
+            finally:
+                with self._state:
+                    self._waiting -= 1
+            if not got:
+                raise TmdbBusy("another TMDb request is still running")
+        try:
+            now = self.clock()
+            with self._state:
+                if now < self._paused_until:
+                    raise TmdbBusy(f"TMDb asked to wait {self._paused_until - now:.0f} s")
+                self._sent = [t for t in self._sent if now - t < 60.0]
+                limit = self.background_per_minute if background else self.per_minute
+                if len(self._sent) >= limit:
+                    raise TmdbBusy(f"{len(self._sent)} TMDb requests in the last minute")
+                self._sent.append(now)
+            yield self
+        finally:
             self._lock.release()
-            raise TmdbBusy(f"{self.per_minute} TMDb requests in the last minute")
-        self._sent.append(now)
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        self._lock.release()
 
 
 class TmdbClient:
@@ -264,7 +301,7 @@ class TmdbClient:
             text = text.replace(self._key, "***").replace(urllib.parse.quote(self._key, safe=""), "***")
         return text
 
-    def get(self, path: str, params: dict[str, str]) -> dict:
+    def get(self, path: str, params: dict[str, str], background: bool = False) -> dict:
         headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
         query = dict(params)
         if self.bearer:
@@ -272,7 +309,7 @@ class TmdbClient:
         else:
             query["api_key"] = self._key
         request = urllib.request.Request(API_BASE + path + "?" + urllib.parse.urlencode(query), headers=headers)
-        body = self._fetch(request, path, MAX_JSON)[0]
+        body = self._fetch(request, path, MAX_JSON, background)[0]
         try:
             data = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
@@ -291,8 +328,9 @@ class TmdbClient:
             raise TmdbError(f"TMDb poster: unexpected type {content_type[:40]!r}")
         return body, content_type
 
-    def _fetch(self, request: urllib.request.Request, what: str, limit: int) -> tuple[bytes, str]:
-        with self.limiter:
+    def _fetch(self, request: urllib.request.Request, what: str, limit: int,
+               background: bool = False) -> tuple[bytes, str]:
+        with self.limiter.slot(background):
             try:
                 with self._urlopen(request, timeout=self.timeout) as response:
                     status = getattr(response, "status", 200)
@@ -303,7 +341,12 @@ class TmdbClient:
             except TmdbError:
                 raise
             except urllib.error.HTTPError as exc:
+                retry = exc.headers.get("Retry-After") if exc.code == 429 and exc.headers else None
                 exc.close()
+                if exc.code == 429:
+                    wait = retry_after(retry)
+                    self.limiter.pause(wait)
+                    raise TmdbBusy(f"TMDb {what}: HTTP 429, waiting {wait:.0f} s") from None
                 hint = " (the [tmdb] key was refused)" if exc.code == 401 else ""
                 raise TmdbError(f"TMDb {what}: HTTP {exc.code}{hint}") from None
             except urllib.error.URLError as exc:
@@ -315,109 +358,35 @@ class TmdbClient:
         return body, content_type
 
 
-# -- cache -------------------------------------------------------------------------------------
-class DetailsCache:
-    """Programme key → match or ``None`` (no match), 30 days, at most 5000; ``<state dir>/tmdb-cache.json``."""
-
-    def __init__(self, state_dir: Path, now: Callable[[], float] = time.time, log: Callable[[str], None] = print,
-                 max_entries: int = CACHE_MAX, max_age: float = CACHE_SECONDS):
-        self.path = Path(state_dir) / CACHE_FILE
-        self.now, self.log = now, log
-        self.max_entries, self.max_age = max_entries, max_age
-        self._lock = threading.Lock()
-        self._entries: dict[str, dict] = self._load()
-
-    def _load(self) -> dict[str, dict]:
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return {}
-        except (OSError, ValueError) as exc:
-            self.log(f"dvb: details: {self.path.name} unreadable ({type(exc).__name__}); starting empty")
-            return {}
-        entries = raw.get("entries") if isinstance(raw, dict) else None
-        out: dict[str, dict] = {}
-        for key, item in (entries or {}).items() if isinstance(entries, dict) else []:
-            at = item.get("at") if isinstance(item, dict) else None
-            match = item.get("match") if isinstance(item, dict) else None
-            if isinstance(key, str) and isinstance(at, (int, float)) and not isinstance(at, bool) \
-                    and (match is None or isinstance(match, dict)):
-                out[key] = {"at": float(at), "match": match}
-        return self._trim(out)
-
-    def _trim(self, entries: dict[str, dict]) -> dict[str, dict]:
-        now = self.now()
-        fresh = {k: v for k, v in entries.items() if 0 <= now - v["at"] < self.max_age}
-        if len(fresh) > self.max_entries:
-            newest = sorted(fresh.items(), key=lambda kv: kv[1]["at"], reverse=True)[:self.max_entries]
-            fresh = dict(newest)
-        return fresh
-
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._entries)
-
-    def get(self, key: str) -> tuple[bool, dict | None]:
-        with self._lock:
-            item = self._entries.get(key)
-            if item is None or not 0 <= self.now() - item["at"] < self.max_age:
-                return False, None
-            return True, json.loads(json.dumps(item["match"]))
-
-    def put(self, key: str, match: dict | None) -> None:
-        with self._lock:
-            self._entries[key] = {"at": self.now(), "match": match}
-            self._entries = self._trim(self._entries)
-            payload = json.dumps({"v": 1, "entries": self._entries}, ensure_ascii=False, separators=(",", ":"))
-        try:
-            _write_private(self.path, payload)
-        except OSError as exc:
-            self.log(f"dvb: details: cannot save {self.path.name}: {exc}")
-
-    def posters(self) -> set[str]:
-        """Poster files of fresh matches: the only ones the proxy fetches."""
-        with self._lock:
-            now = self.now()
-            out = set()
-            for item in self._entries.values():
-                poster = (item["match"] or {}).get("poster")
-                if isinstance(poster, str) and poster.startswith(POSTER_PREFIX) and 0 <= now - item["at"] < self.max_age:
-                    out.add(poster[len(POSTER_PREFIX):])
-            return out
-
-
-def _write_private(path: Path, payload: str) -> None:
-    """Atomically, mode 0600."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+def retry_after(value: Any) -> float:
+    """TMDb's Retry-After in seconds (only the number form; anything else waits the default)."""
     try:
-        os.fchmod(fd, 0o600)  # an older tmp file may have had other bits
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(payload)
-            fh.flush()
-            os.fsync(fh.fileno())
-    except BaseException:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
-    os.replace(tmp, path)
+        seconds = float(str(value).strip())
+    except (TypeError, ValueError):
+        return RETRY_AFTER_DEFAULT
+    if seconds != seconds or seconds < 0:
+        return RETRY_AFTER_DEFAULT
+    return min(seconds, RETRY_AFTER_MAX)
+
+
+def genre_ids(data: Any) -> list[int]:
+    genres = data.get("genres") if isinstance(data, dict) and isinstance(data.get("genres"), list) else []
+    return [g["id"] for g in genres if isinstance(g, dict) and isinstance(g.get("id"), int)
+            and not isinstance(g.get("id"), bool)]
+
+
+def stored_result(match: dict, data: Any) -> dict:
+    """What the store keeps of a match (the rule's list): kind, id, rating, genres, year, poster file."""
+    poster = match.get("poster")
+    return {"kind": match["kind"], "tmdbId": match["tmdbId"], "rating": match.get("rating"),
+            "genreIds": genre_ids(data), "genres": list(match.get("genres") or []), "year": match.get("year"),
+            "poster": poster[len(POSTER_PREFIX):] if isinstance(poster, str) and poster.startswith(POSTER_PREFIX)
+            else None}
 
 
 def remove_cache(state_dir: Path, log: Callable[[str], None] = print) -> None:
     """``[tmdb] key`` is gone: nothing from TMDb stays on the Pi."""
-    path = Path(state_dir) / CACHE_FILE
-    for item in (path, path.with_name(path.name + ".tmp")):
-        try:
-            item.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            log(f"dvb: details: cannot delete {item.name}: {exc}")
-            continue
-        log(f"dvb: details: no [tmdb] key, deleted {item.name}")
+    tmdbstore.remove_store(state_dir, log)
 
 
 # -- posters -----------------------------------------------------------------------------------
@@ -446,13 +415,15 @@ class _Posters:
 class Details:
     def __init__(self, key: str, state_dir: Path, now: Callable[[], float] = time.time,
                  log: Callable[[str], None] = print, client: TmdbClient | None = None,
-                 cache: DetailsCache | None = None):
+                 store: TmdbStore | None = None, months: Callable[[], int] = lambda: tmdbstore.DEFAULT_MONTHS):
         self.now, self.log = now, log
         self.client = client or TmdbClient(key)
-        self.cache = cache or DetailsCache(state_dir, now=now, log=log)
-        self._lookup = threading.Lock()  # one lookup at a time; the second asker then finds it cached
+        self.store = store or TmdbStore(state_dir, months=months, now=now, log=log)
+        self._lookup = threading.Lock()  # one page lookup at a time; the second asker then finds it stored
         self._posters = _Posters()
         self._posters_lock = threading.Lock()
+        self._extras: OrderedDict[tuple[str, int], dict] = OrderedDict()  # memory only (the rule stores none)
+        self._extras_lock = threading.Lock()
 
     @staticmethod
     def answer(match: dict | None, error: str | None = None) -> dict:
@@ -462,44 +433,99 @@ class Details:
         out["attribution"] = ATTRIBUTION
         return out
 
+    def query(self, programme: Programme) -> Query | None:
+        return make_query(programme, datetime.fromtimestamp(self.now(), timezone.utc).year)
+
     def lookup(self, programme: Programme) -> dict:
-        this_year = datetime.fromtimestamp(self.now(), timezone.utc).year
-        query = make_query(programme, this_year)
+        """The page lookup (a viewer opened the programme): stored result, else TMDb at once."""
+        query = self.query(programme)
         if query is None:
             return self.answer(None)
-        found, match = self.cache.get(query.key)
-        if found:
-            return self.answer(match)
+        entry = self.store.get(query.key)
+        if entry is not None:
+            return self.answer(self._match(entry))
         if not self._lookup.acquire(timeout=WAIT_SECONDS):
             return self.answer(None, TmdbBusy.user_message)
         try:
-            found, match = self.cache.get(query.key)
-            if found:
-                return self.answer(match)
+            entry = self.store.get(query.key)
+            if entry is not None:
+                return self.answer(self._match(entry))
             try:
-                match = self._search(query)
+                match = self.refresh(query)
             except TmdbError as exc:
                 self.log(f"dvb: details: {exc}")
                 return self.answer(None, exc.user_message)
-            self.cache.put(query.key, match)
             return self.answer(match)
         finally:
             self._lookup.release()
 
-    def _search(self, query: Query) -> dict | None:
+    def refresh(self, query: Query, background: bool = False) -> dict | None:
+        """Ask TMDb for ``query`` and store the result (also a no match); TmdbError when TMDb failed or the
+        limiter refused, and then nothing is stored."""
+        match, data = self._search(query, background)
+        self.store.put(query.key, query.kind, query.year, query.title,
+                       stored_result(match, data) if match else None)
+        if match:
+            self._remember(match)
+        return match
+
+    def _search(self, query: Query, background: bool) -> tuple[dict | None, Any]:
         for kind in (query.kind, "movie" if query.kind == "tv" else "tv"):
             title = clean_title(query.title, kind)
             if not normalise(title):
                 continue
             data = self.client.get(f"search/{kind}", {"query": title, "language": LANGUAGE,
-                                                      "include_adult": "false"})
+                                                      "include_adult": "false"}, background)
             result = pick(data.get("results"), title, query.year, kind)
             if result is not None:
-                return to_match(kind, self.client.get(f"{kind}/{result['id']}", {"language": LANGUAGE}))
-        return None
+                details = self.client.get(f"{kind}/{result['id']}", {"language": LANGUAGE}, background)
+                return to_match(kind, details), details
+        return None, None
 
+    # -- a stored entry as the page's match -----------------------------------------------
+    def _remember(self, match: dict) -> None:
+        extras = {k: match[k] for k in ("title", "originalTitle", "overview", "runtimeMinutes") if k in match}
+        with self._extras_lock:
+            self._extras[(match["kind"], match["tmdbId"])] = extras
+            self._extras.move_to_end((match["kind"], match["tmdbId"]))
+            while len(self._extras) > EXTRAS_MAX:
+                self._extras.popitem(last=False)
+
+    def _match(self, entry: Entry) -> dict | None:
+        """A stored match with TMDb's texts: from memory, else one details request (the page asked); without
+        them the stored facts and our own title."""
+        if not entry.matched or entry.match_kind not in ("movie", "tv") or entry.tmdb_id is None:
+            return None
+        ident = (entry.match_kind, entry.tmdb_id)
+        with self._extras_lock:
+            extras = self._extras.get(ident)
+        if extras is None:
+            try:
+                data = self.client.get(f"{entry.match_kind}/{entry.tmdb_id}", {"language": LANGUAGE})
+                fresh = to_match(entry.match_kind, data)
+            except TmdbError as exc:
+                self.log(f"dvb: details: {exc}")
+                fresh = None
+            if fresh is not None:
+                self._remember(fresh)
+                extras = {k: fresh[k] for k in ("title", "originalTitle", "overview", "runtimeMinutes")
+                          if k in fresh}
+        extras = extras or {"title": entry.title, "originalTitle": ""}
+        match: dict[str, Any] = {"kind": entry.match_kind, "title": extras.get("title", entry.title),
+                                 "originalTitle": extras.get("originalTitle", ""), "year": entry.match_year}
+        if extras.get("overview"):
+            match["overview"] = extras["overview"]
+        match["genres"] = list(entry.genres)
+        if extras.get("runtimeMinutes"):
+            match["runtimeMinutes"] = extras["runtimeMinutes"]
+        match["rating"] = dict(entry.rating) if entry.rating else None
+        match["poster"] = POSTER_PREFIX + entry.poster if entry.poster else None
+        match["tmdbId"] = entry.tmdb_id
+        return match
+
+    # -- posters ---------------------------------------------------------------------------
     def allowed(self, file: str) -> bool:
-        return bool(POSTER_FILE_RE.match(file)) and file in self.cache.posters()
+        return bool(POSTER_FILE_RE.match(file)) and file in self.store.posters()
 
     def poster(self, file: str) -> tuple[bytes, str] | None:
         """The poster of one of our own matches (None for any other file); TmdbError when TMDb fails."""

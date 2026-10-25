@@ -9,8 +9,12 @@
  *           {kind: 'dvbRecorded', channelId, title, recordingId, fromStart}
  *           (a continuous-recording id plays through the channel timeline, a TVHeadend DVR id as before)
  *           {kind: 'pspLive', channelId: Chamber stream id, title} (live only)
- *           Optional on startover/programme/dvbRecorded: resumeSeconds ("Pokračovat"), and for saving the progress
- *           resumeKey (`ct:<idec>` / `dvb:<recording id>`), lengthSeconds; startover/programme also carry `start`.
+ *           {kind: 'archive', idec, title, start?} (an iVysílání episode from the Archiv tab without a known CT
+ *           channel and broadcast time: VOD only; airing now → start-over (with `start`) or live on CT's channel)
+ *           Optional on startover/programme/dvbRecorded/archive: resumeSeconds ("Pokračovat"), and for saving the
+ *           progress resumeKey (`ct:<idec>` / `dvb:<recording id>`), lengthSeconds, resumeMeta (the Archiv row's
+ *           title, showTitle, image, source); startover/programme also carry `start`. Optional for the player's
+ *           info bar: episodeTitle, channelName (when channelId names no known channel).
  * Targets:  {url, kind: 'live' | 'timeshift' | 'vod' | 'timeline', title, seekToWallClock, fallbackOffsetMs,
  *            startPositionMs, dvb: DvbClient | null, recordingId: finished Anténa recording | null,
  *            timeline: the parsed window (kind 'timeline') | null,
@@ -47,6 +51,7 @@
     try {
       if (request.kind === 'dvbLive' || request.kind === 'dvbRecorded') return this.planDvb(request);
       if (request.kind === 'pspLive') return this.planPsp(request, forceRefresh);
+      if (request.kind === 'archive') return this.archive(request, forceRefresh);
       var channel = CT.Channels.byId(request.channelId);
       if (!channel) throw new CT.CtError('unknown channel ' + request.channelId);
       switch (request.kind) {
@@ -153,6 +158,26 @@
           return self.startover(airingOn, request.title, request.start, forceRefresh, request.resumeSeconds);
         });
     }
+  };
+
+  /**
+   * An iVysílání episode by idec (Archiv): CT's VOD as for the guide's archive; CT's own text when it cannot play
+   * (licence, DRM). Airing right now: from the start in the buffer when the start is known, else live.
+   */
+  Planner.prototype.archive = function (request, forceRefresh) {
+    var self = this;
+    var resume = request.resumeSeconds;
+    return this.api.vodUrl(request.idec).then(function (url) {
+      return target(url, 'vod', request.title, { startPositionMs: resume ? resume * 1000 : null });
+    }, function (e) {
+      if (!(e instanceof CT.StillLiveError)) throw e;
+      var channel = CT.Channels.byId(e.channelId);
+      if (!channel) throw e;
+      if (typeof request.start === 'number') return self.startover(channel, request.title, request.start, forceRefresh, resume);
+      return self.live.resolve(channel.id, forceRefresh).then(function (s) {
+        return target(s.main, 'live', request.title);
+      });
+    });
   };
 
   /** From the programme start (minus the margin), or from `resumeSeconds` into it ("Pokračovat"). */

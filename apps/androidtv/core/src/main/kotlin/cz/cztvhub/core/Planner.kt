@@ -134,6 +134,8 @@ class Planner(
             }
             else -> Unit
         }
+        // An archive episode (T13) may name no channel of the catalogue: it still plays as VOD (below).
+        if (request is PlayRequest.Programme) return programme(Channels.byId(request.channelId), request, forceRefresh)
         val channel = Channels.byId(request.channelId)
             ?: throw CtException("unknown channel ${request.channelId}")
         return when (request) {
@@ -142,16 +144,20 @@ class Planner(
             }
             is PlayRequest.Startover ->
                 startover(channel, request.title, request.start, forceRefresh, request.resumeSeconds)
-            is PlayRequest.Programme -> programme(channel, request, forceRefresh)
-            is PlayRequest.DvbLive, is PlayRequest.DvbRecorded, is PlayRequest.PspLive -> error("handled above")
+            is PlayRequest.DvbLive, is PlayRequest.DvbRecorded, is PlayRequest.PspLive, is PlayRequest.Programme ->
+                error("handled above")
         }
     }
 
-    private fun programme(channel: Channel, request: PlayRequest.Programme, forceRefresh: Boolean): PlayTarget {
+    /** [channel] null = not in the catalogue: VOD only (the buffer needs a channel). */
+    private fun programme(channel: Channel?, request: PlayRequest.Programme, forceRefresh: Boolean): PlayTarget {
         val decision = Decisions.decide(request.start, request.end, request.isPlayableNow, clock())
         return when (decision.action) {
             Action.FUTURE -> throw CtException("${request.idec} has not started", Messages.FUTURE)
-            Action.STARTOVER -> startover(channel, request.title, request.start, forceRefresh, request.resumeSeconds)
+            Action.STARTOVER -> startover(
+                channel ?: throw CtException("unknown channel ${request.channelId}", Messages.NO_TIMESHIFT),
+                request.title, request.start, forceRefresh, request.resumeSeconds,
+            )
             // Not playable: still ask the API so the viewer gets CT's reason.
             Action.VOD, Action.VOD_UNAVAILABLE -> try {
                 PlayTarget(
@@ -161,7 +167,9 @@ class Planner(
                     startPositionMs = request.resumeSeconds?.let { (it * 1000).toLong() },
                 )
             } catch (e: StillLiveException) {
-                val airingOn = Channels.byId(e.channelId) ?: channel
+                val airingOn = Channels.byId(e.channelId) ?: channel ?: throw CtException(
+                    "${request.idec} still live on unknown ${e.channelId}", Messages.NO_TIMESHIFT,
+                )
                 startover(airingOn, request.title, request.start, forceRefresh, request.resumeSeconds)
             }
         }

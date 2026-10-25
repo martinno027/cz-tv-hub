@@ -188,6 +188,20 @@ Builds the add-on ZIP into `dist/`; `--serve` offers it on the LAN for installin
 
 </details>
 
+## Shared fixtures
+
+<details>
+<summary><code>PYTHONPATH=src:tests python3 -c 'import archive_world as w; w.write_shared_fixtures()'</code> — regenerate the archive samples</summary>
+
+Run from `server/`. Rewrites `spec/fixtures/dvb/dvb_archive_*.json` from the gateway's real code path (a temporary
+continuous recording, ČT and TMDb faked with invented titles and an `.invalid` image host). The apps' parser tests
+read these files; a server test fails when the gateway's output and the files differ.
+
+Can go wrong: regenerating after a gateway change silently changes what the apps' tests expect — run all three apps'
+tests afterwards.
+
+</details>
+
 ## Repository
 
 <details>
