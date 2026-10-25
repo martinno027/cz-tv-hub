@@ -427,6 +427,15 @@ app** (Tizen web apps cannot run it): it reaches the gateway on the LAN as befor
   reloaded, so the screens show the error instead of "Připojuji se…" for ever; thumbnails do not trigger a check.
   The bridge's dial to the gateway times out after 8 s (a tsnet dial while the node is not connected hangs, so
   without it the app saw a client timeout instead of the 502).
+- **Start (T21)**: after an app start the node needs a few seconds to connect, and the first gateway requests get the
+  bridge's 502 while `quietAfterStart` suppresses the T18 check (seen 2026-10-25: Apple TV switched off and on, the
+  app started again, the Anténa group stayed away until the app went to the background and back). So: **every time the
+  node's state changes to `Running` from any other state** (start, switch on, new address, restart, or a later
+  reconnect), the app loads the gateway data the screens need again (channels, guide, defaults, profile), at most
+  once per change. After any node start the status is polled **every 1 s until `Running`** (at most 20 s, then every
+  30 s as before), and while the node is not yet `Running` Živě and the guide show "Připojuji se k Tailscale…" instead
+  of an empty Anténa group. A T18 check still runs at most once at a time; a reload already done by the change to
+  `Running` makes the check's own reload unnecessary (one reload, not two).
 - **Connection line (T18)**: `Info()` also gives the gateway peer's path, `"gateway": {"direct": bool, "relay":
   "<DERP region code>", "latencyMs": <int> | null}` (from the node's peer status and a ping, refreshed with the
   status). Nastavení → Server shows it after "Připojeno jako …": "· k bráně přímo, 32 ms" or "· přes relé fra,
