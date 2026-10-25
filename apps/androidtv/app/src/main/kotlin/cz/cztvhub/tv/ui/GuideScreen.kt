@@ -82,6 +82,7 @@ import cz.cztvhub.core.ImagePrefetch
 import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
+import cz.cztvhub.core.ResumeCard
 import cz.cztvhub.core.PspState
 import cz.cztvhub.core.TailnetStatus
 import cz.cztvhub.core.dvb.DvbAction
@@ -174,7 +175,12 @@ private data class OpenPage(val model: ProgrammePageModel, val day: LocalDate)
 
 /** "TV průvodce": EPG grid with channels as rows and time on the horizontal axis. */
 @Composable
-fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
+fun GuideScreen(
+    viewModel: MainViewModel,
+    onPlay: (PlayRequest) -> Unit,
+    /** Playing from a programme page, with what "Pokračovat ve sledování" keeps (T13). */
+    onPlayCard: (PlayRequest, ResumeCard?) -> Unit = { request, _ -> onPlay(request) },
+) {
     val day by viewModel.selectedDay.collectAsStateWithLifecycle()
     val plans by viewModel.plans.collectAsStateWithLifecycle()
     val now by viewModel.now.collectAsStateWithLifecycle()
@@ -354,7 +360,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
             // The page stays under the player (spec/apps.md).
             onPlay = { request ->
                 selection.notice = null
-                onPlay(request)
+                onPlayCard(request, entry.resumeCard(imageOf(entry)?.url))
             },
             onOpenApp = onOpenApp,
             onDismiss = {

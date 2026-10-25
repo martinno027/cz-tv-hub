@@ -130,4 +130,67 @@ class ResumeTest {
         val entry = ResumeEntry(1390.5, 3600.0, Instant.ofEpochMilli(1_760_000_000_123))
         assertEquals(entry, ResumeEntry.decode(entry.encode()))
     }
+
+    // -- T13: the card kept for "Pokračovat ve sledování" ----------------------------------------------------
+
+    private val card = ResumeCard(
+        "1/26 Od začátku; díl", "Most!", "/dvb/details/image/w342/a.jpg", "ct", Instant.ofEpochMilli(1_760_000_000_000), "CH_1",
+    )
+
+    @Test fun entryWithCardRoundTrips() {
+        val entry = ResumeEntry(1390.5, 3600.0, Instant.ofEpochMilli(1_760_000_000_123), card)
+        assertTrue("a card is stored as JSON (titles may hold ';')", entry.encode().startsWith("{"))
+        assertEquals(entry, ResumeEntry.decode(entry.encode()))
+        val minimal = entry.copy(card = ResumeCard("A", source = "dvb"))
+        assertEquals(minimal, ResumeEntry.decode(minimal.encode()))
+        assertNull("a card without a title is none", ResumeEntry.decode(minimal.encode().replace("\"A\"", "\"\""))?.card)
+        val bare = ResumeEntry(1390.5, 3600.0, Instant.ofEpochMilli(1_760_000_000_123))
+        assertEquals("1390.5;3600.0;1760000000123", bare.encode())
+    }
+
+    @Test fun oldEntriesStillOfferAndAreLeftOutOfTheRow() {
+        backend.put("ct:old", "600.0;3600.0;${now.toEpochMilli()}")
+        assertEquals(600.0, store.offer("ct:old")!!, 0.0)
+        assertTrue(store.continueRow().isEmpty())
+    }
+
+    @Test fun saveWithoutCardKeepsTheStoredCard() {
+        store.save("ct:1", 600.0, 3600.0, card)
+        store.save("ct:1", 900.0, 3600.0)
+        assertEquals(card, store.entry("ct:1")!!.card)
+        assertEquals(900.0, store.offer("ct:1")!!, 0.0)
+    }
+
+    @Test fun goldenContinueRow() {
+        val cases = Fixtures.json("archive_cases.json").getValue("continueRow").jsonArray
+        assertTrue(cases.isNotEmpty())
+        for (case in cases) {
+            val c = case.jsonObject
+            val entries = c.getValue("entries").jsonArray.associate { item ->
+                val e = item.jsonObject
+                val title = e["title"]?.jsonPrimitive?.content
+                val key = e.getValue("key").jsonPrimitive.content
+                key to ResumeEntry(
+                    600.0, 3600.0, Instant.parse(e.getValue("savedAt").jsonPrimitive.content),
+                    title?.let { ResumeCard(it, source = ResumeRules.source(key)) },
+                )
+            }
+            val expected = c.getValue("row").jsonArray.map { it.jsonPrimitive.content }
+            assertEquals("$c", expected, ResumeRules.continueRow(entries).map { it.key })
+        }
+    }
+
+    @Test fun continueRowHoldsAtMost20NewestOfferable() {
+        for (i in 0 until 25) {
+            store.save("ct:$i", 600.0, 3600.0, card)
+            now = now.plusSeconds(1)
+        }
+        val row = store.continueRow()
+        assertEquals(ResumeRules.ROW_SIZE, row.size)
+        assertEquals("ct:24", row.first().key)
+        assertEquals("ct:5", row.last().key)
+        store.save("ct:24", 3590.0, 3600.0, card) // watched: removed, the next one moves up
+        assertEquals("ct:23", store.continueRow().first().key)
+        assertEquals(listOf("ct", "dvb"), listOf(ResumeRules.source("ct:1"), ResumeRules.source("dvb:b1-1-2")))
+    }
 }

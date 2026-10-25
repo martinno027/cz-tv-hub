@@ -40,9 +40,12 @@ object ProgrammePage {
     /** "Hodnocení TMDB 7,4 (1 234 hlasů)", or null below [MIN_VOTES] votes. */
     fun ratingLine(value: Double, votes: Int): String? {
         if (votes < MIN_VOTES || !value.isFinite()) return null
-        val rounded = BigDecimal(value.toString()).setScale(1, RoundingMode.HALF_UP).toPlainString().replace('.', ',')
-        return "Hodnocení TMDB $rounded (${thousands(votes)} ${votesWord(votes)})"
+        return "Hodnocení TMDB ${ratingValue(value)} (${thousands(votes)} ${votesWord(votes)})"
     }
+
+    /** One decimal, half up, decimal comma: `7,4` (also the archive cards' "★ 7,4"). */
+    fun ratingValue(value: Double): String =
+        BigDecimal(value.toString()).setScale(1, RoundingMode.HALF_UP).toPlainString().replace('.', ',')
 
     /** Czech plural of "hlas" (CLDR cs: 1 one, 2–4 few, else other; whole numbers only). */
     fun votesWord(n: Int): String = when (n) {
@@ -69,5 +72,5 @@ object ProgrammePage {
     /** The facts line's length in whole minutes: broadcast end − start, rounded (never TMDb's runtime). */
     fun minutes(start: Instant, end: Instant): Long = (Duration.between(start, end).seconds.coerceAtLeast(0) + 30) / 60
 
-    private fun thousands(n: Int): String = n.toString().reversed().chunked(3).joinToString(" ").reversed()
+    fun thousands(n: Int): String = n.toString().reversed().chunked(3).joinToString(" ").reversed()
 }
