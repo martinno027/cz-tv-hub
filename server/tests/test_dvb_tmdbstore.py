@@ -7,6 +7,7 @@ import sqlite3
 import stat
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 from pathlib import Path
@@ -402,6 +403,25 @@ class WorkerTest(unittest.TestCase):
         self.worker.start()
         self.worker.poke()
         self.worker.stop()
+        self.assertFalse(self.worker._thread.is_alive())
+
+    def test_stop_during_a_round_is_not_lost(self):
+        # stop() arriving while a round runs must end the thread, not leave it asleep for WORKER_IDLE
+        inside, release = threading.Event(), threading.Event()
+
+        def slow_lookup(query):
+            inside.set()
+            release.wait(5)
+
+        self.worker.lookup = slow_lookup
+        self.wanted = [Q("slow")]
+        self.worker.start()
+        self.assertTrue(inside.wait(5))
+        threading.Timer(0.2, release.set).start()
+        started = time.monotonic()
+        self.worker.stop()
+        self.assertFalse(self.worker._thread.is_alive())
+        self.assertLess(time.monotonic() - started, 4)
 
 
 class RefreshTest(unittest.TestCase):

@@ -376,6 +376,7 @@ class TmdbWorker:
         self._failed: dict[str, float] = {}
         self._stop = threading.Event()
         self._wake = threading.Event()
+        self._thread: threading.Thread | None = None
 
     def run_once(self) -> tuple[int, bool]:
         """One round: (lookups done, refused by the limiter)."""
@@ -406,18 +407,25 @@ class TmdbWorker:
         self._wake.set()
 
     def start(self) -> None:
-        threading.Thread(target=self._loop, name="dvb-tmdb", daemon=True).start()
+        self._thread = threading.Thread(target=self._loop, name="dvb-tmdb", daemon=True)
+        self._thread.start()
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 5.0) -> None:
+        """Stop and wait for the round in progress, so nothing writes the store afterwards."""
         self._stop.set()
         self._wake.set()
+        if self._thread is not None:
+            self._thread.join(timeout)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
+            # cleared before the round, so a poke or stop() during it is not lost
+            self._wake.clear()
             try:
                 _, refused = self.run_once()
             except Exception as exc:  # never let the worker die
                 self.log(f"dvb: tmdb: worker round failed: {exc!r}")
                 refused = False
-            self._wake.clear()
+            if self._stop.is_set():
+                break
             self._wake.wait(WORKER_BUSY if refused else WORKER_IDLE)
