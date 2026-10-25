@@ -305,16 +305,18 @@ class AdminHttpTest(unittest.TestCase):
             def __init__(self):
                 self.seen = []
 
-            def handle(self, method, path, headers, body):
-                self.seen.append((method, path, body))
+            def handle(self, method, path, headers, body, query=None):
+                self.seen.append((method, path, body, query))
                 from cztvhub.dvb.gateway import json_response
                 return json_response(200, {})
 
         site = Site()
         port = self.start(site)
         self.assertEqual(self.call(port, "GET", "/admin")[0], 200)
+        self.assertEqual(self.call(port, "GET", "/admin/api/tmdb?page=2")[0], 200)
         self.assertEqual(self.call(port, "POST", "/admin/api/channels/x?y=1", body=b'{"offered": true}')[0], 200)
-        self.assertEqual(site.seen, [("GET", "/admin", b""), ("POST", "/admin/api/channels/x", b'{"offered": true}')])
+        self.assertEqual(site.seen, [("GET", "/admin", b"", {}), ("GET", "/admin/api/tmdb", b"", {"page": "2"}),
+                                     ("POST", "/admin/api/channels/x", b'{"offered": true}', {})])
 
 
 if __name__ == "__main__":

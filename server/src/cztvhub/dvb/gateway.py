@@ -21,9 +21,11 @@ from typing import Any, Callable, Mapping
 from .. import api as ct_api
 from ..channels import CHANNELS as CT_CHANNELS
 from ..config import Config
+from . import archive_catalog as catalog
 from . import breaks as ads
 from . import details as tmdb
-from .archive import Archive, ArchiveError, parse_recording_id
+from . import tmdbstore
+from .archive import MAX_PROGRAMME, Archive, ArchiveError, parse_recording_id, recording_id
 from .buffer import BufferStore
 from .eit import EitStore
 from .recorder import RecorderManager
@@ -72,6 +74,15 @@ IDEC_RE = re.compile(r"^[A-Za-z0-9]{1,32}$")
 CT_SCHEDULE_SECONDS = 600.0  # the CT schedule of a day, for /dvb/details?source=ct
 CT_DAYS_BACK, CT_DAYS_AHEAD = 7, 2  # the apps' guide range (spec/apps.md "TV průvodce")
 POSTER_RETRY_AFTER = 5
+ARCHIVE_PATH = "/dvb/archive"
+ARCHIVE_SEARCH = "/dvb/archive/search"
+ARCHIVE_CATEGORY_RE = re.compile(r"^/dvb/archive/category/(recordings|\d{4}-[a-z-]{1,40})$")
+ARCHIVE_SHOW_RE = re.compile(r"^/dvb/archive/show/([^/]{1,400})$")
+CT_SHOW_ID_RE = re.compile(r"^ct:([A-Za-z0-9]{1,32})$")
+REC_SHOW_ID_RE = re.compile(r"^rec:([a-z0-9]{1,600})$")  # archive_catalog.card_key: ASCII only
+SUBGENRE_RE = re.compile(r"^[0-9]{1,8}$")
+SEARCH_MAX = 100
+PAGE_RE = re.compile(r"^[1-9][0-9]{0,2}$")
 JSON = "application/json; charset=utf-8"
 M3U8 = "application/vnd.apple.mpegurl"
 MEDIA_TYPES = {".m4s": "video/iso.segment", ".mp4": "video/mp4"}
@@ -147,13 +158,29 @@ class DvbGateway:
         self._thumb_dvr_at = float("-inf")
         self._thumb_dvr_lock = threading.Lock()
         if cfg.tmdb.enabled:
-            self.details: tmdb.Details | None = tmdb.Details(cfg.tmdb.key, self.dvb.state_dir, now=now, log=log)
+            self.details: tmdb.Details | None = tmdb.Details(cfg.tmdb.key, self.dvb.state_dir, now=now, log=log,
+                                                             months=self.tmdb_months)
         else:
             self.details = None
             tmdb.remove_cache(self.dvb.state_dir, log)  # no key, nothing from TMDb kept
         self.fetch_schedules = ct_api.fetch_schedules
         self._ct_schedules: dict[tuple[str, date], tuple[float, list[ct_api.Programme]]] = {}
         self._ct_lock = threading.Lock()
+        # the apps' Archiv (spec "Archive"); TMDb only with the key, and then the worker fills the store
+        self.catalog = catalog.ArchiveCatalog(catalog.CtArchiveClient(), self._archive_recordings,
+                                              store=lambda: self.details.store if self.details else None,
+                                              thumbs=lambda: self.thumbs.enabled, now=now, log=log,
+                                              on_listed=lambda: self.tmdb_worker and self.tmdb_worker.poke())
+        self.tmdb_worker: tmdbstore.TmdbWorker | None = None
+        if self.details is not None:
+            details = self.details
+            self.tmdb_worker = tmdbstore.TmdbWorker(details.store, self.catalog.wanted,
+                                                    lambda query: details.refresh(query, background=True),
+                                                    tmdb.TmdbBusy, tmdb.TmdbError, log=log)
+
+    def tmdb_months(self) -> int:
+        """``/admin`` "Obnovit údaje z TMDb po N měsících" (default 5, any positive number)."""
+        return tmdbstore.clamp_months(self.settings.get(tmdbstore.SETTING, tmdbstore.DEFAULT_MONTHS))
 
     # -- lifecycle -------------------------------------------------------------------------
     def start(self) -> None:
@@ -161,9 +188,13 @@ class DvbGateway:
         self.retention.start()
         self.archive.start()
         threading.Thread(target=self._collect_loop, name="dvb-epg-history", daemon=True).start()
+        if self.tmdb_worker is not None:
+            self.tmdb_worker.start()
 
     def stop(self) -> None:
         self._collector_stop.set()
+        if self.tmdb_worker is not None:
+            self.tmdb_worker.stop()
         self.archive.stop()
         self.retention.stop()
         self.hls.shutdown()
@@ -229,6 +260,8 @@ class DvbGateway:
             return self.programme_details(query)
         if m := DETAILS_IMAGE_RE.match(path):
             return self.details_poster(m.group(1))
+        if path == ARCHIVE_PATH or path.startswith(ARCHIVE_PATH + "/"):
+            return self.archive_route(path, query)
         if m := HLS_RE.match(path):
             return self.media(m.group(1), m.group(2), headers.get("Range"))
         if path.startswith(VIEW_PREFIX):
@@ -675,6 +708,81 @@ class DvbGateway:
             raise HttpError(404, "Plakát není k dispozici")
         return Response(200, found[0], found[1], {"Cache-Control": "private, no-store"})
 
+    # -- archive (archive_catalog.py) ------------------------------------------------------
+    def archive_route(self, path: str, query: Mapping[str, str]) -> Response:
+        """``/dvb/archive``, ``…/category/<slug>``, ``…/search``, ``…/show/<id>`` (spec "Archive")."""
+        try:
+            if path == ARCHIVE_PATH:
+                return json_response(200, self.catalog.home())
+            if path == ARCHIVE_SEARCH:
+                return json_response(200, self.catalog.search(_search_text(query.get("q")),
+                                                              _page(query.get("page"), catalog.MAX_PAGES)))
+            if m := ARCHIVE_CATEGORY_RE.match(path):
+                slug = m.group(1)
+                if slug != catalog.RECORDINGS and slug not in catalog.BY_SLUG:
+                    raise HttpError(404, "Neznámá kategorie")
+                sort = query.get("sort") or "popular"
+                if sort not in catalog.SORTS:
+                    raise HttpError(400, "Řazení musí být popular, newest nebo az")
+                genre = query.get("genre") or None
+                if genre is not None and (slug == catalog.RECORDINGS or not SUBGENRE_RE.match(genre)):
+                    raise HttpError(400, "Neplatný žánr")
+                limit = catalog.MAX_RECORDINGS_PAGES if slug == catalog.RECORDINGS else catalog.MAX_PAGES
+                try:
+                    return json_response(200, self.catalog.category(slug, sort, genre, _page(query.get("page"),
+                                                                                             limit)))
+                except catalog.BadInput:
+                    raise HttpError(400, "Neznámý žánr kategorie")
+            if m := ARCHIVE_SHOW_RE.match(path):
+                return self.archive_show(urllib.parse.unquote(m.group(1)), query)
+        except catalog.NotFound:
+            raise HttpError(404, "Pořad nenalezen")
+        except catalog.CtError as exc:
+            self.log(f"dvb: archive: {exc}")
+            raise HttpError(502, catalog.CtError.user_message)
+        raise HttpError(404, "Nenalezeno")
+
+    def archive_show(self, card_id: str, query: Mapping[str, str]) -> Response:
+        if not (CT_SHOW_ID_RE.match(card_id) or REC_SHOW_ID_RE.match(card_id)):
+            raise HttpError(400, "Neplatné id pořadu")
+        season = query.get("season") or None
+        if season is not None and (card_id.startswith("rec:") or not catalog.SEASON_RE.match(season)):
+            raise HttpError(400, "Neplatná řada")
+        page = _page(query.get("page"), catalog.MAX_EPISODE_PAGES)
+        try:
+            return json_response(200, self.catalog.show(card_id, season, page))
+        except catalog.BadInput:
+            raise HttpError(400, "Neznámá řada pořadu")
+
+    def _archive_recordings(self) -> list[catalog.RecProgramme]:
+        """Ended, recorded programmes within retention on offered channels (the continuous recording only)."""
+        now = int(self.now())
+        first = now - self.archive.max_days() * 86400
+        try:
+            names = {c.uuid: c.name for c in self._channel_list()}
+        except TvhError as exc:
+            self.log(f"dvb: archive: {exc}")
+            return []
+        recorded = {c for c in names if self.archive.is_recorded(c)}
+        if not recorded:
+            return []
+        events = {e.event_id: e for e in self.history.between(first, now)}
+        try:
+            for e in self.client.epg_events(first, now):
+                events.setdefault(e.event_id, e)
+        except TvhError:
+            pass
+        out = []
+        for e in events.values():
+            if e.channel not in recorded or e.start < first or e.stop > now \
+                    or not 0 < e.stop - e.start <= MAX_PROGRAMME:
+                continue
+            if self.archive.state(e.channel, e.start, e.stop) != "completed":
+                continue
+            out.append(catalog.RecProgramme(recording_id(e.channel, e.start, e.stop), names[e.channel], e.title,
+                                            e.description, tuple(e.genre), e.start, e.stop))
+        return out
+
     # -- profiles (profiles.py) ------------------------------------------------------------
     def _profile_route(self, method: str, path: str, headers: Mapping[str, str], body: bytes) -> Response:
         """Settings profiles (spec/dvb-gateway.md "Profiles"). The app key must come as the bearer header:
@@ -823,6 +931,23 @@ class DvbGateway:
         removed = self.breaks.prune(e.uuid for e in entries)
         if removed:
             self.log(f"dvb: removed ad breaks of {len(removed)} deleted recording(s)")
+
+
+def _page(value: str | None, last: int) -> int:
+    if value is None or value == "":
+        return 1
+    if not PAGE_RE.match(value) or int(value) > last:
+        raise HttpError(400, f"Stránka musí být 1 až {last}")
+    return int(value)
+
+
+def _search_text(value: str | None) -> str:
+    text = " ".join((value or "").split())
+    if not text:
+        raise HttpError(400, "Chybí hledaný text")
+    if len(text) > SEARCH_MAX or any(ord(c) < 32 or ord(c) == 127 for c in text):
+        raise HttpError(400, f"Hledaný text může mít nejvýš {SEARCH_MAX} znaků")
+    return text
 
 
 def local_url(url: str) -> bool:

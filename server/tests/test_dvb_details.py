@@ -3,8 +3,6 @@ strict matching, the TMDb client and its limits, the cache, the poster proxy and
 TMDb is a fake ``urlopen``; nothing here touches the network."""
 import io
 import json
-import os
-import stat
 import tempfile
 import threading
 import unittest
@@ -16,6 +14,7 @@ from pathlib import Path
 from cztvhub import api
 from cztvhub.config import AdsConfig, Config, ConfigError, DvbConfig, TmdbConfig, parse_config
 from cztvhub.dvb import details as dt
+from cztvhub.dvb import tmdbstore
 from cztvhub.dvb.gateway import DvbGateway
 from cztvhub.dvb.hls import HlsManager
 from cztvhub.dvb.tvheadend import EpgEvent
@@ -28,7 +27,6 @@ TMDB_V4 = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0In0.c2lnbmF0dXJlLXNlY3JldA"
 APP = {"Authorization": "Bearer " + KEY}
 WORKER = {"Authorization": "Bearer " + WORKER_KEY}
 TEMPLATE = Path(__file__).resolve().parents[1] / "deploy" / "cztvhub.conf.example"
-DAY = 86400
 SHARED = Path(__file__).resolve().parents[2] / "spec" / "fixtures" / "dvb"
 SHARED_FILES = {"match": "dvb_details_match.json", "nomatch": "dvb_details_nomatch.json"}
 
@@ -99,6 +97,13 @@ def details_for(state_dir, http, key=TMDB_V3, now=lambda: NOW, logs=None, per_mi
     client = dt.TmdbClient(key, limiter=limiter, urlopen=http)
     log = logs.append if logs is not None else (lambda m: None)
     return dt.Details(key, state_dir, now=now, log=log, client=client)
+
+
+def put_poster(details, file):
+    """A stored match with this poster file, as a lookup would leave it."""
+    details.store.put(tmdbstore.store_key("movie", None, file), "movie", None, file,
+                      {"kind": "movie", "tmdbId": 1, "rating": None, "genreIds": [], "genres": [], "year": None,
+                       "poster": file})
 
 
 def shared_answers(state_dir):
@@ -335,17 +340,17 @@ class LimiterTest(unittest.TestCase):
         clock = Clock()
         limiter = dt.Limiter(clock=clock)
         for _ in range(30):
-            with limiter:
+            with limiter.slot():
                 pass
         with self.assertRaises(dt.TmdbBusy):
-            with limiter:
+            with limiter.slot():
                 pass
         clock.t += 59.9
         with self.assertRaises(dt.TmdbBusy):
-            with limiter:
+            with limiter.slot():
                 pass
         clock.t += 0.2  # the first ones are a minute old
-        with limiter:
+        with limiter.slot():
             pass
 
     def test_one_at_a_time(self):
@@ -353,7 +358,7 @@ class LimiterTest(unittest.TestCase):
         inside, release = threading.Event(), threading.Event()
 
         def hold():
-            with limiter:
+            with limiter.slot():
                 inside.set()
                 release.wait(5)
 
@@ -362,12 +367,12 @@ class LimiterTest(unittest.TestCase):
         self.assertTrue(inside.wait(5))
         try:
             with self.assertRaises(dt.TmdbBusy):
-                with limiter:
+                with limiter.slot():
                     pass
         finally:
             release.set()
             worker.join()
-        with limiter:  # free again
+        with limiter.slot():  # free again
             pass
 
     def test_refused_request_is_not_sent(self):
@@ -379,74 +384,6 @@ class LimiterTest(unittest.TestCase):
         with self.assertRaises(dt.TmdbBusy):
             client.get("search/movie", {})
         self.assertEqual(len(http.requests), 2)
-
-
-class CacheTest(unittest.TestCase):
-    def setUp(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.dir = Path(tmp.name)
-        self.now = Clock(NOW)
-
-    def make(self, **kwargs):
-        return dt.DetailsCache(self.dir, now=self.now, log=lambda m: None, **kwargs)
-
-    def test_persistence_and_mode(self):
-        cache = self.make()
-        cache.put("a", {"title": "A", "poster": "/dvb/details/image/w342/a.jpg"})
-        cache.put("b", None)
-        self.assertEqual(stat.S_IMODE(os.stat(self.dir / dt.CACHE_FILE).st_mode), 0o600)
-        again = self.make()
-        self.assertEqual(again.get("a"), (True, {"title": "A", "poster": "/dvb/details/image/w342/a.jpg"}))
-        self.assertEqual(again.get("b"), (True, None))  # "no match" is remembered too
-        self.assertEqual(again.get("c"), (False, None))
-        self.assertEqual(again.posters(), {"a.jpg"})
-
-    def test_mode_after_a_loose_tmp_file(self):
-        tmp = self.dir / (dt.CACHE_FILE + ".tmp")
-        tmp.write_text("x")
-        os.chmod(tmp, 0o644)
-        self.make().put("a", None)
-        self.assertEqual(stat.S_IMODE(os.stat(self.dir / dt.CACHE_FILE).st_mode), 0o600)
-
-    def test_thirty_days(self):
-        cache = self.make()
-        cache.put("a", {"poster": "/dvb/details/image/w342/a.jpg"})
-        self.now.t += 30 * DAY - 1
-        self.assertEqual(cache.get("a")[0], True)
-        self.assertEqual(self.make().get("a")[0], True)
-        self.now.t += 1
-        self.assertEqual(cache.get("a"), (False, None))
-        self.assertEqual(cache.posters(), set())  # an expired match's poster is no longer served
-        self.assertEqual(len(self.make()), 0)  # dropped when read again
-
-    def test_cap(self):
-        cache = self.make(max_entries=3)
-        for name in "abcd":
-            cache.put(name, None)
-            self.now.t += 1
-        self.assertEqual([cache.get(n)[0] for n in "abcd"], [False, True, True, True])  # the oldest went
-        self.assertEqual(len(self.make(max_entries=3)), 3)
-        self.assertEqual(dt.CACHE_MAX, 5000)
-        self.assertEqual(dt.CACHE_SECONDS, 30 * DAY)
-
-    def test_broken_file(self):
-        (self.dir / dt.CACHE_FILE).write_text("{nope")
-        self.assertEqual(len(self.make()), 0)
-        (self.dir / dt.CACHE_FILE).write_text(json.dumps({"entries": {"a": {"at": "x"}, "b": {"at": NOW, "match": 1},
-                                                                      "c": {"at": NOW, "match": None}}}))
-        cache = self.make()
-        self.assertEqual((len(cache), cache.get("c")), (1, (True, None)))
-
-    def test_unwritable_is_logged_not_raised(self):
-        logs = []
-        (self.dir / "ro").mkdir()
-        cache = dt.DetailsCache(self.dir / "ro" / "missing-file-dir", now=self.now, log=logs.append)
-        os.chmod(self.dir / "ro", 0o500)
-        self.addCleanup(os.chmod, self.dir / "ro", 0o700)
-        cache.put("a", None)
-        self.assertEqual(cache.get("a"), (True, None))
-        self.assertTrue(any("cannot save" in line for line in logs))
 
 
 class LookupTest(unittest.TestCase):
@@ -512,7 +449,7 @@ class LookupTest(unittest.TestCase):
         self.http.add("/3/search/movie", {"results": []})
         answer = details.lookup(dt.Programme("Pelíšky"))  # the movie search fits, the tv one does not
         self.assertEqual(answer["error"], dt.TmdbBusy.user_message)
-        self.assertEqual(len(details.cache), 0)
+        self.assertEqual(len(details.store), 0)
 
     def test_nothing_to_ask(self):
         self.assertEqual(self.details.lookup(dt.Programme("(14)"))["match"], None)
@@ -600,13 +537,13 @@ class GatewayDetailsTest(unittest.TestCase):
         self.titans()
         self.remember("5001", "Film: Hněv Titánů", "(USA, 2012)")
         self.assertEqual(self.get("/dvb/details", {"source": "dvb", "id": "5001"})[0].status, 200)
-        cache = self.dir / dt.CACHE_FILE
-        self.assertTrue(cache.exists())
+        store = self.dir / tmdbstore.FILE
+        self.assertTrue(store.exists())
         self.make(TMDB_V3)
-        self.assertTrue(cache.exists())  # a restart with the key keeps it
+        self.assertTrue(store.exists())  # a restart with the key keeps it
         self.make("")
-        self.assertFalse(cache.exists())
-        self.assertIn("dvb: details: no [tmdb] key, deleted tmdb-cache.json", self.logs)
+        self.assertFalse(store.exists())
+        self.assertIn("dvb: tmdb: no [tmdb] key, deleted tmdb.sqlite", self.logs)
 
     # -- access --------------------------------------------------------------------------------
     def test_needs_the_app_key(self):
@@ -719,14 +656,14 @@ class GatewayDetailsTest(unittest.TestCase):
         self.get("/dvb/details", {"source": "dvb", "id": "5001"})
         self.http.error = None
         self.http.add("/t/p/w342/titanyPoster01.jpg", b"x", content_type="text/html")
-        self.gw.details.cache.put("k", {"poster": "/dvb/details/image/w342/titanyPoster01.jpg"})
+        put_poster(self.gw.details, "titanyPoster01.jpg")
         self.get("/dvb/details/image/w342/titanyPoster01.jpg")
         self.assertTrue(any("key was refused" in line for line in self.logs))
         self.assertGreaterEqual(len([line for line in self.logs if "details" in line]), 3)
         for line in self.logs:
             self.assertNotIn(TMDB_V3, line)
         self.assertNotIn(TMDB_V3.encode(), resp.body)
-        self.assertEqual(len(self.gw.details.cache), 1)  # only the poster entry put by hand
+        self.assertEqual(len(self.gw.details.store), 1)  # only the poster entry put by hand
 
     # -- posters -------------------------------------------------------------------------------
     def test_poster_only_from_own_lookups(self):
@@ -753,9 +690,8 @@ class GatewayDetailsTest(unittest.TestCase):
         self.assertNotIn("/t/p/w342/other.jpg", self.http.paths())
 
     def test_poster_limits(self):
-        cache = self.gw.details.cache
         for name in ("big.jpg", "html.jpg"):
-            cache.put(name, {"poster": "/dvb/details/image/w342/" + name})
+            put_poster(self.gw.details, name)
         self.http.add("/t/p/w342/big.jpg", b"x" * (dt.POSTER_MAX + 1), content_type="image/jpeg")
         self.http.add("/t/p/w342/html.jpg", b"<html>", content_type="text/html")
         for name in ("big.jpg", "html.jpg"):
@@ -766,7 +702,7 @@ class GatewayDetailsTest(unittest.TestCase):
 
     def test_poster_busy(self):
         self.gw.details = details_for(self.dir, self.http, per_minute=0)
-        self.gw.details.cache.put("k", {"poster": "/dvb/details/image/w342/a.jpg"})
+        put_poster(self.gw.details, "a.jpg")
         resp, _ = self.get("/dvb/details/image/w342/a.jpg")
         self.assertEqual((resp.status, resp.headers["Retry-After"]), (503, "5"))
 
