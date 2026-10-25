@@ -211,6 +211,7 @@ class GuardTest(unittest.TestCase):
     def test_system_disk_refused_and_limit_kept(self):
         with tempfile.TemporaryDirectory() as tmp:  # a temp dir is on the system disk here
             archive, started = self.archive(tmp, allow=False)
+            archive.system_root = Path(tmp)  # "the system disk" here, whatever the runner mounts /tmp on
             self.assertTrue(archive.on_system_disk())
             self.assertIn("buffer_dir", archive.can_record())
             archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])

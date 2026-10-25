@@ -130,6 +130,7 @@ class Archive:
         self.programmes = programmes or (lambda channel, start, end: [])
         self.max_recordings = max_recordings
         self.allow_system_disk = allow_system_disk
+        self.system_root = Path("/")  # the system disk; tests point it at their temp dir (runners differ)
         self._views: dict[str, View] = {}
         self._view_keys: dict[str, str] = {}
         self._runs: OrderedDict[tuple[str, str], RunInfo] = OrderedDict()
@@ -166,7 +167,7 @@ class Archive:
         while not path.exists() and path != path.parent:
             path = path.parent
         try:
-            return path.stat().st_dev == Path("/").stat().st_dev
+            return path.stat().st_dev == self.system_root.stat().st_dev
         except OSError:
             return True
 

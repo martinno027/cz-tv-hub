@@ -352,7 +352,8 @@ class RecordingAdminTest(AdminTest):
         self.assertTrue(next(c for c in data["channels"] if c["id"] == CT1)["record"])
 
     def test_system_disk_refused(self):
-        self.gateway.archive.allow_system_disk = False  # the temp dir is on the system disk
+        self.gateway.archive.allow_system_disk = False
+        self.gateway.archive.system_root = self.gateway.archive.store.root  # the temp dir as the system disk
         resp, data = self.record([CT1])
         self.assertEqual(resp.status, 400)
         self.assertIn("buffer_dir", data["error"])
