@@ -539,11 +539,17 @@
   };
 
   /** "Pokračovat": the programme at the playhead (with an id), seconds from its start. */
-  TimelineController.prototype.saveProgress = function (store) {
+  /**
+   * "Pokračovat" of the programme at the playhead; the Archiv row gets the request's title and image when that is
+   * the programme that was opened, else the neighbour's own title and thumbnail path.
+   */
+  TimelineController.prototype.saveProgress = function (store, request) {
     var time = this.playingTime();
     var programme = time === null ? null : this.programmeAt(time);
     if (!programme || !programme.id) return;
-    store.save('dvb:' + programme.id, T.progress(programme, time), (programme.end - programme.start) / 1000);
+    var meta = request && request.recordingId === programme.id && request.resumeMeta ? request.resumeMeta
+      : CT.ResumeRules.meta(programme.title, programme.subtitle, CT.Thumbs.path(programme.id), 'dvb');
+    store.save('dvb:' + programme.id, T.progress(programme, time), (programme.end - programme.start) / 1000, meta);
   };
 
   /** Where to continue after re-resolving or coming back from the background: this window, same wall clock. */

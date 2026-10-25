@@ -74,6 +74,20 @@
     },
 
     /**
+     * What the Archiv row "Pokračovat ve sledování" shows for an entry remembered from the guide: its title (the
+     * episode under the programme when there is one), CT's image or the recording's gateway thumbnail path; ČT
+     * programmes with their start and CT channel, so the row resumes by the decision rules.
+     */
+    resumeMeta: function (entry) {
+      if (entry.source === 'ct') {
+        var image = /^https:\/\//.test(entry.imageUrl || '') ? entry.imageUrl : '';
+        return CT.ResumeRules.meta(entry.title, entry.subtitle, image, 'ct', entry.start, entry.channel.id);
+      }
+      var rec = entry.item.recording;
+      return CT.ResumeRules.meta(entry.title, entry.subtitle, rec ? CT.Thumbs.path(rec.id) : '', 'dvb');
+    },
+
+    /**
      * {type: 'notice', text} | {type: 'play', request} |
      * {type: 'choice', resume: request | null, resumeLabel, fromStart: request | null, live: request | null}
      * Airing: "Od začátku" / "Živě"; with a remembered position (`store`, optional) "Pokračovat od …" comes
@@ -86,7 +100,9 @@
       var offer = info && store ? store.offer(info.key) : null;
       var tag = function (request) {
         if (!request || request.kind === 'live' || request.kind === 'dvbLive' || !info) return request;
-        return Object.assign({}, request, { resumeKey: info.key, lengthSeconds: info.lengthSeconds });
+        return Object.assign({}, request, {
+          resumeKey: info.key, lengthSeconds: info.lengthSeconds, resumeMeta: Entries.resumeMeta(entry)
+        });
       };
       var fromStart = tag(base.type === 'play' ? base.request : base.fromStart);
       if (offer) {
