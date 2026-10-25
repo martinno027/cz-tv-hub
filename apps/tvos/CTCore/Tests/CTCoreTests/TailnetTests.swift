@@ -336,6 +336,8 @@ final class TailnetRecoveryTests: XCTestCase {
         XCTAssertEqual(TailnetRules.screenLine(enabled: true, info: TailnetInfo(state: "NeedsMachineAuth"), checking: false), waiting)
         XCTAssertNil(TailnetRules.screenLine(enabled: true, info: running, checking: false))
         XCTAssertEqual(TailnetRules.screenLine(enabled: true, info: running, checking: true), connecting)
+        XCTAssertEqual(TailnetRules.screenLine(enabled: true, info: TailnetInfo(state: "NeedsLogin"), checking: true), connecting,
+                       "a T18 check says Připojuji se…")
         XCTAssertNil(TailnetRules.screenLine(enabled: false, info: TailnetInfo(state: "Starting"), checking: false))
         XCTAssertNil(TailnetRules.screenLine(enabled: true, info: nil, checking: false), "no node: no bridge in use")
     }
