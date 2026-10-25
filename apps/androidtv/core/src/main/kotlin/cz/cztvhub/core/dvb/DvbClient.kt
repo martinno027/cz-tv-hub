@@ -79,7 +79,13 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
     }
 }
 
-class UrlConnectionDvbTransport(private val timeoutMs: Int = 8_000) : DvbTransport {
+/**
+ * Connect/read timeout of the gateway clients: above the Tailscale bridge's 8 s dial timeout, so through the bridge
+ * its 502 with the Czech text comes first instead of a client timeout (spec/apps.md "Back in front (T18)").
+ */
+const val GATEWAY_TIMEOUT_MS = 10_000
+
+class UrlConnectionDvbTransport(val timeoutMs: Int = GATEWAY_TIMEOUT_MS) : DvbTransport {
     override fun get(url: String, headers: Map<String, String>): HttpResponse {
         val connection = URI(url).toURL().openConnection() as HttpURLConnection
         try {

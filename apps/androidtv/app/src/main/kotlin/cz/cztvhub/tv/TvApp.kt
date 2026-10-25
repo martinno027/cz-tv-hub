@@ -1,7 +1,10 @@
 package cz.cztvhub.tv
 
+import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.os.Bundle
+import cz.cztvhub.core.BridgeWatch
 import cz.cztvhub.core.CtApi
 import cz.cztvhub.core.LiveResolver
 import cz.cztvhub.core.Planner
@@ -11,6 +14,9 @@ import cz.cztvhub.core.ScheduleRepository
 import cz.cztvhub.core.dvb.DvbClient
 import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.dvb.DvbRepository
+import cz.cztvhub.core.dvb.UrlConnectionDvbTransport
+import cz.cztvhub.core.profile.ProfileClient
+import cz.cztvhub.core.profile.UrlConnectionProfileTransport
 import cz.cztvhub.tv.dvb.DvbSettings
 import cz.cztvhub.tv.dvb.TailnetController
 import cz.cztvhub.tv.ui.ImageCache
@@ -46,6 +52,14 @@ class TvApp : Application() {
         TailnetController.Route.Pending -> null
         is TailnetController.Route.Bridge -> config?.copy(baseUrl = route.baseUrl)
     }
+
+    /** A gateway request through the bridge that the bridge could not pass on makes the app check it (T18). */
+    private val bridgeWatch = BridgeWatch { tailnet.checkBridge() }
+
+    /** True when [config] goes through the Tailscale bridge (its requests are watched). */
+    private fun bridged(config: DvbConfig): Boolean =
+        (tailnet.state.value.route as? TailnetController.Route.Bridge)?.baseUrl == config.baseUrl
+
     val planner by lazy { Planner(api, LiveResolver(api), dvb = { dvb()?.client }) }
     val images by lazy { ImageCache() }
 
@@ -65,7 +79,12 @@ class TvApp : Application() {
     val thumbnailPrefs by lazy { ThumbnailPrefs(this) }
 
     /** "Profil": the settings above kept in a profile on the gateway while signed in. */
-    val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) { gateway.value } }
+    val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) {
+            gateway.value?.let { config ->
+                val transport = UrlConnectionProfileTransport()
+                ProfileClient(config, if (bridged(config)) bridgeWatch.profile(transport) else transport)
+            }
+        } }
 
     /** The household default channel list from the gateway, shown while signed out and the list is not the TV's own. */
     val defaults by lazy { HouseholdDefaultManager(this, this) }
@@ -75,6 +94,7 @@ class TvApp : Application() {
     override fun onCreate() {
         super.onCreate()
         tailnet // with the switch on, the node starts before the first gateway request
+        registerActivityLifecycleCallbacks(Foreground { tailnet.checkBridge() })
     }
 
     override fun onTrimMemory(level: Int) {
@@ -87,7 +107,28 @@ class TvApp : Application() {
     fun dvb(): DvbRepository? {
         val config = gateway.value ?: return null.also { dvbRepository = null }
         dvbRepository?.let { if (it.client.config == config) return it }
-        return DvbRepository(DvbClient(config)).also { dvbRepository = it }
+        val transport = UrlConnectionDvbTransport()
+        return DvbRepository(DvbClient(config, if (bridged(config)) bridgeWatch.dvb(transport) else transport))
+            .also { dvbRepository = it }
+    }
+
+    /** Calls [onFront] when the app comes to the front (its first activity starts), also from the background. */
+    private class Foreground(private val onFront: () -> Unit) : ActivityLifecycleCallbacks {
+        private var started = 0
+
+        override fun onActivityStarted(activity: Activity) {
+            if (started++ == 0) onFront()
+        }
+
+        override fun onActivityStopped(activity: Activity) {
+            started--
+        }
+
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+        override fun onActivityResumed(activity: Activity) {}
+        override fun onActivityPaused(activity: Activity) {}
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+        override fun onActivityDestroyed(activity: Activity) {}
     }
 }
 

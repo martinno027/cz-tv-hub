@@ -37,6 +37,7 @@ import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.PspState
+import cz.cztvhub.core.TailnetStatus
 import cz.cztvhub.core.Timed
 import cz.cztvhub.tv.R
 import java.time.Duration
@@ -63,9 +64,12 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val psp by viewModel.psp.collectAsStateWithLifecycle()
     val notOn = stringResource(R.string.psp_not_on)
     PspPolling(viewModel)
+    // Tailscale is being checked (spec/apps.md T18): "Připojuji se k Tailscale…" instead of the gateway's error.
+    val checking by viewModel.tailnetChecking.collectAsStateWithLifecycle()
+    val connecting = checking && antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
     // Anténa switched on but the gateway has not answered yet: not "everything hidden".
     val antennaPending = antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
-        antenna.channels.isEmpty() && antenna.error == null
+        antenna.channels.isEmpty() && (antenna.error == null || connecting)
 
     if (channels.isEmpty() && !antennaPending) {
         CenteredMessage(stringResource(R.string.channels_all_hidden))
@@ -76,7 +80,9 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        if (antenna?.error != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)) {
+        if (connecting) {
+            Text(TailnetStatus.CONNECTING, color = Palette.textDim)
+        } else if (antenna?.error != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)) {
             Text(stringResource(R.string.antenna_unavailable, antenna.error), color = Palette.nowLine)
         }
         channels.chunked(3).forEachIndexed { rowIndex, row ->
