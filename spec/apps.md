@@ -433,8 +433,10 @@ app** (Tizen web apps cannot run it): it reaches the gateway on the LAN as befor
   node's state changes to `Running` from any other state** (start, switch on, new address, restart, or a later
   reconnect), the app loads the gateway data the screens need again (channels, guide, defaults, profile), at most
   once per change. After any node start the status is polled **every 1 s until `Running`** (at most 20 s, then every
-  30 s as before), and while the node is not yet `Running` Živě and the guide show "Připojuji se k Tailscale…" instead
-  of an empty Anténa group. A T18 check still runs at most once at a time; a reload already done by the change to
+  30 s as before; the T18 restart's own wait polls every 1 s too), and while the node is connecting Živě and the guide
+  show "Připojuji se k Tailscale…" instead of an empty Anténa group; in `NeedsLogin` / `NeedsMachineAuth` (which can
+  last) they show "Tailscale čeká na přihlášení (Nastavení → Server)." instead. A double load right after a start
+  (new route, then the change to `Running`) is fine. A T18 check still runs at most once at a time; a reload already done by the change to
   `Running` makes the check's own reload unnecessary (one reload, not two).
 - **Connection line (T18)**: `Info()` also gives the gateway peer's path, `"gateway": {"direct": bool, "relay":
   "<DERP region code>", "latencyMs": <int> | null}` (from the node's peer status and a ping, refreshed with the
