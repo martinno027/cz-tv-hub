@@ -64,12 +64,13 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val psp by viewModel.psp.collectAsStateWithLifecycle()
     val notOn = stringResource(R.string.psp_not_on)
     PspPolling(viewModel)
-    // Tailscale is being checked (spec/apps.md T18): "Připojuji se k Tailscale…" instead of the gateway's error.
-    val checking by viewModel.tailnetChecking.collectAsStateWithLifecycle()
-    val connecting = checking && antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
+    // Tailscale is not Running yet or being checked (spec/apps.md T21, T18): "Připojuji se k Tailscale…" instead of
+    // the gateway's error or an empty Anténa group (also before the bridge exists, when Anténa is not loaded at all).
+    val tailnetConnecting by viewModel.tailnetConnecting.collectAsStateWithLifecycle()
+    val connecting = tailnetConnecting && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
     // Anténa switched on but the gateway has not answered yet: not "everything hidden".
-    val antennaPending = antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
-        antenna.channels.isEmpty() && (antenna.error == null || connecting)
+    val antennaPending = connecting || antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
+        antenna.channels.isEmpty() && antenna.error == null
 
     if (channels.isEmpty() && !antennaPending) {
         CenteredMessage(stringResource(R.string.channels_all_hidden))

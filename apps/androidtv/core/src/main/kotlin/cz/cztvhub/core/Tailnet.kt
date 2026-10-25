@@ -93,6 +93,14 @@ data class TailnetStatus(val line: String, val qr: Boolean, val logout: Boolean,
         }
 
         /**
+         * "Start (T21)": Živě and the guide say [CONNECTING] instead of an empty Anténa group while the switch is on
+         * and the node is not `Running` yet (also before it started), or while the bridge is being checked (T18).
+         * A failed start shows its error instead.
+         */
+        fun connecting(enabled: Boolean, info: TailnetInfo?, error: String?, checking: Boolean): Boolean =
+            enabled && error == null && (checking || info?.state != TailnetRunningWatch.RUNNING)
+
+        /**
          * [info] is null until the node started; [error] is the start failure. The bridge is used as soon as the
          * node started (before `Running` it answers 502 with the gateway-style error).
          */
@@ -190,6 +198,12 @@ class TailnetRecovery(
 
         /** Loads the gateway data the screens need again. */
         fun reload()
+
+        /**
+         * How many reloads the node's changes to `Running` made so far ([TailnetRunningWatch.reloads], T21): when one
+         * came during the check, the check's own reload is left out (one reload, not two).
+         */
+        fun runningReloads(): Int = 0
     }
 
     private val busy = AtomicBoolean(false)
@@ -215,13 +229,14 @@ class TailnetRecovery(
         try {
             if (steps.check()) return Outcome.HEALTHY
             lastStart = clock()
+            val reloadsBefore = steps.runningReloads()
             var answered = false
             if (steps.restart()) {
                 val deadline = clock().plus(RUNNING_WAIT)
                 while (!steps.isRunning() && clock().isBefore(deadline)) sleep(RUNNING_POLL)
                 answered = steps.check()
             }
-            steps.reload()
+            if (steps.runningReloads() == reloadsBefore) steps.reload()
             return if (answered) Outcome.RECOVERED else Outcome.FAILED
         } finally {
             busy.set(false)
@@ -246,5 +261,65 @@ class TailnetRecovery(
         } catch (_: IOException) {
             false
         }
+    }
+}
+
+/**
+ * "Start (T21)": after a node start (app start, switch on, new address, restart) the node connects within a few
+ * seconds, and the gateway requests made meanwhile got the bridge's 502. Every status read goes through [observe]: a
+ * change of the state to `Running` from any other state asks for one reload of the gateway data. [pollInterval] reads
+ * the status every [FAST_POLL] until `Running`, at most [FAST_WAIT] after the start. Thread-safe.
+ */
+class TailnetRunningWatch(private val clock: () -> Instant = Instant::now) {
+    private var state: String? = null
+    private var startedAt: Instant? = null
+    private var count = 0
+
+    /** Reloads asked for by changes to `Running` so far. */
+    val reloads: Int @Synchronized get() = count
+
+    /** The node (re)started: its state is unknown again, so the next `Running` is a change. */
+    @Synchronized
+    fun nodeStarted() {
+        state = null
+        startedAt = clock()
+    }
+
+    /** The node stopped (switch off, logout). */
+    @Synchronized
+    fun nodeStopped() {
+        state = null
+        startedAt = null
+    }
+
+    /** A status read ([TailnetInfo.state]); true = the state changed to `Running`, so reload the gateway data now. */
+    @Synchronized
+    fun observe(newState: String): Boolean {
+        val changed = newState == RUNNING && state != RUNNING
+        state = newState
+        if (changed) count++
+        return changed
+    }
+
+    /** How long until the next status read: [FAST_POLL] after a start until `Running`, else as before. */
+    @Synchronized
+    fun pollInterval(settingsOpen: Boolean): Duration {
+        val start = startedAt
+        val starting = state != RUNNING && start != null && Duration.between(start, clock()) < FAST_WAIT
+        return when {
+            starting -> FAST_POLL
+            settingsOpen -> SETTINGS_POLL
+            else -> SLOW_POLL
+        }
+    }
+
+    companion object {
+        const val RUNNING = "Running"
+        val FAST_POLL: Duration = Duration.ofSeconds(1)
+        val FAST_WAIT: Duration = Duration.ofSeconds(20)
+
+        /** Nastavení → Server is open. */
+        val SETTINGS_POLL: Duration = Duration.ofSeconds(2)
+        val SLOW_POLL: Duration = Duration.ofSeconds(30)
     }
 }

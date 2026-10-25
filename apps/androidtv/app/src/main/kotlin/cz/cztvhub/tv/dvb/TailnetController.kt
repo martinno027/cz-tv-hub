@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import cz.cztvhub.core.TailnetInfo
 import cz.cztvhub.core.TailnetRecovery
+import cz.cztvhub.core.TailnetRunningWatch
 import cz.cztvhub.core.TailnetStatus
 import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.dvb.UrlConnectionDvbTransport
@@ -16,8 +17,11 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -73,17 +77,31 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
     /** "Back in front (T18)": checks of the bridge and restarts of the node. */
     private val recovery = TailnetRecovery()
 
+    /** "Start (T21)": changes of the node's state to `Running` and the fast polling after a start. */
+    private val watch = TailnetRunningWatch()
+
     private val _checking = MutableStateFlow(false)
 
     /** The bridge is being checked (or the node restarted): Živě and the guide say "Připojuji se k Tailscale…". */
     val checking: StateFlow<Boolean> = _checking.asStateFlow()
 
+    /**
+     * The switch is on and the node is not `Running` yet, or the bridge is being checked: Živě and the guide say
+     * "Připojuji se k Tailscale…" instead of an empty Anténa group (T21).
+     */
+    val connecting: StateFlow<Boolean> =
+        combine(_state, _checking) { s, checking -> TailnetStatus.connecting(s.enabled, s.info, s.error, checking) }
+            .stateIn(scope, SharingStarted.Eagerly, TailnetStatus.connecting(_state.value.enabled, null, null, false))
+
     private val _reloads = MutableStateFlow(0)
 
-    /** Counts restarts of the node: the gateway data the screens need is loaded again on every change. */
+    /**
+     * Counts the node's changes to `Running` (T21) and the T18 checks' reloads: the gateway data the screens need is
+     * loaded again on every change.
+     */
     val reloads: StateFlow<Int> = _reloads.asStateFlow()
 
-    /** Nastavení → Server is open: poll every 2 s instead of every 30 s until `Running`. */
+    /** Nastavení → Server is open: poll every 2 s instead of every 30 s (after a start every 1 s until `Running`). */
     var settingsOpen = false
         set(value) {
             field = value
@@ -146,7 +164,7 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
         withTimeoutOrNull(READY_WAIT_MS) {
             while (_state.value.info?.state != RUNNING && node != null) {
                 poll()
-                if (_state.value.info?.state != RUNNING) delay(FAST_POLL_MS)
+                if (_state.value.info?.state != RUNNING) delay(TailnetRunningWatch.FAST_POLL.toMillis())
             }
         }
     }
@@ -176,8 +194,10 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
         nodeTarget = target
         savedVersion = 0 // the store counts changes since this start
         recovery.nodeStarted()
+        watch.nodeStarted()
         _state.value = State(true, null, null, Route.Bridge(withContext(bridgeThread) { n.proxyPort().toInt() }))
         poll()
+        wake.trySend(Unit) // every 1 s until Running
     }
 
     /**
@@ -210,6 +230,8 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
         }
 
         override fun reload() = _reloads.update { it + 1 }
+
+        override fun runningReloads() = watch.reloads
     }
 
     /** The node again with its state; the bridge keeps its port, so the gateway URL and a player's URLs stay valid. */
@@ -227,6 +249,7 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
             return@withLock false
         }
         Log.i(TAG, "restarted, bridge on port $port")
+        watch.nodeStarted()
         if ((_state.value.route as? Route.Bridge)?.port != port) _state.value = _state.value.copy(route = Route.Bridge(port))
         wake.trySend(Unit) // polling until Running again
         true
@@ -236,6 +259,7 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
         val n = node ?: return
         node = null
         nodeTarget = null
+        watch.nodeStopped()
         withContext(bridgeThread) { n.close() }
     }
 
@@ -258,11 +282,13 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
             savedVersion = info.stateVersion
         }
         _state.value = _state.value.copy(info = info)
+        // "Start (T21)": the requests made while connecting got the bridge's 502; once Running, everything again.
+        if (info != null && watch.observe(info.state)) _reloads.update { it + 1 }
     }
 
     private suspend fun pollLoop() {
         while (true) {
-            withTimeoutOrNull(if (settingsOpen) FAST_POLL_MS else SLOW_POLL_MS) { wake.receive() }
+            withTimeoutOrNull(watch.pollInterval(settingsOpen).toMillis()) { wake.receive() }
             if (node != null && (settingsOpen || _state.value.info?.state != RUNNING)) poll()
         }
     }
@@ -272,9 +298,7 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
         const val ENABLED = "enabled"
         const val STATE = "state"
         const val HOSTNAME = "televize-androidtv"
-        const val RUNNING = "Running"
-        const val FAST_POLL_MS = 2_000L
-        const val SLOW_POLL_MS = 30_000L
+        const val RUNNING = TailnetRunningWatch.RUNNING
         const val READY_WAIT_MS = 20_000L
     }
 }

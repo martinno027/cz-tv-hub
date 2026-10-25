@@ -21,9 +21,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,10 +68,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val dvbPlans: StateFlow<Map<LocalDate, Map<String, List<DvbEvent>>>> = _dvbPlans.asStateFlow()
 
     /**
-     * The Tailscale bridge is being checked (spec/apps.md "Back in front (T18)"): Živě and the guide say "Připojuji se
-     * k Tailscale…" instead of hiding Anténa or showing the bridge's error.
+     * Anténa is set up and the Tailscale node is not `Running` yet or the bridge is being checked (spec/apps.md
+     * "Start (T21)", "Back in front (T18)"): Živě and the guide say "Připojuji se k Tailscale…" instead of hiding
+     * Anténa or showing the bridge's error.
      */
-    val tailnetChecking: StateFlow<Boolean> = app.tailnet.checking
+    val tailnetConnecting: StateFlow<Boolean> =
+        combine(app.tailnet.connecting, app.dvbSettings.config) { connecting, config -> connecting && config != null }
+            .stateIn(viewModelScope, SharingStarted.Eagerly,
+                app.tailnet.connecting.value && app.dvbSettings.config.value != null)
 
     /** "Kanály": hidden channels and their order on this device (or in the signed-in profile). */
     val channelPrefs: StateFlow<ChannelPrefs> = app.channelPrefs.value
@@ -231,8 +238,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 loadDvbDay(_selectedDay.value)
             }
         }
-        // The Tailscale node restarted (same bridge port, so the gateway stays the same): everything from it again,
-        // and the Anténa group comes back by itself.
+        // The Tailscale node reached Running after a start, or restarted (same bridge port, so the gateway stays the
+        // same): everything from it again, and the Anténa group comes back by itself.
         viewModelScope.launch {
             app.tailnet.reloads.drop(1).collect {
                 _dvbPlans.value = emptyMap()

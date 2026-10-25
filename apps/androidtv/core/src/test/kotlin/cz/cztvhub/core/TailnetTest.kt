@@ -180,6 +180,11 @@ class TailnetTest {
         override fun reload() {
             log += "reload"
         }
+
+        /** Reloads made by the node's change to `Running` meanwhile (T21). */
+        var runningReloads = 0
+
+        override fun runningReloads() = runningReloads
     }
 
     private class FakeClock {
@@ -260,5 +265,104 @@ class TailnetTest {
         assertEquals(TailnetRecovery.Outcome.HEALTHY, r.run(steps))
         assertEquals(TailnetRecovery.Outcome.SKIPPED, nested)
         assertFalse(r.checking)
+    }
+
+    @Test fun aReloadByTheChangeToRunningReplacesTheChecksOwn() {
+        val clock = FakeClock()
+        val steps = Script(clock, mutableListOf(false, true), notRunningFor = 1)
+        // The status read that sees Running reloads (T21), so the check itself does not.
+        val r = recovery(clock)
+        val withWatch = object : TailnetRecovery.Steps by steps {
+            override fun isRunning(): Boolean = steps.isRunning().also { if (it) steps.runningReloads++ }
+            override fun runningReloads() = steps.runningReloads
+        }
+        assertEquals(TailnetRecovery.Outcome.RECOVERED, r.run(withWatch))
+        assertEquals(listOf("check", "restart", "running?", "running?", "check"), steps.log)
+
+        // Running not reached in time: no change to Running, so the check reloads as before.
+        clock.now = clock.now.plusSeconds(31)
+        val late = Script(clock, mutableListOf(false, false), notRunningFor = Int.MAX_VALUE)
+        assertEquals(TailnetRecovery.Outcome.FAILED, r.run(late))
+        assertEquals("reload", late.log.last())
+    }
+
+    private fun watch(clock: FakeClock) = TailnetRunningWatch(clock = { clock.now })
+
+    @Test fun coldStartReloadsOnceWhenTheNodeReachesRunning() {
+        // Seen on Apple TV: the app starts again, the first requests get the bridge's 502 and the T18 check is
+        // quiet after the start; the change to Running is what brings Anténa back.
+        val clock = FakeClock()
+        val recovery = recovery(clock)
+        val w = watch(clock)
+        recovery.nodeStarted()
+        w.nodeStarted()
+        assertEquals(TailnetRecovery.Outcome.SKIPPED, recovery.run(Script(clock, mutableListOf(false))))
+        assertFalse(w.observe("NoState"))
+        assertFalse(w.observe("Starting"))
+        clock.now = clock.now.plusSeconds(4)
+        assertTrue(w.observe("Running"))
+        assertFalse(w.observe("Running")) // at most once per change
+        assertFalse(w.observe("Running"))
+        assertEquals(1, w.reloads)
+    }
+
+    @Test fun everyChangeToRunningReloads() {
+        val clock = FakeClock()
+        val w = watch(clock)
+        // Already Running at the first read after the start: still a change (from not started).
+        w.nodeStarted()
+        assertTrue(w.observe("Running"))
+        // A later reconnect.
+        assertFalse(w.observe("Starting"))
+        assertTrue(w.observe("Running"))
+        // A restart (T18), even when no other state is seen in between.
+        w.nodeStarted()
+        assertTrue(w.observe("Running"))
+        // Switch off and on again.
+        w.nodeStopped()
+        w.nodeStarted()
+        assertFalse(w.observe("NeedsLogin"))
+        assertFalse(w.observe("NeedsMachineAuth"))
+        assertTrue(w.observe("Running"))
+        assertEquals(4, w.reloads)
+    }
+
+    @Test fun pollsEverySecondAfterAStartUntilRunningAtMost20Seconds() {
+        val clock = FakeClock()
+        val w = watch(clock)
+        assertEquals(Duration.ofSeconds(30), w.pollInterval(settingsOpen = false)) // never started
+        w.nodeStarted()
+        assertEquals(Duration.ofSeconds(1), w.pollInterval(settingsOpen = false))
+        assertEquals(Duration.ofSeconds(1), w.pollInterval(settingsOpen = true))
+        w.observe("Starting")
+        clock.now = clock.now.plusSeconds(19)
+        assertEquals(Duration.ofSeconds(1), w.pollInterval(settingsOpen = false))
+        clock.now = clock.now.plusSeconds(1)
+        assertEquals(Duration.ofSeconds(30), w.pollInterval(settingsOpen = false))
+        assertEquals(Duration.ofSeconds(2), w.pollInterval(settingsOpen = true))
+
+        // Running ends the fast reads at once.
+        w.nodeStarted()
+        clock.now = clock.now.plusSeconds(3)
+        w.observe("Running")
+        assertEquals(Duration.ofSeconds(30), w.pollInterval(settingsOpen = false))
+        assertEquals(Duration.ofSeconds(2), w.pollInterval(settingsOpen = true))
+
+        // A stopped node is not polled fast.
+        w.nodeStarted()
+        w.nodeStopped()
+        assertEquals(Duration.ofSeconds(30), w.pollInterval(settingsOpen = false))
+    }
+
+    @Test fun connectingWhileTheSwitchIsOnAndTheNodeIsNotRunning() {
+        val running = TailnetInfo("Running", self = "televize")
+        assertFalse(TailnetStatus.connecting(false, null, null, checking = false))
+        assertFalse(TailnetStatus.connecting(false, null, null, checking = true))
+        assertTrue(TailnetStatus.connecting(true, null, null, checking = false)) // not started yet
+        assertTrue(TailnetStatus.connecting(true, TailnetInfo("Starting"), null, checking = false))
+        assertTrue(TailnetStatus.connecting(true, TailnetInfo("NeedsLogin"), null, checking = false))
+        assertFalse(TailnetStatus.connecting(true, running, null, checking = false))
+        assertTrue(TailnetStatus.connecting(true, running, null, checking = true)) // T18
+        assertFalse(TailnetStatus.connecting(true, null, TailnetStatus.NO_TARGET, checking = false))
     }
 }

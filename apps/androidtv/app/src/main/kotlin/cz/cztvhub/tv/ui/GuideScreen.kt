@@ -215,9 +215,9 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
     val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
     val pspStates by viewModel.psp.collectAsStateWithLifecycle()
-    // Tailscale is being checked: the Anténa rows come back once it answers (spec/apps.md T18).
-    val checking by viewModel.tailnetChecking.collectAsStateWithLifecycle()
-    val connecting = checking && dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
+    // Tailscale is not Running yet or being checked: the Anténa rows come back once it answers (spec/apps.md T21, T18).
+    val tailnetConnecting by viewModel.tailnetConnecting.collectAsStateWithLifecycle()
+    val connecting = tailnetConnecting && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
     PspPolling(viewModel)
     val today = Days.today(now)
 
@@ -299,8 +299,8 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                     guideRows(plan.value, ChannelOrder.visible(prefs, dvbChannels), dvbPlan, day)
                 }
                 // Anténa on but its channels not loaded yet: not "everything hidden".
-                val antennaPending = dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
-                    dvbChannels.isEmpty() && (dvb?.error == null || connecting)
+                val antennaPending = connecting || dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
+                    dvbChannels.isEmpty() && dvb?.error == null
                 if (rows.isEmpty() && !antennaPending) {
                     CenteredMessage(stringResource(R.string.channels_all_hidden))
                 } else if (rows.all { it.entries.isEmpty() }) {
