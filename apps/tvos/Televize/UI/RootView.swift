@@ -44,6 +44,7 @@ struct RootView: View {
             model.numberEntry.type(digit, count: model.visibleChannels.count)
             return .handled
         }
+        .clockTopRight()
         .overlay(alignment: .topTrailing) {
             if tab != .settings { NumberEntryBadge(entry: model.numberEntry) }
         }
