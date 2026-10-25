@@ -3,6 +3,7 @@ package cz.cztvhub.core.dvb
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.HouseholdDefaults
 import cz.cztvhub.core.HttpResponse
+import cz.cztvhub.core.archive.ArchiveCategory
 import cz.cztvhub.core.archive.ArchiveHome
 import cz.cztvhub.core.archive.ArchiveMessages
 import cz.cztvhub.core.archive.ArchivePage
@@ -15,8 +16,6 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
 import java.time.LocalDate
-
-private val ARCHIVE_SLUG = Regex("^[a-z0-9-]{1,60}$")
 
 /** Seam for tests: GET with headers. Throws [IOException] on network failure. */
 fun interface DvbTransport {
@@ -45,9 +44,13 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
     /** The Archiv tab's home rows (T13, spec/dvb-gateway.md "Archive"). */
     fun archiveHome(): ArchiveHome = call("/dvb/archive") { s, b -> ArchiveParser.parseHome(s, b) }
 
+    /** The Archiv menu's categories (T23), in the gateway's order. */
+    fun archiveCategories(): List<ArchiveCategory> =
+        call("/dvb/archive/categories") { s, b -> ArchiveParser.parseCategories(s, b) }
+
     /** A category (`recordings` = ours only), [genre] a sub-genre id, [page] from 1. */
     fun archiveCategory(slug: String, sort: ArchiveSort, genre: String?, page: Int): ArchivePage {
-        if (!ARCHIVE_SLUG.matches(slug)) throw CtException("bad archive slug $slug", ArchiveMessages.GENERIC)
+        if (!ArchiveParser.isSlug(slug)) throw CtException("bad archive slug $slug", ArchiveMessages.GENERIC)
         val query = buildList {
             add("sort=${sort.query}")
             genre?.let { add("genre=${encode(it)}") }
