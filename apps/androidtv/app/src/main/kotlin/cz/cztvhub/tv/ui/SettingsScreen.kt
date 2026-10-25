@@ -1,6 +1,7 @@
 package cz.cztvhub.tv.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -64,7 +65,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** The three Nastavení sections (spec/apps.md: "Nastavení is a choice of three sections"). */
-enum class SettingsSection { CHANNELS, PROFILE, SERVER }
+enum class SettingsSection(@StringRes val title: Int) {
+    CHANNELS(R.string.settings_tab_channels),
+    PROFILE(R.string.settings_tab_profile),
+    SERVER(R.string.settings_tab_server),
+}
 
 /**
  * "Nastavení": a choice of three large items, "Kanály" (hide/reorder on this TV) first, then "Profil" (settings in
@@ -84,18 +89,8 @@ fun SettingsScreen(viewModel: MainViewModel, open: SettingsSection?, onOpen: (Se
             lastLeft = open
             onOpen(null)
         }
+        // The section's title is in MainScreen's header row, next to the clock.
         Column(Modifier.fillMaxSize()) {
-            Text(
-                stringResource(
-                    when (open) {
-                        SettingsSection.CHANNELS -> R.string.settings_tab_channels
-                        SettingsSection.PROFILE -> R.string.settings_tab_profile
-                        SettingsSection.SERVER -> R.string.settings_tab_server
-                    },
-                ),
-                style = MaterialTheme.typography.headlineMedium,
-            )
-            Spacer(Modifier.height(8.dp))
             when (open) {
                 SettingsSection.CHANNELS ->
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 16.dp)) {

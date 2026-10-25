@@ -30,3 +30,8 @@ sourceSets {
         resources.srcDir(specFixtures)
     }
 }
+
+// Prague-based logic must not lean on the device zone: run the tests in another one.
+tasks.withType<Test>().configureEach {
+    systemProperty("user.timezone", "America/New_York")
+}
