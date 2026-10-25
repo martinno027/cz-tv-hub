@@ -86,6 +86,8 @@ public enum TailnetRules {
     public static let connectingLine = "Připojuji se k Tailscale…"
     public static let loginLine = "Naskenujte QR kód telefonem a přihlaste se do Tailscale."
     public static let approvalLine = "Televize čeká na schválení v administraci Tailscale."
+    /// Živě and the guide while the node waits for a login or an approval (T21).
+    public static let waitingLine = "Tailscale čeká na přihlášení (Nastavení → Server)."
     /// The start error when the switch is on but there is no gateway address: the node is not started.
     public static let missingAddress = "chybí adresa brány."
     /// "Uložit a ověřit" after a restart: the check waits this long for `Running` (else it would get the bridge's 502).
@@ -151,6 +153,15 @@ public enum TailnetRules {
         }
     }
 
+    /// What Živě and the guide say instead of an empty Anténa group: `connectingLine` while a bridge check runs (T18)
+    /// or the node is connecting, `waitingLine` in `NeedsLogin` / `NeedsMachineAuth` (T21); nil when `Running`, the
+    /// switch is off or there is no node.
+    public static func screenLine(enabled: Bool, info: TailnetInfo?, checking: Bool) -> String? {
+        if checking { return connectingLine }
+        guard enabled, let info, info.state != "Running" else { return nil }
+        return info.state == "NeedsLogin" || info.state == "NeedsMachineAuth" ? waitingLine : connectingLine
+    }
+
     /// The bridge's `QRMatrix` (rows of `1`/`0`, quiet zone included) → dark modules; nil when empty or not square.
     public static func qrModules(_ matrix: String) -> [[Bool]]? {
         let rows = matrix.split(whereSeparator: \.isNewline).map { $0.map { $0 == "1" } }
@@ -188,13 +199,20 @@ public struct BridgeWatchTransport: HTTPTransport {
 /// (`GET /health` through it, `checkTimeout`); not answered → the node is restarted with its saved state, its status
 /// polled every `runningPoll` until `Running` (at most `runningWait`), the bridge checked again and the gateway data
 /// reloaded. One check at a time; after a (re)start of the node no check for `quietAfterStart`.
+///
+/// "Start (T21)": every change of the node's state to `Running` from another state reloads the gateway data, once per
+/// change (`stateRead`); after a node start its status is polled every `startPoll` until `Running` (at most
+/// `startPollWindow`), and a check whose node reached `Running` that way does not reload a second time.
 @MainActor
 @Observable
 public final class TailnetRecovery {
     public static let checkTimeout: TimeInterval = 4
-    public static let runningPoll: TimeInterval = 2
+    public static let runningPoll: TimeInterval = 1
     public static let runningWait: TimeInterval = 20
     public static let quietAfterStart: TimeInterval = 30
+    /// Status polling after a node start until `Running` (T21), for at most `startPollWindow`.
+    public static let startPoll: TimeInterval = 1
+    public static let startPollWindow: TimeInterval = 20
 
     public enum Outcome: Sendable, Equatable {
         /// A check runs already, or the node (re)started less than `quietAfterStart` ago.
@@ -230,6 +248,10 @@ public final class TailnetRecovery {
     /// A check (and what follows it) runs: Živě and the guide say "Připojuji se k Tailscale…" instead of hiding Anténa.
     public private(set) var checking = false
     @ObservationIgnored private var lastStart: Date?
+    /// The last status read said `Running` (false again after every node start).
+    @ObservationIgnored private var running = false
+    /// A change to `Running` reloaded since the last node start.
+    @ObservationIgnored private var reloadedSinceStart = false
     @ObservationIgnored private let clock: @Sendable () -> Date
     @ObservationIgnored private let sleep: @Sendable (TimeInterval) async -> Void
 
@@ -242,6 +264,31 @@ public final class TailnetRecovery {
     /// The node was started (app start, switch on, new address): it connects by itself first.
     public func nodeStarted() {
         lastStart = clock()
+        running = false
+        reloadedSinceStart = false
+    }
+
+    /// A read of the node's status: true when its state changed to `Running` from another state, so the gateway data
+    /// must be loaded again (once per change). `reload: false` = the read that comes with a start, before the gateway
+    /// is applied at all (that first load is the load).
+    @discardableResult
+    public func stateRead(_ state: String, reload: Bool = true) -> Bool {
+        let wasRunning = running
+        running = state == "Running"
+        guard running, !wasRunning, reload else { return false }
+        reloadedSinceStart = true
+        return true
+    }
+
+    /// How long until the next status read; nil = no more polling (`Running` and the settings closed). Every
+    /// `settingsPoll` while Nastavení → Server is open, every `startPoll` for `startPollWindow` after a node start,
+    /// else every `backgroundPoll` until `Running`.
+    public func pollInterval(settingsOpen: Bool, settingsPoll: TimeInterval = TailnetRules.settingsPollInterval,
+                             backgroundPoll: TimeInterval = TailnetRules.backgroundPollInterval) -> TimeInterval? {
+        if running, !settingsOpen { return nil }
+        let starting = !running && lastStart.map { clock().timeIntervalSince($0) < Self.startPollWindow } == true
+        if starting { return Self.startPoll }
+        return settingsOpen ? settingsPoll : backgroundPoll
     }
 
     @discardableResult
@@ -251,7 +298,7 @@ public final class TailnetRecovery {
         checking = true
         defer { checking = false }
         if await steps.check() { return .healthy }
-        lastStart = clock()
+        nodeStarted()
         var answered = false
         if await steps.restart() {
             let deadline = clock().addingTimeInterval(Self.runningWait)
@@ -260,7 +307,8 @@ public final class TailnetRecovery {
             }
             answered = await steps.check()
         }
-        await steps.reload()
+        // The change to `Running` reloaded already (T21): one reload, not two.
+        if !reloadedSinceStart { await steps.reload() }
         return answered ? .recovered : .failed
     }
 }

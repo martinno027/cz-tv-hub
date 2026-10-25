@@ -84,9 +84,11 @@ final class TailnetController {
 
     /// "Back in front (T18)": checks of the bridge and restarts of the node.
     let recovery = TailnetRecovery()
-    /// The bridge is being checked (or the node restarted): Živě and the guide say "Připojuji se k Tailscale…".
-    var checking: Bool { recovery.checking }
-    /// After a restart: load the gateway data the screens need again.
+    /// The bridge is being checked (or the node restarted), or the node is not `Running` yet: what Živě and the guide
+    /// say instead of an empty Anténa group ("Připojuji se k Tailscale…", or the wait for a login).
+    var screenLine: String? { TailnetRules.screenLine(enabled: enabled, info: info, checking: recovery.checking) }
+    /// After a restart, and whenever the node's state changes to `Running` (spec/apps.md "Start (T21)"): load the
+    /// gateway data the screens need again.
     @ObservationIgnored var onRecovered: () async -> Void = {}
 
     /// `http://127.0.0.1:<port>` while the app talks to the gateway through the bridge.
@@ -156,7 +158,8 @@ final class TailnetController {
             self.target = target
             startError = nil
             recovery.nodeStarted()
-            await apply(result.1)
+            // the gateway is applied right after this (onBridgeChange): that is the first load
+            await apply(result.1, reload: false)
         case .failure(let error):
             log.error("tailnet: start failed: \(error.message, privacy: .public)")
             port = nil
@@ -242,7 +245,7 @@ final class TailnetController {
         generation += 1
         polling?.cancel()
         let hadNode = port != nil
-        await refresh()
+        await refresh(reload: false)
         await Bridge.run { Bridge.stop() }
         port = nil
         target = nil
@@ -267,17 +270,29 @@ final class TailnetController {
     }
 
     /// Reads the node's status and keeps its newest state in the Keychain (also when the app goes to the background).
-    func refresh() async {
+    /// A change to `Running` reloads the gateway data (`reload: false` when the node is about to stop).
+    func refresh(reload: Bool = true) async {
         guard port != nil else { return }
         let current = generation
         let info = await Bridge.run { Bridge.info() }
         guard current == generation, let info else { return }
-        await apply(info)
+        await apply(info, reload: reload)
     }
 
-    private func apply(_ info: TailnetInfo?) async {
+    private func apply(_ info: TailnetInfo?, reload: Bool = true) async {
+        let bridge = bridgeURL
         self.info = info
         guard let info else { return }
+        if reload {
+            // the bridge comes into use with the first status of a node that had none at its start
+            if bridgeURL != bridge { onBridgeChange() }
+            if recovery.stateRead(info.state) {
+                log.info("tailnet: Running, gateway data reloaded")
+                Task { await onRecovered() }
+            }
+        } else {
+            recovery.stateRead(info.state, reload: false)
+        }
         if info.stateVersion != savedVersion {
             let current = generation
             let state = await Bridge.run { Bridge.savedState() }
@@ -295,18 +310,16 @@ final class TailnetController {
         }
     }
 
-    /// Every 2 s while Nastavení → Server is open, else every 30 s until `Running`.
-    /// `now`: the settings just opened, show the current state at once.
+    /// Every 2 s while Nastavení → Server is open, every 1 s for 20 s after a node start, else every 30 s until
+    /// `Running` (`TailnetRecovery.pollInterval`). `now`: the settings just opened, show the current state at once.
     private func schedulePolling(now: Bool = false) {
         polling?.cancel()
         guard enabled, port != nil else { return }
         polling = Task { [weak self] in
             if now { await self?.refresh() }
             while !Task.isCancelled {
-                guard let self else { return }
-                let open = self.settingsOpen
-                if !open, self.info?.state == "Running" { return }
-                try? await Task.sleep(for: .seconds(open ? TailnetRules.settingsPollInterval : TailnetRules.backgroundPollInterval))
+                guard let self, let interval = self.recovery.pollInterval(settingsOpen: self.settingsOpen) else { return }
+                try? await Task.sleep(for: .seconds(interval))
                 if Task.isCancelled { return }
                 await self.refresh()
             }
@@ -321,6 +334,42 @@ extension TailnetController {
     func debugShow(_ json: String) {
         enabled = true
         info = TailnetInfo.parse(json)
+    }
+
+    /// `-tailnetFakeRunningAfter 8` with `-gatewayAddress 127.0.0.1:<port>`: a cold start without a tailnet
+    /// (spec/apps.md "Start (T21)"). A fake node "starts" with the dev gateway as its bridge, says `state` (`Starting`,
+    /// or `-tailnetFakeState NeedsLogin`) for that many seconds and then `Running`; until then gateway requests get
+    /// the bridge's 502 (`debugBridgeDown`).
+    func debugFakeStart(address: String, runningAfter: TimeInterval, state: String = "Starting") {
+        guard let target = TailnetRules.target(address: address), let url = GatewayConfig.baseURL(address: address),
+              url.host() == "127.0.0.1", let port = url.port else { return }
+        enabled = true
+        self.port = port
+        self.target = target
+        recovery.nodeStarted()
+        Task {
+            await apply(TailnetInfo(state: state), reload: false)
+            try? await Task.sleep(for: .seconds(runningAfter))
+            log.info("tailnet: fake node Running")
+            await apply(TailnetInfo(state: "Running", selfName: TailnetRules.hostname, ip: "100.64.0.9"))
+        }
+    }
+
+    /// The fake node of `debugFakeStart` is not `Running` yet.
+    var debugBridgeDown: Bool { target != nil && info?.state != "Running" && info?.state != nil }
+}
+
+/// Answers like the bridge while `down()`: its own 502 (spec/apps.md "Tailscale v aplikaci").
+struct DebugStartingBridgeTransport: HTTPTransport {
+    let inner: HTTPTransport
+    let down: @MainActor @Sendable () -> Bool
+
+    func send(_ request: URLRequest) async throws -> HTTPResponse {
+        if await down() {
+            let body = try JSONSerialization.data(withJSONObject: ["error": TailnetRules.bridgeError])
+            return HTTPResponse(status: 502, body: body)
+        }
+        return try await inner.send(request)
     }
 }
 #endif

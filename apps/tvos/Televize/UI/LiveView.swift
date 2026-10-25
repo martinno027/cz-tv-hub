@@ -20,8 +20,10 @@ struct LiveView: View {
     var body: some View {
         let prefs = model.channelPrefs
         let channels = prefs.channels(antenna: antennaChannels).visible
-        // Tailscale is being checked: "Připojuji se k Tailscale…" instead of the gateway's error (spec/apps.md T18).
-        let connecting = model.tailnet.checking && model.antenna != nil && prefs.prefs.isOn(.dvb)
+        // Tailscale is being checked or not connected yet: "Připojuji se k Tailscale…" (or the wait for a login)
+        // instead of the gateway's error (spec/apps.md T18, T21).
+        let tailnetLine = model.antenna != nil && prefs.prefs.isOn(.dvb) ? model.tailnet.screenLine : nil
+        let connecting = tailnetLine != nil
         // "All hidden" only once the Anténa channels are known (or Anténa is off / not configured).
         let antennaPending = model.antenna != nil && prefs.prefs.isOn(.dvb) && antennaChannels.isEmpty
             && (antennaError == nil || connecting)
@@ -36,8 +38,8 @@ struct LiveView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 200)
                     }
-                    if connecting {
-                        Text(TailnetRules.connectingLine).font(.callout).foregroundStyle(.secondary)
+                    if let tailnetLine {
+                        Text(tailnetLine).font(.callout).foregroundStyle(.secondary)
                     } else if let antennaError, model.antenna != nil, prefs.prefs.isOn(.dvb) {
                         Text(antennaError).font(.callout).foregroundStyle(.secondary)
                     }

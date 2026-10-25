@@ -84,7 +84,6 @@ import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.ResumeCard
 import cz.cztvhub.core.PspState
-import cz.cztvhub.core.TailnetStatus
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
@@ -221,9 +220,10 @@ fun GuideScreen(
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
     val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
     val pspStates by viewModel.psp.collectAsStateWithLifecycle()
-    // Tailscale is being checked: the Anténa rows come back once it answers (spec/apps.md T18).
-    val checking by viewModel.tailnetChecking.collectAsStateWithLifecycle()
-    val connecting = checking && dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
+    // Tailscale is not Running yet or being checked: the Anténa rows come back once it answers (spec/apps.md T21, T18).
+    val tailnetNotice by viewModel.tailnetNotice.collectAsStateWithLifecycle()
+    val notice = tailnetNotice?.takeIf { prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) }
+    val connecting = notice != null
     PspPolling(viewModel)
     val today = Days.today(now)
 
@@ -292,7 +292,7 @@ fun GuideScreen(
         Spacer(Modifier.height(8.dp))
         DetailPanel(selection, now, appButton, onOpenApp, images, imageOf)
         Spacer(Modifier.height(8.dp))
-        if (connecting) Text(TailnetStatus.CONNECTING, color = Palette.textDim)
+        if (notice != null) Text(notice, color = Palette.textDim)
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
             is Load.Failed -> CenteredMessage(plan.message) {
@@ -305,8 +305,8 @@ fun GuideScreen(
                     guideRows(plan.value, ChannelOrder.visible(prefs, dvbChannels), dvbPlan, day)
                 }
                 // Anténa on but its channels not loaded yet: not "everything hidden".
-                val antennaPending = dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
-                    dvbChannels.isEmpty() && (dvb?.error == null || connecting)
+                val antennaPending = connecting || dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
+                    dvbChannels.isEmpty() && dvb?.error == null
                 if (rows.isEmpty() && !antennaPending) {
                     CenteredMessage(stringResource(R.string.channels_all_hidden))
                 } else if (rows.all { it.entries.isEmpty() }) {

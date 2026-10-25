@@ -71,6 +71,11 @@ struct RootView: View {
                                          code: CTError.unsupportedDRM)
             }
             if let json = arguments.string(forKey: "tailnetInfo") { model.tailnet.debugShow(json) }
+            if let address = arguments.string(forKey: "gatewayAddress"),
+               arguments.object(forKey: "tailnetFakeRunningAfter") != nil {
+                model.tailnet.debugFakeStart(address: address, runningAfter: arguments.double(forKey: "tailnetFakeRunningAfter"),
+                                             state: arguments.string(forKey: "tailnetFakeState") ?? "Starting")
+            }
             if let address = arguments.string(forKey: "gatewayAddress"), let key = arguments.string(forKey: "gatewayKey") {
                 model.setGateway(GatewayConfig(address: address, key: key))
             }
