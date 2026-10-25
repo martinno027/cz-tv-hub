@@ -48,19 +48,16 @@
       <!-- Archiv (spec/apps.md "Archiv"): iVysílání and our recordings from the gateway's /dvb/archive -->
       <section id="screen-archive" class="screen">
         <div id="ar-message" class="hidden"></div>
-        <div id="ar-home">
-          <div id="ar-search-box"><input id="ar-search" type="text" autocomplete="off" spellcheck="false"
-            placeholder="Hledat v archivu"></div>
-          <div id="ar-notice" class="ar-notice hidden"></div>
-          <div id="ar-rows" class="ar-viewport"><div class="ar-track"></div></div>
-          <div id="ar-results" class="ar-viewport hidden"><div class="ar-track"></div><div class="ar-note"></div></div>
-        </div>
-        <div id="ar-category" class="hidden">
-          <h1 id="ar-cat-title" class="page-title"></h1>
-          <div id="ar-genres" class="ar-chips"></div>
-          <div id="ar-sorts" class="ar-chips"></div>
-          <div id="ar-cat-notice" class="ar-notice hidden"></div>
-          <div id="ar-cat-grid" class="ar-viewport"><div class="ar-track"></div><div class="ar-note"></div></div>
+        <!-- T23: the menu on the left, the grid of what the selected item filters on the right -->
+        <div id="ar-layout">
+          <div id="ar-side"><div class="ar-side-track"></div></div>
+          <div id="ar-main">
+            <div id="ar-search-box" class="hidden"><input id="ar-search" type="text" autocomplete="off" spellcheck="false"
+              placeholder="Hledat v archivu"></div>
+            <div id="ar-sorts" class="ar-chips hidden"></div>
+            <div id="ar-notice" class="ar-notice hidden"></div>
+            <div id="ar-grid" class="ar-viewport"><div class="ar-track"></div><div class="ar-note"></div></div>
+          </div>
         </div>
         <div id="ar-tmdb" class="tmdb-note hidden"><img class="tmdb-logo" src="img/tmdb-logo-short.svg" alt="TMDB"><span></span></div>
       </section>
@@ -234,6 +231,7 @@
   <script src="js/core/household.js"></script>
   <script src="js/core/programme.js"></script>
   <script src="js/core/archive.js"></script>
+  <script src="js/core/archive-menu.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
   <!-- Optional, written only into the build by build.py (version, build number, commit, build time). -->
