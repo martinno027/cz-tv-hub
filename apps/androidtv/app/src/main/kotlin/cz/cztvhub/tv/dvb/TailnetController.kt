@@ -86,12 +86,12 @@ class TailnetController(context: Context, private val settings: DvbSettings) {
     val checking: StateFlow<Boolean> = _checking.asStateFlow()
 
     /**
-     * The switch is on and the node is not `Running` yet, or the bridge is being checked: Živě and the guide say
-     * "Připojuji se k Tailscale…" instead of an empty Anténa group (T21).
+     * The switch is on and the node is not `Running` yet, or the bridge is being checked: what Živě and the guide say
+     * instead of an empty Anténa group (T21), null = nothing.
      */
-    val connecting: StateFlow<Boolean> =
-        combine(_state, _checking) { s, checking -> TailnetStatus.connecting(s.enabled, s.info, s.error, checking) }
-            .stateIn(scope, SharingStarted.Eagerly, TailnetStatus.connecting(_state.value.enabled, null, null, false))
+    val notice: StateFlow<String?> =
+        combine(_state, _checking) { s, checking -> TailnetStatus.screenNotice(s.enabled, s.info, s.error, checking) }
+            .stateIn(scope, SharingStarted.Eagerly, TailnetStatus.screenNotice(_state.value.enabled, null, null, false))
 
     private val _reloads = MutableStateFlow(0)
 

@@ -213,7 +213,7 @@ class TailnetTest {
         r.onChecking = { flags += it }
         assertEquals(TailnetRecovery.Outcome.RECOVERED, r.run(steps))
         assertEquals(listOf("check", "restart", "running?", "running?", "running?", "check", "reload"), steps.log)
-        assertEquals(listOf(Duration.ofSeconds(2), Duration.ofSeconds(2)), clock.sleeps)
+        assertEquals(listOf(Duration.ofSeconds(1), Duration.ofSeconds(1)), clock.sleeps) // 1 s since T21
         assertEquals(listOf(true, false), flags)
         assertFalse(r.checking)
     }
@@ -222,8 +222,8 @@ class TailnetTest {
         val clock = FakeClock()
         val steps = Script(clock, mutableListOf(false, false), notRunningFor = Int.MAX_VALUE)
         assertEquals(TailnetRecovery.Outcome.FAILED, recovery(clock).run(steps))
-        assertEquals(10, clock.sleeps.size) // 2 s steps up to 20 s
-        assertEquals(listOf("check", "restart") + List(11) { "running?" } + listOf("check", "reload"), steps.log)
+        assertEquals(List(20) { Duration.ofSeconds(1) }, clock.sleeps) // 1 s steps up to 20 s (T21)
+        assertEquals(listOf("check", "restart") + List(21) { "running?" } + listOf("check", "reload"), steps.log)
     }
 
     @Test fun failedRestartStillReloads() {
@@ -354,15 +354,25 @@ class TailnetTest {
         assertEquals(Duration.ofSeconds(30), w.pollInterval(settingsOpen = false))
     }
 
-    @Test fun connectingWhileTheSwitchIsOnAndTheNodeIsNotRunning() {
+    @Test fun screenNoticeWhileTheSwitchIsOnAndTheNodeIsNotRunning() {
         val running = TailnetInfo("Running", self = "televize")
-        assertFalse(TailnetStatus.connecting(false, null, null, checking = false))
-        assertFalse(TailnetStatus.connecting(false, null, null, checking = true))
-        assertTrue(TailnetStatus.connecting(true, null, null, checking = false)) // not started yet
-        assertTrue(TailnetStatus.connecting(true, TailnetInfo("Starting"), null, checking = false))
-        assertTrue(TailnetStatus.connecting(true, TailnetInfo("NeedsLogin"), null, checking = false))
-        assertFalse(TailnetStatus.connecting(true, running, null, checking = false))
-        assertTrue(TailnetStatus.connecting(true, running, null, checking = true)) // T18
-        assertFalse(TailnetStatus.connecting(true, null, TailnetStatus.NO_TARGET, checking = false))
+        val connecting = "Připojuji se k Tailscale…"
+        val login = "Tailscale čeká na přihlášení (Nastavení → Server)."
+        assertNull(TailnetStatus.screenNotice(false, null, null, checking = false))
+        assertNull(TailnetStatus.screenNotice(false, null, null, checking = true))
+        assertEquals(connecting, TailnetStatus.screenNotice(true, null, null, checking = false)) // not started yet
+        assertEquals(connecting, TailnetStatus.screenNotice(true, TailnetInfo("Starting"), null, checking = false))
+        assertEquals(connecting, TailnetStatus.screenNotice(true, TailnetInfo("NoState"), null, checking = false))
+        assertEquals(login, TailnetStatus.screenNotice(true, TailnetInfo("NeedsLogin", "https://login.example/a"), null, false))
+        assertEquals(login, TailnetStatus.screenNotice(true, TailnetInfo("NeedsLogin"), null, checking = false))
+        assertEquals(login, TailnetStatus.screenNotice(true, TailnetInfo("NeedsMachineAuth"), null, checking = false))
+        assertNull(TailnetStatus.screenNotice(true, running, null, checking = false))
+        assertEquals(connecting, TailnetStatus.screenNotice(true, running, null, checking = true)) // T18
+        assertNull(TailnetStatus.screenNotice(true, null, TailnetStatus.NO_TARGET, checking = false))
+    }
+
+    @Test fun restartWaitPollsEverySecond() {
+        assertEquals(Duration.ofSeconds(1), TailnetRecovery.RUNNING_POLL)
+        assertEquals(Duration.ofSeconds(20), TailnetRecovery.RUNNING_WAIT)
     }
 }

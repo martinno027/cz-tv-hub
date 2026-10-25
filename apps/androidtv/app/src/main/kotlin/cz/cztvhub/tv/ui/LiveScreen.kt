@@ -37,7 +37,6 @@ import cz.cztvhub.core.ChannelPrefs
 import cz.cztvhub.core.Days
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.PspState
-import cz.cztvhub.core.TailnetStatus
 import cz.cztvhub.core.Timed
 import cz.cztvhub.tv.R
 import java.time.Duration
@@ -64,10 +63,11 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val psp by viewModel.psp.collectAsStateWithLifecycle()
     val notOn = stringResource(R.string.psp_not_on)
     PspPolling(viewModel)
-    // Tailscale is not Running yet or being checked (spec/apps.md T21, T18): "Připojuji se k Tailscale…" instead of
-    // the gateway's error or an empty Anténa group (also before the bridge exists, when Anténa is not loaded at all).
-    val tailnetConnecting by viewModel.tailnetConnecting.collectAsStateWithLifecycle()
-    val connecting = tailnetConnecting && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
+    // Tailscale is not Running yet or being checked (spec/apps.md T21, T18): "Připojuji se k Tailscale…" (or the wait
+    // for a login) instead of the gateway's error or an empty Anténa group (also before the bridge exists).
+    val tailnetNotice by viewModel.tailnetNotice.collectAsStateWithLifecycle()
+    val notice = tailnetNotice?.takeIf { prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) }
+    val connecting = notice != null
     // Anténa switched on but the gateway has not answered yet: not "everything hidden".
     val antennaPending = connecting || antenna != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
         antenna.channels.isEmpty() && antenna.error == null
@@ -81,8 +81,8 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        if (connecting) {
-            Text(TailnetStatus.CONNECTING, color = Palette.textDim)
+        if (notice != null) {
+            Text(notice, color = Palette.textDim)
         } else if (antenna?.error != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)) {
             Text(stringResource(R.string.antenna_unavailable, antenna.error), color = Palette.nowLine)
         }

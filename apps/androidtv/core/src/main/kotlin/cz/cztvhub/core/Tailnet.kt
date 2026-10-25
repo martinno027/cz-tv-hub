@@ -73,6 +73,9 @@ data class TailnetStatus(val line: String, val qr: Boolean, val logout: Boolean,
         const val SCAN = "Naskenujte QR kód telefonem a přihlaste se do Tailscale."
         const val NEEDS_APPROVAL = "Televize čeká na schválení v administraci Tailscale."
 
+        /** Živě and the guide in `NeedsLogin` / `NeedsMachineAuth`, which can last (T21). */
+        const val WAITING_FOR_LOGIN = "Tailscale čeká na přihlášení (Nastavení → Server)."
+
         /** The switch is on but no gateway address is saved, so there is nothing to bridge to. */
         const val NO_TARGET = "chybí adresa brány."
 
@@ -93,12 +96,18 @@ data class TailnetStatus(val line: String, val qr: Boolean, val logout: Boolean,
         }
 
         /**
-         * "Start (T21)": Živě and the guide say [CONNECTING] instead of an empty Anténa group while the switch is on
-         * and the node is not `Running` yet (also before it started), or while the bridge is being checked (T18).
-         * A failed start shows its error instead.
+         * "Start (T21)": what Živě and the guide say instead of an empty Anténa group while the switch is on and the
+         * node is not `Running` yet: [CONNECTING] (also before it started, and while the bridge is being checked,
+         * T18), [WAITING_FOR_LOGIN] in the login states. Null = nothing (switch off, `Running`, or a failed start,
+         * which shows its error instead).
          */
-        fun connecting(enabled: Boolean, info: TailnetInfo?, error: String?, checking: Boolean): Boolean =
-            enabled && error == null && (checking || info?.state != TailnetRunningWatch.RUNNING)
+        fun screenNotice(enabled: Boolean, info: TailnetInfo?, error: String?, checking: Boolean): String? = when {
+            !enabled || error != null -> null
+            checking -> CONNECTING
+            info?.state == TailnetRunningWatch.RUNNING -> null
+            info?.state == "NeedsLogin" || info?.state == "NeedsMachineAuth" -> WAITING_FOR_LOGIN
+            else -> CONNECTING
+        }
 
         /**
          * [info] is null until the node started; [error] is the start failure. The bridge is used as soon as the
@@ -251,7 +260,7 @@ class TailnetRecovery(
 
     companion object {
         val CHECK_TIMEOUT: Duration = Duration.ofSeconds(4)
-        val RUNNING_POLL: Duration = Duration.ofSeconds(2)
+        val RUNNING_POLL: Duration = Duration.ofSeconds(1)
         val RUNNING_WAIT: Duration = Duration.ofSeconds(20)
         val QUIET_AFTER_START: Duration = Duration.ofSeconds(30)
 

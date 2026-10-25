@@ -69,13 +69,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Anténa is set up and the Tailscale node is not `Running` yet or the bridge is being checked (spec/apps.md
-     * "Start (T21)", "Back in front (T18)"): Živě and the guide say "Připojuji se k Tailscale…" instead of hiding
-     * Anténa or showing the bridge's error.
+     * "Start (T21)", "Back in front (T18)"): what Živě and the guide say ("Připojuji se k Tailscale…", or the wait for
+     * a login) instead of hiding Anténa or showing the bridge's error; null = nothing.
      */
-    val tailnetConnecting: StateFlow<Boolean> =
-        combine(app.tailnet.connecting, app.dvbSettings.config) { connecting, config -> connecting && config != null }
+    val tailnetNotice: StateFlow<String?> =
+        combine(app.tailnet.notice, app.dvbSettings.config) { notice, config -> notice?.takeIf { config != null } }
             .stateIn(viewModelScope, SharingStarted.Eagerly,
-                app.tailnet.connecting.value && app.dvbSettings.config.value != null)
+                app.tailnet.notice.value?.takeIf { app.dvbSettings.config.value != null })
 
     /** "Kanály": hidden channels and their order on this device (or in the signed-in profile). */
     val channelPrefs: StateFlow<ChannelPrefs> = app.channelPrefs.value

@@ -83,7 +83,6 @@ import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.PspState
-import cz.cztvhub.core.TailnetStatus
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
@@ -216,8 +215,9 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
     val pspStates by viewModel.psp.collectAsStateWithLifecycle()
     // Tailscale is not Running yet or being checked: the Anténa rows come back once it answers (spec/apps.md T21, T18).
-    val tailnetConnecting by viewModel.tailnetConnecting.collectAsStateWithLifecycle()
-    val connecting = tailnetConnecting && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
+    val tailnetNotice by viewModel.tailnetNotice.collectAsStateWithLifecycle()
+    val notice = tailnetNotice?.takeIf { prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) }
+    val connecting = notice != null
     PspPolling(viewModel)
     val today = Days.today(now)
 
@@ -286,7 +286,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         Spacer(Modifier.height(8.dp))
         DetailPanel(selection, now, appButton, onOpenApp, images, imageOf)
         Spacer(Modifier.height(8.dp))
-        if (connecting) Text(TailnetStatus.CONNECTING, color = Palette.textDim)
+        if (notice != null) Text(notice, color = Palette.textDim)
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
             is Load.Failed -> CenteredMessage(plan.message) {
