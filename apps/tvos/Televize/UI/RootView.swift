@@ -35,6 +35,8 @@ struct RootView: View {
             if phase == .active, tab == .guide, model.session == nil { guideOpens += 1 }
             // the Tailscale node's newest state into the Keychain (status polling stops once it runs)
             if phase == .background { Task { await model.tailnet.refresh() } }
+            // its connections may have died while suspended (spec/apps.md "Back in front (T18)")
+            if phase == .active { Task { await model.tailnet.checkBridge() } }
         }
         // Digits on Živě and the guide start that channel live (spec/apps.md "Number keys").
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in
@@ -65,6 +67,7 @@ struct RootView: View {
                 model.drmError = CTError("Video vyžaduje prohlížeč s\u{00A0}ochranou DRM\n" + CTError.drmHint,
                                          code: CTError.unsupportedDRM)
             }
+            if let json = arguments.string(forKey: "tailnetInfo") { model.tailnet.debugShow(json) }
             if let address = arguments.string(forKey: "gatewayAddress"), let key = arguments.string(forKey: "gatewayKey") {
                 model.setGateway(GatewayConfig(address: address, key: key))
             }

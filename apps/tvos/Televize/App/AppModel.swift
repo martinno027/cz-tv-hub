@@ -78,6 +78,9 @@ final class AppModel {
     @ObservationIgnored private var bridgeStart: Task<Void, Never>?
     @ObservationIgnored private var gatewayApplied = false
     @ObservationIgnored private var startingBridge = false
+    /// Bumped when the gateway data must be loaded again although the gateway stayed the same (the Tailscale node
+    /// restarted, spec/apps.md "Back in front (T18)"); the screens' loads are keyed by it.
+    private(set) var gatewayReloads = 0
 
     init(client: CTClient = CTClient()) {
         schedules = ScheduleStore(client: client)
@@ -95,6 +98,7 @@ final class AppModel {
         )
         wireProfile()
         tailnet.onBridgeChange = { [weak self] in self?.applyGateway() }
+        tailnet.onRecovered = { [weak self] in await self?.reloadFromGateway() }
         setGateway(GatewayStore.load(), persist: false)
         numberEntry = NumberEntry { [weak self] number in self?.playLive(number: number) }
     }
@@ -133,6 +137,14 @@ final class AppModel {
         async let defaults: Void = household.refresh()
         await profile.refresh()
         await defaults
+    }
+
+    /// The Tailscale node restarted: Živě and the guide load again (the Anténa group comes back), the household
+    /// default, the profile and the channel numbers too.
+    private func reloadFromGateway() async {
+        gatewayReloads += 1
+        await refreshFromGateway()
+        await refreshVisibleChannels()
     }
 
     // MARK: channel numbers
@@ -259,13 +271,20 @@ final class AppModel {
         // App start with Tailscale on: no gateway request before the bridge has started.
         guard !startingBridge, !gatewayApplied || config != gateway else { return }
         gatewayApplied = true
+        // Through the bridge: a request it cannot pass on makes the app check it (spec/apps.md "Back in front (T18)").
+        let bridged = config != nil && config?.baseURL == tailnet.bridgeURL
+        let tailnet = tailnet
+        let watched = { (inner: HTTPTransport) -> HTTPTransport in
+            guard bridged else { return inner }
+            return BridgeWatchTransport(inner) { Task { @MainActor in await tailnet.checkBridge() } }
+        }
         // Odebrat bránu while signed in signs out locally first (spec/apps.md "Profil").
-        let client = config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly()) }
+        let client = config.map { DVBClient(config: $0, transport: watched(URLSessionTransport.memoryOnly())) }
         profile.setAPI(client)
         // The household default belongs to the gateway as saved, not to the bridge's port (new on every start).
         household.setAPI(client, gateway: savedGateway?.baseURL)
         gateway = config
-        antenna = config.map { AntennaStore(client: DVBClient(config: $0)) }
+        antenna = config.map { AntennaStore(client: DVBClient(config: $0, transport: watched(URLSessionTransport()))) }
         detailsClient = client
         detailsCache = [:]
         images.setGateway(config)
