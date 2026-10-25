@@ -1,0 +1,18 @@
+{
+ "status": 200,
+ "body": {
+  "cards": [
+   {
+    "id": "ct:10000000001",
+    "source": "both",
+    "title": "Zahradní seriál",
+    "kind": "series",
+    "image": "https://img.example.invalid/archive/card/10000000001.jpg",
+    "rating": null,
+    "genres": [],
+    "tmdb": false
+   }
+  ],
+  "nextPage": null
+ }
+}

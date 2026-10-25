@@ -1,0 +1,39 @@
+{
+ "status": 200,
+ "body": {
+  "card": {
+   "id": "ct:10000000001",
+   "source": "both",
+   "title": "Zahradní seriál",
+   "kind": "series",
+   "image": "https://img.example.invalid/archive/card/10000000001.jpg",
+   "rating": null,
+   "genres": [
+    "Komedie"
+   ],
+   "episodeCount": 52,
+   "tmdb": false
+  },
+  "description": "Třetí díl.",
+  "seasons": [],
+  "groups": [
+   {
+    "title": "Nahráno z antény",
+    "episodes": [
+     {
+      "source": "rec",
+      "recordingId": "b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792294200-1792296900",
+      "title": "Zahradní seriál (3)",
+      "description": "Třetí díl.",
+      "durationSeconds": 2700,
+      "aired": "2026-10-18T03:30:00Z",
+      "channel": "Nova HD",
+      "channelId": null,
+      "playable": true
+     }
+    ]
+   }
+  ],
+  "error": "iVysílání teď neodpovídá"
+ }
+}

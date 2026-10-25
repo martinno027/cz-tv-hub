@@ -1,0 +1,50 @@
+{
+ "status": 200,
+ "body": {
+  "card": {
+   "id": "ct:10000000002",
+   "source": "ct",
+   "title": "Noční vlak",
+   "kind": "movie",
+   "year": 2019,
+   "image": "https://img.example.invalid/archive/card/10000000002.jpg",
+   "rating": {
+    "value": 6.4,
+    "votes": 80
+   },
+   "genres": [
+    "Drama"
+   ],
+   "durationMinutes": 98,
+   "tmdb": true
+  },
+  "description": "Smyšlený film o jedné noci ve vlaku.",
+  "creators": "Režie: Eva Vzorová.",
+  "countries": [
+   "Česko",
+   "Slovensko"
+  ],
+  "seasons": [],
+  "groups": [
+   {
+    "title": "Díly",
+    "season": null,
+    "episodes": [
+     {
+      "source": "ct",
+      "idec": "22638149399",
+      "title": "Noční vlak",
+      "description": "",
+      "durationSeconds": 5880,
+      "aired": "2026-10-05T20:25:00Z",
+      "channel": "ČT2",
+      "channelId": "CH_2",
+      "playable": true
+     }
+    ],
+    "nextPage": null
+   }
+  ],
+  "attribution": "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB."
+ }
+}
