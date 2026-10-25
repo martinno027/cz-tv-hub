@@ -41,6 +41,25 @@ func TailnetStart(workDir, savedState, hostname, authKey, target *C.char) C.int 
 	return C.int(n.ProxyPort())
 }
 
+// TailnetRestart is Node.Restart(): the node again with its current state, on the same bridge port. Returns that
+// port, or -1 with TailnetLastError set (also without a node).
+//
+//export TailnetRestart
+func TailnetRestart() C.int {
+	mu.Lock()
+	defer mu.Unlock()
+	if node == nil {
+		lastErr = "Tailscale neběží"
+		return -1
+	}
+	if err := node.Restart(); err != nil {
+		lastErr = err.Error()
+		return -1
+	}
+	lastErr = ""
+	return C.int(node.ProxyPort())
+}
+
 //export TailnetLastError
 func TailnetLastError() *C.char {
 	mu.Lock()

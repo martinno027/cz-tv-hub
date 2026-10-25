@@ -3,6 +3,7 @@ package cz.cztvhub.core.profile
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.HttpResponse
 import cz.cztvhub.core.dvb.DvbConfig
+import cz.cztvhub.core.dvb.GATEWAY_TIMEOUT_MS
 import cz.cztvhub.core.dvb.DvbMessages
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -131,7 +132,7 @@ class ProfileClient(val config: DvbConfig, private val transport: ProfileTranspo
     }
 }
 
-class UrlConnectionProfileTransport(private val timeoutMs: Int = 8_000) : ProfileTransport {
+class UrlConnectionProfileTransport(val timeoutMs: Int = GATEWAY_TIMEOUT_MS) : ProfileTransport {
     override fun send(method: String, url: String, headers: Map<String, String>, body: String?): HttpResponse {
         val connection = URI(url).toURL().openConnection() as HttpURLConnection
         try {

@@ -43,6 +43,12 @@ private enum Bridge {
 
     static func savedState() -> String { take(TailnetSavedState()) }
 
+    /// Stop + start with the node's current state on the same port (T18): the port, or the error.
+    static func restart() -> Result<Int, StartError> {
+        let port = TailnetRestart()
+        return port < 0 ? .failure(StartError(message: take(TailnetLastError()))) : .success(Int(port))
+    }
+
     /// nil on success, else the error.
     static func logout() -> String? { TailnetLogout() == 0 ? nil : take(TailnetLastError()) }
 
@@ -75,6 +81,13 @@ final class TailnetController {
     }
 
     var status: TailnetStatus { TailnetRules.status(enabled: enabled, info: info, error: startError) }
+
+    /// "Back in front (T18)": checks of the bridge and restarts of the node.
+    let recovery = TailnetRecovery()
+    /// The bridge is being checked (or the node restarted): Živě and the guide say "Připojuji se k Tailscale…".
+    var checking: Bool { recovery.checking }
+    /// After a restart: load the gateway data the screens need again.
+    @ObservationIgnored var onRecovered: () async -> Void = {}
 
     /// `http://127.0.0.1:<port>` while the app talks to the gateway through the bridge.
     var bridgeURL: URL? {
@@ -142,6 +155,7 @@ final class TailnetController {
             self.port = port
             self.target = target
             startError = nil
+            recovery.nodeStarted()
             await apply(result.1)
         case .failure(let error):
             log.error("tailnet: start failed: \(error.message, privacy: .public)")
@@ -162,6 +176,65 @@ final class TailnetController {
         while port != nil, info?.state != "Running", Date() < deadline, !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(500))
             await refresh()
+        }
+    }
+
+    /// "Back in front (T18)": the app became active, or a request through the bridge got no answer from the gateway.
+    /// The bridge is checked; not answered → the node restarts with its saved state and the gateway data is reloaded.
+    func checkBridge() async {
+        guard enabled, bridgeURL != nil else { return }
+        let outcome = await recovery.run(TailnetRecovery.Steps(
+            check: { [weak self] in
+                guard let url = self?.bridgeURL else { return false }
+                return await Self.bridgeAnswers(url)
+            },
+            restart: { [weak self] in await self?.restartNode() ?? false },
+            isRunning: { [weak self] in
+                guard let self else { return false }
+                await refresh()
+                return info?.state == "Running"
+            },
+            reload: { [weak self] in await self?.onRecovered() }
+        ))
+        if outcome != .healthy, outcome != .skipped {
+            log.info("tailnet: bridge check: \(String(describing: outcome), privacy: .public)")
+        }
+    }
+
+    /// No URLCache, no cookies: only the status matters.
+    private static let healthSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = TailnetRecovery.checkTimeout
+        return URLSession(configuration: configuration)
+    }()
+
+    /// `GET /health` through the bridge (the gateway's health, no key) answered within `checkTimeout`.
+    private static func bridgeAnswers(_ base: URL) async -> Bool {
+        let request = URLRequest(url: base.appending(path: "health"), cachePolicy: .reloadIgnoringLocalCacheData,
+                                 timeoutInterval: TailnetRecovery.checkTimeout)
+        guard let (_, response) = try? await healthSession.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// The node again with its state, on the same bridge port (a player's URLs stay valid).
+    private func restartNode() async -> Bool {
+        generation += 1
+        let current = generation
+        let result = await Bridge.run { Bridge.restart() }
+        guard current == generation else { return false }
+        switch result {
+        case .success(let port):
+            log.info("tailnet: restarted, bridge on port \(port)")
+            if port != self.port {
+                self.port = port
+                onBridgeChange()
+            }
+            schedulePolling()
+            return true
+        case .failure(let error):
+            log.error("tailnet: restart failed: \(error.message, privacy: .public)")
+            return false
         }
     }
 
@@ -240,3 +313,14 @@ final class TailnetController {
         }
     }
 }
+
+#if DEBUG
+extension TailnetController {
+    /// `-tailnetInfo '{"state":"Running",…}'` shows that node status in Nastavení → Server without starting a node
+    /// (simulator screenshots; nothing is saved).
+    func debugShow(_ json: String) {
+        enabled = true
+        info = TailnetInfo.parse(json)
+    }
+}
+#endif

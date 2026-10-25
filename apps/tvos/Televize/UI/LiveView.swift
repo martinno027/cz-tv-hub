@@ -12,11 +12,19 @@ struct LiveView: View {
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
 
+    private struct LoadKey: Equatable {
+        let gateway: GatewayConfig?
+        let reloads: Int
+    }
+
     var body: some View {
         let prefs = model.channelPrefs
         let channels = prefs.channels(antenna: antennaChannels).visible
+        // Tailscale is being checked: "Připojuji se k Tailscale…" instead of the gateway's error (spec/apps.md T18).
+        let connecting = model.tailnet.checking && model.antenna != nil && prefs.prefs.isOn(.dvb)
         // "All hidden" only once the Anténa channels are known (or Anténa is off / not configured).
-        let antennaPending = model.antenna != nil && prefs.prefs.isOn(.dvb) && antennaChannels.isEmpty && antennaError == nil
+        let antennaPending = model.antenna != nil && prefs.prefs.isOn(.dvb) && antennaChannels.isEmpty
+            && (antennaError == nil || connecting)
         return TimelineView(.periodic(from: .now, by: 30)) { context in
             ScrollViewReader { proxy in
             ScrollView {
@@ -28,7 +36,9 @@ struct LiveView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 200)
                     }
-                    if let antennaError, model.antenna != nil, prefs.prefs.isOn(.dvb) {
+                    if connecting {
+                        Text(TailnetRules.connectingLine).font(.callout).foregroundStyle(.secondary)
+                    } else if let antennaError, model.antenna != nil, prefs.prefs.isOn(.dvb) {
                         Text(antennaError).font(.callout).foregroundStyle(.secondary)
                     }
                     LazyVGrid(columns: columns, spacing: 56) {
@@ -62,7 +72,7 @@ struct LiveView: View {
         }
         // "Is it on now?" of the Chamber's streams shown here, only while this screen is on screen.
         .watchesParliament(channels.compactMap(\.parliamentStream))
-        .task(id: model.gateway) {
+        .task(id: LoadKey(gateway: model.gateway, reloads: model.gatewayReloads)) {
             // Schedules are cached, so this only hits the network when today's plan is stale.
             while !Task.isCancelled {
                 onAir = await model.schedules.onAir(at: Date())

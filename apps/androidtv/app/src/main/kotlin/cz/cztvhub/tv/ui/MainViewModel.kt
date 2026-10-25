@@ -23,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,6 +63,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** "Anténa" events per day keyed by channel id; a failed day is just empty. */
     private val _dvbPlans = MutableStateFlow<Map<LocalDate, Map<String, List<DvbEvent>>>>(emptyMap())
     val dvbPlans: StateFlow<Map<LocalDate, Map<String, List<DvbEvent>>>> = _dvbPlans.asStateFlow()
+
+    /**
+     * The Tailscale bridge is being checked (spec/apps.md "Back in front (T18)"): Živě and the guide say "Připojuji se
+     * k Tailscale…" instead of hiding Anténa or showing the bridge's error.
+     */
+    val tailnetChecking: StateFlow<Boolean> = app.tailnet.checking
 
     /** "Kanály": hidden channels and their order on this device (or in the signed-in profile). */
     val channelPrefs: StateFlow<ChannelPrefs> = app.channelPrefs.value
@@ -222,6 +229,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 refreshDvb()
                 app.defaults.refresh() // app start and a new gateway
                 loadDvbDay(_selectedDay.value)
+            }
+        }
+        // The Tailscale node restarted (same bridge port, so the gateway stays the same): everything from it again,
+        // and the Anténa group comes back by itself.
+        viewModelScope.launch {
+            app.tailnet.reloads.drop(1).collect {
+                _dvbPlans.value = emptyMap()
+                refreshDvb()
+                loadDvbDay(_selectedDay.value)
+                app.defaults.refresh()
+                app.profiles.sync()
             }
         }
     }

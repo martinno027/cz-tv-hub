@@ -300,6 +300,8 @@ struct GuideView: View {
     private struct LoadKey: Equatable {
         let day: BroadcastDay
         let gateway: GatewayConfig?
+        /// The Tailscale node restarted (spec/apps.md "Back in front (T18)").
+        let reloads: Int
     }
 
     var body: some View {
@@ -316,7 +318,7 @@ struct GuideView: View {
                 grid(now: context.date, today: today)
             }
         }
-        .task(id: LoadKey(day: day, gateway: model.gateway)) { await load() }
+        .task(id: LoadKey(day: day, gateway: model.gateway, reloads: model.gatewayReloads)) { await load() }
         .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
         // checked only while the grid shows today (other days have no live state)
         .watchesParliament(layout.timeline.contains(Date()) ? layout.parliamentStreams : [])
@@ -449,6 +451,11 @@ struct GuideView: View {
                 Button(option.label(today: today)) { selectDay(option) }
                     .buttonStyle(DayChipStyle(isSelected: option == highlighted))
                     .focused($focusedChip, equals: option)
+            }
+            // Tailscale is being checked: the Anténa rows come back once it answers (spec/apps.md T18).
+            if model.tailnet.checking, model.antenna != nil, model.channelPrefs.prefs.isOn(.dvb) {
+                Spacer(minLength: 24)
+                Text(TailnetRules.connectingLine).font(.callout).foregroundStyle(.secondary)
             }
         }
         // Full width, so moving up from any column of the grid lands in the strip, on the highlighted chip
