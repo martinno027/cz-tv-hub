@@ -85,6 +85,12 @@ DOCUMENTARY, NEWS, TALK, REALITY, KIDS, ANIMATION, FAMILY, HISTORY, MUSIC = 99, 
 DVB_CATEGORIES = {"Zprávy": ZPRAVY, "Zábava": ZABAVA, "Sport": SPORT, "Pro děti": DETI, "Hudba": KULTURA,
                   "Kultura": KULTURA, "Společnost": SPOLECNOST, "Vzdělávání / věda": DOKUMENTY, "Volný čas": RADY}
 FILM_GENRE = "Film / drama"
+# ČT sub-genre titles (normalised) → TMDb genre ids; "filmy"/"seriály" go by the TMDb kind (golden "subgenres").
+# Any other sub-genre (České, Zahraniční, Pohádky, Klasika, the decades of Archiv …) has no TMDb counterpart.
+SUBGENRE_TMDB = {"krimi": {80}, "komedie": {35}, "drama": {18}, "romanticke": {10749}, "thriller": {53},
+                 "thrillery": {53}, "animovane": {16}, "valecne": {10752}, "historicke": {36}, "historie": {36},
+                 "rodinne": {10751}, "hudba": {10402}, "hudebni": {10402}}
+SUBGENRE_KIND = {"filmy": "movie", "serialy": "tv"}
 
 SHOW_FIELDS = "id title year showType playableEpisodeCount durationText images { card } flatGenres { id title }"
 SUBGENRES_QUERY = "query($id: String!) { category(categoryId: $id) { title categoryBlocks { title categoryId } } }"
@@ -163,6 +169,17 @@ def categories_for(tmdb: dict | None, dvb_genre: str = "", title: str = "") -> l
         return [SERIALY if dt.guess_kind(dt.Programme(title)) == "tv" else FILMY]
     found = DVB_CATEGORIES.get(dvb_genre)
     return [found] if found else []
+
+
+def in_subgenre(subgenre_title: str, tmdb: dict | None) -> bool:
+    """Whether one of our shows (already in the sub-genre's category) is also listed in that ČT sub-genre: by
+    its stored TMDb match only (``{"kind", "genres"}``); no match, or a title without a TMDb counterpart: no."""
+    if tmdb is None:
+        return False
+    key = dt.normalise(subgenre_title)
+    if key in SUBGENRE_KIND:
+        return tmdb.get("kind") == SUBGENRE_KIND[key]
+    return bool(SUBGENRE_TMDB.get(key, set()) & set(tmdb.get("genres") or ()))
 
 
 # -- ČT ------------------------------------------------------------------------------------------
@@ -574,6 +591,10 @@ class ArchiveCatalog:
 
     def _rec_info(self, shows: list[RecShow]) -> list[tuple[RecShow, dict, list[str]]]:
         """Card and categories of each of our shows."""
+        return [(show, card, categories) for show, card, categories, _ in self._rec_details(shows)]
+
+    def _rec_details(self, shows: list[RecShow]) -> list[tuple[RecShow, dict, list[str], dict | None]]:
+        """Card, categories and the stored TMDb match (``{"kind", "genres"}`` or None) of each of our shows."""
         year = self._year()
         queries = [s.query(year) for s in shows]
         entries = self._entries(queries)
@@ -603,13 +624,14 @@ class ArchiveCatalog:
             else:
                 card["durationMinutes"] = round((newest.end - newest.start) / 60)
             card["tmdb"] = matched and bool(card["rating"] or (image and image == poster) or entry.genres)
-            categories = categories_for({"kind": entry.match_kind, "genres": entry.genre_ids} if matched else None,
-                                        genre, newest.title)
-            out.append((show, card, categories))
+            tmdb = {"kind": entry.match_kind, "genres": list(entry.genre_ids)} if matched else None
+            out.append((show, card, categories_for(tmdb, genre, newest.title), tmdb))
         return out
 
-    def _ours_in(self, slug: str) -> list[tuple[RecShow, dict, list[str]]]:
-        return [info for info in self._rec_info(self.rec_shows()) if slug in info[2]]
+    def _ours_in(self, slug: str, subgenre_title: str | None = None) -> list[tuple[RecShow, dict, list[str]]]:
+        """Our shows in a category; with a sub-genre's title only those whose TMDb match fits it."""
+        return [(show, card, categories) for show, card, categories, tmdb in self._rec_details(self.rec_shows())
+                if slug in categories and (subgenre_title is None or in_subgenre(subgenre_title, tmdb))]
 
     # -- answers ---------------------------------------------------------------------------
     def home(self) -> dict:
@@ -652,7 +674,11 @@ class ArchiveCatalog:
             failed, genres = True, []
         if genre is not None and not failed and genre not in {g["id"] for g in genres}:
             raise BadInput("unknown sub-genre")
-        mine = [] if genre else self._ours_in(slug)
+        if genre is None:
+            mine = self._ours_in(slug)
+        else:  # ČT down: the sub-genre's title is unknown, so none of ours
+            subgenre_title = next((g["title"] for g in genres if g["id"] == genre), None)
+            mine = self._ours_in(slug, subgenre_title) if subgenre_title is not None else []
         if sort == "az":
             mine.sort(key=lambda info: info[0].key)
         mine_page = [_Card(s.key, card) for s, card, _ in mine[(page - 1) * HOME_REC:page * HOME_REC]]
@@ -666,7 +692,12 @@ class ArchiveCatalog:
         cards = merge(self.ct_cards(shows), mine_page, az=sort == "az")
         more = page < MAX_PAGES and ((page - 1) * PAGE + len(shows) < total or len(mine) > page * HOME_REC)
         return self._finish({"title": title, "genres": genres, "cards": cards,
-                                 "nextPage": page + 1 if more else None}, failed)
+                             "nextPage": page + 1 if more else None}, failed)
+
+    @staticmethod
+    def categories() -> dict:
+        """The 14 categories in the row order, from our own list (no ČT request): the apps' menu."""
+        return {"categories": [{"id": slug, "title": title} for _, slug, title in CATEGORIES]}
 
     def search(self, text: str, page: int) -> dict:
         needle = dt.normalise(text)

@@ -82,6 +82,10 @@ EPISODES = {
 }
 
 
+# T23 tests add these to Filmy (kept out of SUBGENRES: the shared category sample stays as the apps test it)
+FILMY_MORE = [{"title": "Krimi", "categoryId": "3955"}, {"title": "České", "categoryId": "3949"}]
+
+
 class FakeCt:
     """ČT's GraphQL endpoint: answers the archive's five query shapes from the tables above."""
 
@@ -293,6 +297,7 @@ class World:
 SHARED = Path(__file__).resolve().parents[2] / "spec" / "fixtures" / "dvb"
 SHARED_FILES = {
     "home": ("dvb_archive_home.json", "/dvb/archive", {}),
+    "categories": ("dvb_archive_categories.json", "/dvb/archive/categories", {}),
     "category": ("dvb_archive_category.json", "/dvb/archive/category/3947-filmy", {"sort": "popular"}),
     "search": ("dvb_archive_search.json", "/dvb/archive/search", {"q": "zahrad"}),
     "show_series": ("dvb_archive_show_series.json", "/dvb/archive/show/ct:" + SERIES_ID, {}),

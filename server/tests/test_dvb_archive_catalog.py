@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+from unittest import mock
 from pathlib import Path
 
 import archive_world as w
@@ -24,8 +25,8 @@ from dvb_fixtures import NOVA, NOW
 
 GOLDEN = json.loads((Path(__file__).resolve().parents[2] / "spec" / "fixtures" / "archive_cases.json")
                     .read_text(encoding="utf-8"))
-ARCHIVE_ROUTES = [("/dvb/archive", {}), ("/dvb/archive/category/3947-filmy", {}), ("/dvb/archive/search", {"q": "a"}),
-                  ("/dvb/archive/show/ct:" + SERIES_ID, {})]
+ARCHIVE_ROUTES = [("/dvb/archive", {}), ("/dvb/archive/categories", {}), ("/dvb/archive/category/3947-filmy", {}),
+                  ("/dvb/archive/search", {"q": "a"}), ("/dvb/archive/show/ct:" + SERIES_ID, {})]
 
 
 def rec(title, start=0, rid=None):
@@ -48,6 +49,17 @@ class GoldenTest(unittest.TestCase):
                 self.assertIn(slug, ac.BY_SLUG)
         self.assertEqual(len(ac.CATEGORIES), 14)
         self.assertEqual(ac.CATEGORIES[-1][:2], ("4732", "4732-archiv"))  # ČT's "Archiv" too (owner, 2026-10-25)
+
+    def test_subgenres(self):
+        self.assertTrue(GOLDEN["subgenres"])
+        for case in GOLDEN["subgenres"]:
+            with self.subTest(case=case["name"]):
+                self.assertIn(case["category"], ac.BY_SLUG)
+                if case["included"]:  # a listed recording is already in that category (ours are never in
+                    self.assertIn(case["category"], ac.categories_for(case["tmdb"]))  # Archiv at all)
+                self.assertIs(ac.in_subgenre(case["subgenre"], case["tmdb"]), case["included"])
+        included = {c["included"] for c in GOLDEN["subgenres"]}
+        self.assertEqual(included, {True, False})
 
     def test_normalise(self):
         for case in GOLDEN["normalise"]:
@@ -326,7 +338,7 @@ class RouteTest(unittest.TestCase):
 
     def test_category_sub_genre_and_sorts(self):
         _, body = self.get("/dvb/archive/category/3976-serialy", {"genre": "3986", "sort": "az"})
-        self.assertEqual([c["id"] for c in body["cards"]], ["ct:" + SERIES_ID])  # no recordings in a sub-genre
+        self.assertEqual([c["id"] for c in body["cards"]], ["ct:" + SERIES_ID])  # ours without a TMDb match: none
         self.assertEqual(self.world.ct.bodies[-1]["variables"], {"id": "3986"})
         self.assertIn("orderBy: alphabet, order: asc", self.world.ct.bodies[-1]["query"])
         _, body = self.get("/dvb/archive/category/recordings", {"sort": "az"})
@@ -408,6 +420,79 @@ class RouteTest(unittest.TestCase):
                                        "title": "Dílna pana Nováka (13)", "description": "Další rady do dílny.",
                                        "durationSeconds": 1800, "aired": ac.epoch_iso(NOW - 5 * 3600 + 1800),
                                        "channel": "Nova HD", "channelId": None, "playable": True})
+
+
+    def test_categories_menu_without_ct(self):
+        before = len(self.world.ct.bodies)
+        resp, body = self.get("/dvb/archive/categories")
+        self.assertEqual((resp.status, resp.headers["Cache-Control"]), (200, "no-store"))
+        self.assertEqual(body, {"categories": [{"id": slug, "title": title} for _, slug, title in ac.CATEGORIES]})
+        self.assertEqual(len(body["categories"]), 14)
+        self.assertEqual(body["categories"][0], {"id": "3947-filmy", "title": "Filmy"})
+        self.assertEqual(body["categories"][-1], {"id": "4732-archiv", "title": "Archiv"})
+        self.assertEqual(len(self.world.ct.bodies), before)  # no ČT request
+        self.world.ct.error = api.StreamError("down")
+        self.assertEqual(self.get("/dvb/archive/categories")[1], body)  # ČT down: the same menu
+        self.assertEqual(self.get("/dvb/archive/categories/x")[0].status, 404)
+
+
+class SubgenreRecordingsTest(unittest.TestCase):
+    """T23: our recordings in a ČT sub-genre by their stored TMDb match (golden "subgenres")."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(w.SUBGENRES, {"3947": w.SUBGENRES["3947"] + w.FILMY_MORE})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.world = World(Path(self.tmp.name))
+        self.addCleanup(self.world.close)
+        self.store = self.world.gw.details.store
+
+    def put(self, title, result):
+        catalog = self.world.gw.catalog
+        show = next(s for s in catalog.rec_shows() if s.title == title)
+        query = show.query(catalog._year())
+        self.store.put(query.key, query.kind, query.year, query.title, result)
+
+    def ids(self, slug, genre=None, **query):
+        if genre is not None:
+            query["genre"] = genre
+        resp, body = self.world.get("/dvb/archive/category/" + slug, query)
+        self.assertEqual(resp.status, 200)
+        return [c["id"] for c in body["cards"]]
+
+    @staticmethod
+    def match(kind, genres):
+        return {"kind": kind, "tmdbId": 9100, "rating": None, "genreIds": genres, "genres": [], "year": 2015,
+                "poster": None}
+
+    def test_crime_film_in_krimi_not_in_ceske(self):
+        self.put("Tichá hora", None)  # looked up, no match: ČT only in every sub-genre
+        self.assertIn("rec:tichahora", self.ids("3947-filmy"))  # by its DVB genre "Film / drama"
+        self.assertNotIn("rec:tichahora", self.ids("3947-filmy", "3955"))
+        self.put("Tichá hora", self.match("movie", [80, 18]))
+        self.assertIn("rec:tichahora", self.ids("3947-filmy", "3955"))  # Krimi
+        self.assertIn("rec:tichahora", self.ids("3947-filmy", "3955", sort="az"))
+        self.assertNotIn("rec:tichahora", self.ids("3947-filmy", "3949"))  # České: no TMDb counterpart
+        self.assertIn("rec:tichahora", self.ids("3947-filmy", "3951"))  # Drama 18 too
+        self.put("Tichá hora", self.match("movie", [80]))
+        self.assertNotIn("rec:tichahora", self.ids("3947-filmy", "3951"))  # the stored genres, as they are now
+        self.assertIn("rec:tichahora", self.ids("3947-filmy", "3955"))
+
+    def test_only_recordings_of_the_category(self):
+        self.put("Zahradní seriál", self.match("tv", [80, 35]))  # a crime series: Seriály, not Filmy
+        self.assertNotIn("rec:zahradniserial", self.ids("3947-filmy", "3955"))
+        self.assertEqual(self.ids("3976-serialy", "3986"), ["ct:" + SERIES_ID])
+        _, body = self.world.get("/dvb/archive/category/3976-serialy", {"genre": "3986"})
+        self.assertEqual(body["cards"][0]["source"], "both")  # ours of Komedie merged with ČT's card
+        self.assertEqual(self.ids("3947-filmy", "3955"), [])  # Krimi: nothing of ČT, Tichá hora unmatched
+
+    def test_ct_down_none_of_ours_in_a_sub_genre(self):
+        self.put("Tichá hora", self.match("movie", [80]))
+        self.world.ct.error = api.StreamError("down")
+        resp, body = self.world.get("/dvb/archive/category/3947-filmy", {"genre": "3955"})
+        self.assertEqual((resp.status, body["cards"], body["error"]), (200, [], "iVysílání teď neodpovídá"))
 
 
 class RecordingsTest(unittest.TestCase):
