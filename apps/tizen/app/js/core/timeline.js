@@ -34,7 +34,7 @@
 
   /** `H:MM` / `H:MM:SS` of Prague wall clock, hour without a leading zero. */
   function clockText(ms, seconds) {
-    var hm = CT.Days.time(ms).replace(/^0(\d)/, '$1');
+    var hm = CT.Days.clock(ms);
     if (!seconds) return hm;
     var s = Math.floor(ms / 1000) % 60;
     return hm + ':' + (s < 10 ? '0' : '') + s;

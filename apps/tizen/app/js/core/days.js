@@ -76,6 +76,17 @@
       return pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
     },
 
+    /** The header clock (spec/apps.md "Clock (T22)"): Prague `H:MM`, 24 h, hour without a leading zero. */
+    clock: function (ms) {
+      var d = local(ms);
+      return d.getUTCHours() + ':' + pad2(d.getUTCMinutes());
+    },
+
+    /** Milliseconds from `ms` to the next minute boundary (1..60000), when the clock changes next. */
+    untilNextMinute: function (ms) {
+      return 60000 - ((ms % 60000) + 60000) % 60000;
+    },
+
     timeRange: function (start, end) {
       return Days.time(start) + '–' + Days.time(end);
     },
