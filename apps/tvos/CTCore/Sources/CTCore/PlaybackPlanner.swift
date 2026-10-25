@@ -5,6 +5,9 @@ public enum PlaybackRequest: Sendable, Hashable {
     case live(Channel)
     /// A programme picked in the guide; the decision rules choose start-over or archive.
     case programme(Programme, channel: Channel)
+    /// An iVysílání episode from the Archiv tab (spec/apps.md "Archiv"): the same decision rules, but the channel may
+    /// be unknown (web-only items, ČT3), then it can only play from the archive (VOD by idec).
+    case episode(Programme, channel: Channel?)
 }
 
 /// A freshly resolved stream, ready for the player. Hold it only while playing.
@@ -68,14 +71,30 @@ public struct PlaybackPlanner: Sendable {
             case .startOver:
                 return try await startOver(programme, channel: channel, resumeAt: resumeAt)
             case .vod, .vodUnavailable:
-                // For unavailable items this surfaces CT's own reason as a CTError.
-                switch try await client.vod(idec: programme.idec) {
-                case .stream(let url):
-                    return PlaybackSource(url: url, title: programme.title, mode: .vod, startPosition: resumeAt)
-                case .stillLive(let channelID):
-                    return try await startOver(programme, channel: Channels.byID(channelID) ?? channel, resumeAt: resumeAt)
-                }
+                return try await vod(programme, channel: channel, resumeAt: resumeAt)
             }
+        case .episode(let programme, let channel):
+            switch DecisionRules.action(for: programme, now: clock()) {
+            case .future:
+                throw CTError(CTError.notStarted)
+            case .startOver:
+                // Without a known channel there is no buffer to play from: the archive, or CT's reason.
+                guard let channel else { return try await vod(programme, channel: nil, resumeAt: resumeAt) }
+                return try await startOver(programme, channel: channel, resumeAt: resumeAt)
+            case .vod, .vodUnavailable:
+                return try await vod(programme, channel: channel, resumeAt: resumeAt)
+            }
+        }
+    }
+
+    /// The archive item by IDEC; for unavailable items this surfaces CT's own reason as a CTError.
+    private func vod(_ programme: Programme, channel: Channel?, resumeAt: TimeInterval?) async throws -> PlaybackSource {
+        switch try await client.vod(idec: programme.idec) {
+        case .stream(let url):
+            return PlaybackSource(url: url, title: programme.title, mode: .vod, startPosition: resumeAt)
+        case .stillLive(let channelID):
+            guard let live = Channels.byID(channelID) ?? channel else { throw CTError(CTError.noTimeshift) }
+            return try await startOver(programme, channel: live, resumeAt: resumeAt)
         }
     }
 

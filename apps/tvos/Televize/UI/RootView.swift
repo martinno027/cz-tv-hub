@@ -2,7 +2,7 @@ import CTCore
 import SwiftUI
 
 struct RootView: View {
-    enum Tab: Hashable { case live, guide, settings }
+    enum Tab: Hashable { case live, guide, archive, settings }
 
     @Environment(AppModel.self) private var model
     @State private var tab: Tab = .live
@@ -23,6 +23,9 @@ struct RootView: View {
             GuideView(opens: guideOpens)
                 .tabItem { Text("TV průvodce") }
                 .tag(Tab.guide)
+            ArchiveView()
+                .tabItem { Text("Archiv") }
+                .tag(Tab.archive)
             SettingsView()
                 .tabItem { Text("Nastavení") }
                 .tag(Tab.settings)
@@ -40,12 +43,12 @@ struct RootView: View {
         }
         // Digits on Živě and the guide start that channel live (spec/apps.md "Number keys").
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in
-            guard tab != .settings, model.session == nil, let digit = Int(press.characters) else { return .ignored }
+            guard tab == .live || tab == .guide, model.session == nil, let digit = Int(press.characters) else { return .ignored }
             model.numberEntry.type(digit, count: model.visibleChannels.count)
             return .handled
         }
         .overlay(alignment: .topTrailing) {
-            if tab != .settings { NumberEntryBadge(entry: model.numberEntry) }
+            if tab == .live || tab == .guide { NumberEntryBadge(entry: model.numberEntry) }
         }
         // Household default and profile read at start (pending profile changes sent first), failed sends again every 60 s.
         .task { await model.runProfileSync() }
@@ -80,6 +83,7 @@ struct RootView: View {
             }
             switch arguments.string(forKey: "tab") {
             case "guide": tab = .guide
+            case "archive": tab = .archive
             case "settings": tab = .settings
             default: break
             }
