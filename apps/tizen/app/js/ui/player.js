@@ -391,7 +391,7 @@
     } else {
       channel = CT.Channels.byId(r.channelId);
     }
-    return channel ? channel.name : r.title;
+    return channel ? channel.name : r.channelName || r.title;
   };
 
   /** Info bar text; live is re-evaluated every second against the guide data the app keeps fresh. */
@@ -672,12 +672,12 @@
   Player.prototype.saveProgress = function () {
     if (!this.isOpen() || !this.target || this.backend.position() <= 0) return;
     if (this.tl) {
-      this.tl.saveProgress(this.app.resumeStore);
+      this.tl.saveProgress(this.app.resumeStore, this.request);
       return;
     }
     var progress = this.progressSeconds();
-    if (progress === null || progress < 0) return;
-    this.app.resumeStore.save(this.request.resumeKey, progress, this.request.lengthSeconds);
+    if (progress === null || !isFinite(progress) || progress < 0) return;
+    this.app.resumeStore.save(this.request.resumeKey, progress, this.request.lengthSeconds, this.request.resumeMeta);
   };
 
   /**

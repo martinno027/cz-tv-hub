@@ -3,10 +3,20 @@ package cz.cztvhub.core.dvb
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.HouseholdDefaults
 import cz.cztvhub.core.HttpResponse
+import cz.cztvhub.core.archive.ArchiveHome
+import cz.cztvhub.core.archive.ArchiveMessages
+import cz.cztvhub.core.archive.ArchivePage
+import cz.cztvhub.core.archive.ArchiveParser
+import cz.cztvhub.core.archive.ArchiveRules
+import cz.cztvhub.core.archive.ArchiveShow
+import cz.cztvhub.core.archive.ArchiveSort
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.URLEncoder
 import java.time.LocalDate
+
+private val ARCHIVE_SLUG = Regex("^[a-z0-9-]{1,60}$")
 
 /** Seam for tests: GET with headers. Throws [IOException] on network failure. */
 fun interface DvbTransport {
@@ -31,6 +41,37 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
 
     /** A poster of [details] (needs [DvbConfig.authHeaders]); null for anything but a gateway image path. */
     fun posterUrl(path: String): String? = path.takeIf(DvbParser::isPosterPath)?.let(config::url)
+
+    /** The Archiv tab's home rows (T13, spec/dvb-gateway.md "Archive"). */
+    fun archiveHome(): ArchiveHome = call("/dvb/archive") { s, b -> ArchiveParser.parseHome(s, b) }
+
+    /** A category (`recordings` = ours only), [genre] a sub-genre id, [page] from 1. */
+    fun archiveCategory(slug: String, sort: ArchiveSort, genre: String?, page: Int): ArchivePage {
+        if (!ARCHIVE_SLUG.matches(slug)) throw CtException("bad archive slug $slug", ArchiveMessages.GENERIC)
+        val query = buildList {
+            add("sort=${sort.query}")
+            genre?.let { add("genre=${encode(it)}") }
+            add("page=$page")
+        }.joinToString("&")
+        return call("/dvb/archive/category/$slug?$query") { s, b -> ArchiveParser.parsePage(s, b) }
+    }
+
+    /** Search by title; [text] is cut to [ArchiveRules.SEARCH_MAX_CHARS]. */
+    fun archiveSearch(text: String, page: Int): ArchivePage =
+        call("/dvb/archive/search?q=${encode(text.take(ArchiveRules.SEARCH_MAX_CHARS))}&page=$page") { s, b ->
+            ArchiveParser.parsePage(s, b)
+        }
+
+    /** A show page; with [season] that season's episodes ([page] from 1). */
+    fun archiveShow(id: String, season: String? = null, page: Int = 1): ArchiveShow {
+        if (!ArchiveParser.isCardId(id)) throw CtException("bad archive id $id", ArchiveMessages.GENERIC)
+        val query = season?.let { "?season=${encode(it)}&page=$page" }.orEmpty()
+        // The id is checked above; only a non-ASCII letter of a normalised title needs escaping, the colon stays.
+        return call("/dvb/archive/show/${encode(id).replace("%3A", ":")}$query") { s, b -> ArchiveParser.parseShow(s, b) }
+    }
+
+    /** A card image that is a gateway path (needs [DvbConfig.authHeaders]); null for anything else. */
+    fun archiveImageUrl(path: String): String? = path.takeIf(ArchiveParser::isGatewayPath)?.let(config::url)
 
     /** Ad breaks of a finished recording (`[ads]` on the gateway); `404` when the feature is off. */
     fun breaks(recordingId: String): List<AdBreak> =
@@ -68,6 +109,8 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
 
     /** One still of a recording (needs [DvbConfig.authHeaders]); never cache it on disk. */
     fun thumbnailUrl(recordingId: String): String = config.url("/dvb/recording/$recordingId/thumb.jpg")
+
+    private fun encode(text: String): String = URLEncoder.encode(text, Charsets.UTF_8).replace("+", "%20")
 
     private fun <T> call(path: String, parse: (Int, String) -> T): T {
         val response = try {

@@ -174,4 +174,19 @@ class PlannerTest {
         val (p, _) = planner()
         assertEquals(Messages.GENERIC, failure { p.plan(PlayRequest.Live("CH_1", "ČT1")) }.userMessage)
     }
+
+    // T13: an archive episode whose channel is not in the catalogue still plays from the archive.
+    @Test fun archiveEpisodeWithoutCatalogueChannelPlaysVod() {
+        val (p, t) = planner("media/external" to "vod_ok.json")
+        val request = programme("2026-10-17T08:00:00Z", "2026-10-17T09:00:00Z", true).copy(channelId = "")
+        assertEquals(PlayKind.VOD, p.plan(request).kind)
+        assertTrue(t.requests.single().first.contains("/media/external/226411010101016?"))
+    }
+
+    @Test fun recentEpisodeWithoutCatalogueChannelSaysNoBuffer() {
+        val (p, t) = planner("channel/CH_1" to "live_CH_1.json")
+        val request = programme("2026-10-17T17:30:00Z", "2026-10-17T19:00:00Z", true).copy(channelId = "")
+        assertEquals(Messages.NO_TIMESHIFT, failure { p.plan(request) }.userMessage)
+        assertTrue(t.requests.isEmpty())
+    }
 }

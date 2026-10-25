@@ -57,15 +57,21 @@ or Poslanecká sněmovna Parlamentu ČR.
   the recording, needs the same key, is never made from ČT internet streams, never uses a tuner and can be switched
   off for the household (`/admin`) and per TV. Thumbnails are never published, committed or shown in screenshots.
 
-## Programme details (TMDb, approved by the user on 2026-10-24)
+## Programme details (TMDb, approved by the user on 2026-10-24; extended for the archive on 2026-10-25)
 - Optional, off without the household's own TMDb API key (free, non-commercial use only). The Raspberry Pi sends TMDb
-  only the title, year and type of a programme a viewer opens, one at a time, from the Pi's own address; no viewing
-  history, device or profile data. Lookup results are cached on the Pi's disk for at most 30 days (TMDb's terms
-  allow at most 6 months, section 1.C, checked 2026-10-24); posters only in the Pi's memory, and only while their
-  result is cached. Both reach the apps only through the gateway, so the TVs never
-  contact TMDb. Ratings are shown as TMDb's ("Hodnocení TMDB").
+  only the cleaned title of a programme, from its own address: for a programme a viewer opens, and in the background
+  (one at a time, at most 30 per minute) for programmes the archive lists, meaning the household's recordings within
+  retention and iVysílání shows from ČT's public API. No viewing history, device or profile data is sent. Results
+  (rating, genres, year, poster path, with the time they were fetched) are stored on the Pi's disk and refreshed while
+  the archive still lists the programme, after 5 months by default; a result that could not be refreshed is deleted
+  after the same period. The period is set on `/admin` and is the household's decision: TMDb's terms (section 1.C,
+  checked 2026-10-24) allow keeping their data at most 6 months, `/admin` says so above 6, and TMDb may revoke a
+  key that keeps it longer. Posters stay only in the Pi's memory, and only while their result is stored. The household can view,
+  refresh and delete the stored results on `/admin`; they cannot be downloaded or exported. Everything reaches the
+  apps only through the gateway, so the TVs never contact TMDb. Ratings are shown as TMDb's ("Hodnocení TMDB").
 - "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." The
-  TMDB logo is shown with it, less prominent than the app's own name.
+  TMDB logo is shown with it wherever TMDb data is shown (programme page and archive), less prominent than the app's
+  own name.
 - No other metadata sources; ČSFD, IMDb and similar sites are not scraped. Each user registers their own key; none
   is published or committed.
 

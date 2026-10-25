@@ -28,6 +28,8 @@
 
   var Programme = {
     MIN_VOTES: MIN_VOTES,
+    /** The only gateway path a TMDb poster may have (also for archive cards). */
+    POSTER_PATH: POSTER_PATH,
 
     /** 'future' | 'airing' | 'ended' */
     state: function (entry, now) {
@@ -113,12 +115,18 @@
       return n >= 2 && n <= 4 ? 'hlasy' : 'hlasů';
     },
 
-    /** "Hodnocení TMDB 7,4 (1 234 hlasů)", or null without a rating or below 20 votes. */
-    ratingLine: function (rating) {
+    /** "7,4" (one decimal, decimal comma), or null without a rating or below 20 votes. */
+    ratingValue: function (rating) {
       if (!rating || !isNumber(rating.value) || !isNumber(rating.votes) || rating.votes < MIN_VOTES) return null;
       // one decimal, half up (the epsilon keeps 6.35 from becoming 6.3 through binary rounding)
       var tenths = Math.floor(rating.value * 10 + 0.5 + 1e-9);
-      var value = Math.floor(tenths / 10) + ',' + (tenths % 10);
+      return Math.floor(tenths / 10) + ',' + (tenths % 10);
+    },
+
+    /** "Hodnocení TMDB 7,4 (1 234 hlasů)", or null without a rating or below 20 votes. */
+    ratingLine: function (rating) {
+      var value = Programme.ratingValue(rating);
+      if (value === null) return null;
       return 'Hodnocení TMDB ' + value + ' (' + thousands(rating.votes) + ' ' + Programme.votesWord(rating.votes) + ')';
     },
 

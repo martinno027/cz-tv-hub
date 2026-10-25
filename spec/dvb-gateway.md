@@ -337,8 +337,10 @@ Extra facts for the apps' programme page: year, a poster, TMDb's rating, the ori
 - **Posters**: `GET /dvb/details/image/w342/<file>.(jpg|png)` (app key) fetches **only** a path the gateway got from its
   own lookup, from `https://image.tmdb.org/t/p/w342/<file>` (fixed host and size, ≤ 1 MB), kept in memory (LRU 40 MB).
   The client never sends a URL.
-- **Cache**: `<state_dir>/tmdb-cache.json` (0600) programme key → match or "no match", **30 days** (TMDb terms 1.C:
-  at most 6 months), at most 5000 entries; deleted when `[tmdb] key` goes.
+- **Cache**: since T13 the TMDb store (`<state_dir>/tmdb.sqlite`, see "Archive"), refreshed / deleted after N months;
+  `tmdb-cache.json` of T15 (30 days) is migrated once and deleted. TMDb's title, original title, overview and runtime
+  are kept in memory only (the rule stores none of them); a stored match whose texts are not in memory costs one
+  `movie|tv/{id}` request when a viewer opens the page, and without TMDb the stored facts and our title are shown.
 - **Details of the implementation** (T15):
   - Errors: `400` missing/invalid `source`, `id` (`[A-Za-z0-9:_-]{1,128}`), `date` or `idec`, or a CT `date`
     outside the guide's range (7 days back, 2 ahead); `404` unknown programme or CT channel, or a programme of a
@@ -354,7 +356,7 @@ Extra facts for the apps' programme page: year, a poster, TMDb's rating, the ori
     containing "seriál" make it `tv`.
   - Over 30 requests per minute (posters count too) a lookup answers at once with the `error`, it does not wait;
     a lookup waits at most 10 s for the one request slot. Redirects from TMDb are not followed.
-  - A poster is served only while the match it came from is in the cache (≤ 30 days), also from memory.
+  - A poster is served only while the match it came from is in the store (≤ N months), also from memory.
 
 ## Real programme starts from the broadcast (T14, phase 1: measure; `src/cztvhub/dvb/eit.py`)
 Commercial channels often start a programme minutes after its EPG time (ads), so "Od začátku" (start − 30 s) shows the
@@ -395,6 +397,121 @@ table (PID `0x12`, `table_id 0x4E`) names the event now running (`running_status
   2:30 and −0:30 after the EPG start on channels 1-3 (names in ISO 6937, UTF-8 and ISO 8859-2), none on channel 4.
 - Phase 2 (only after the owner has looked at a day of the report): use the measured start for "Od začátku", the
   timeline's programme ticks and ▲/▼ where the channel's EIT proved accurate.
+
+## Archive (T13, draft for the owner's review; `src/cztvhub/dvb/archive_catalog.py`, `tmdbstore.py`)
+The apps' **Archiv** tab: iVysílání and the household's own recordings in shared categories, searchable by title.
+The gateway builds it, because it alone may call TMDb and it knows the recordings; the apps only list and play
+(iVysílání episodes are still resolved on the TV through ČT's VOD API — IP-bound URLs, as for the guide).
+- **Sources**:
+  - **iVysílání** from ČT's public GraphQL API (`api.py`, the same honest `User-Agent` as today, never the website,
+    never a faked browser): the 14 categories (`3947` Filmy … `4732` Archiv), their sub-genres and sorts
+    (`popular_previous_seven_days`, newest, A–Z), `searchShows`, a show's seasons and playable episodes. Cached on the
+    Pi: categories and rows 6 h, a show 1 h, a search 10 min; at most 60 shows per row and 3 pages per request; one ČT
+    request at a time. No crawling of whole categories.
+  - **Our recordings**: ended programmes of the continuous recording within retention, on offered channels, with
+    state `completed` (from the EPG + EPG history, as `/dvb/epg` annotates them). Programmes with the same cleaned
+    title (`details.clean_title` for `tv`) are **one show** with episodes, newest first.
+- **Categories of our recordings** (a show may be in several; golden `spec/fixtures/archive_cases.json`
+  "categories"): with a stored TMDb match by its TMDb genre ids (stable across languages) — a movie → Filmy, a `tv`
+  match → Seriály; Documentary 99 → Dokumenty (instead of Filmy/Seriály); News 10763 → Zpravodajství only; Talk
+  10767 / Reality 10764 → Zábava (instead of Seriály); Kids 10762, or Animation 16 + Family 10751 → also Pro děti;
+  History 36 → also Historie; Music 10402 → also Kultura. Without a match by the DVB genre: Film / drama → Filmy (a
+  title with an episode number → Seriály), Zprávy → Zpravodajství, Zábava → Zábava, Sport → Sport, Pro děti → Pro
+  děti, Hudba and Kultura → Kultura, Společnost → Společnost, Vzdělávání / věda → Dokumenty, Volný čas → Rady
+  a recepty; none → only "Naše nahrávky". Computed when the catalogue is built, never stored separately.
+- **One card per show**: an iVysílání show and our recordings with the same normalised title (casefold, no
+  diacritics, letters and digits) are one card with `source: "both"`, **iVysílání first** (its image, year, episodes);
+  the show page lists our recorded episodes as an extra group "Nahráno z antény".
+- **TMDb store** (`<state_dir>/tmdb.sqlite`, 0600; replaces `tmdb-cache.json`): key = kind + year + cleaned title;
+  match / no match, TMDb id, rating value + votes, genres, year, poster path, `fetchedAt`. Background worker: titles
+  the archive lists that have no entry, or whose entry is older than **N months** (`/admin` setting "Obnovit údaje
+  z TMDb po N měsících", any positive integer, default 5; a warning above 6: "Licence TMDb povoluje uchovávat údaje
+  nejvýš 6 měsíců. Delší doba je vaše rozhodnutí a TMDb může klíč zrušit."), one TMDb request at a time, ≤ 30 per
+  minute together with the page lookups, page lookups first; an entry not refreshed is deleted N months after
+  `fetchedAt` (checked on read and at start). No `[tmdb] key` → no lookups and the store is deleted. Only the
+  cleaned title goes to TMDb, never client text (search results are looked up by their ČT/EPG title).
+- **API** (app key; worker key `403`; JSON):
+  - `GET /dvb/archive` → `{"rows": [{"id": "recordings" | "<category slug>", "title", "cards": [card…], "more":
+    bool}]}`: "Naše nahrávky" first (newest), then the 14 categories incl. ČT's "Archiv" (`4732`, owner 2026-10-25)
+    (their ČT "popular" block with our recordings of that category mixed in by recording date), empty rows left out.
+  - `GET /dvb/archive/category/<slug>?sort=popular|newest|az&genre=<sub-genre id>&page=<n>` → `{"title",
+    "genres": [{"id","title"}], "cards": [...], "nextPage": n | null}` (`slug` `recordings` = ours only).
+  - `GET /dvb/archive/search?q=<text>&page=<n>` (text ≤ 100 chars) → `{"cards": [...], "nextPage"}`: ČT
+    `searchShows` + our recordings whose title contains the text (no diacritics, case-insensitive), merged as above.
+  - `GET /dvb/archive/show/<id>` (`ct:<ČT show id>` or `rec:<normalised title>`; the colon plain or as `%3A`) →
+    `{"card": card, "description", "creators"? (one display string as ČT sends it, "Režie: … Hrají: …"),
+    "countries"? [names], "seasons": [{"id","title"}], "groups": [{"title", "episodes": [episode…]}],
+    "attribution"?, "error"?}`. The show page's `card` always has the show's own `kind` and `year` (from ČT's
+    `showType`/`year`), also when the card in a list came from a search without them.
+  - **Season page** `GET /dvb/archive/show/<id>?season=<id>&page=<n>` answers the same show object; its ČT group
+    (`groups[0]`) holds that season's page `n` and `nextPage` (`null` = no more); "Nahráno z antény" stays as it
+    is. The apps replace the ČT group's episodes on page 1 and append them on later pages. Sample:
+    `spec/fixtures/dvb/dvb_archive_show_season_page.json`.
+  - **card** `{"id", "source": "ct"|"rec"|"both", "title", "kind": "movie"|"series"|null, "year"?, "image"
+    (ČT image URL, or a gateway path `/dvb/details/image/…` / thumbnail for recordings) | null, "rating":
+    {"value","votes"} | null, "genres": [..], "episodeCount"?, "durationMinutes"?, "tmdb": bool}`; **episode**
+    `{"source": "ct"|"rec", "idec" | "recordingId", "title", "description", "durationSeconds", "aired": "…Z" | null,
+    "channel", "channelId", "playable": bool}`. `channel` is the display name; `channelId` the CT API id (`CH_1`,
+    `CH_2`, `CH_24`, `CH_4`, `CH_5`, `CH_6`) when ČT's `channelName` equals a name in `channels.py` (spaces
+    normalised, nothing else guessed), else `null` (always `null` for our recordings: they play from the Anténa
+    recording); the apps use it for the 3-hour buffer rule. `tmdb` = the card shows TMDb data (rating, TMDb poster or TMDb genres): the apps
+    show the TMDB logo and attribution then; every `/dvb/archive*` answer with such a card has `"attribution"`
+    (TMDb's sentence, as in `/dvb/details`). `kind` is null for a ČT search card (ČT's `searchShows` does not say;
+    merged with our recording it takes ours). Keys marked `?` are left out when unknown.
+  - Home, category and search answer `200` with `"error": "iVysílání teď neodpovídá"` added when ČT failed (our
+    recordings are still listed); a ČT show page answers `502`, except a `both` show the archive listed before
+    (its last card kept in memory): `200` with that card, `"seasons": []`, only "Nahráno z antény" and the
+    `error`. On the show page the ČT group is `{"title" (season
+    title, or "Díly"), "season": id | null, "episodes", "nextPage": n | null}`, "Nahráno z antény" `{"title",
+    "episodes"}` (all our episodes, newest first).
+- **`/admin`, tab "TMDb"**: the store, read-only and paginated (title, match, rating, genres, year, fetched), refresh
+  / delete per entry, "Smazat vše" (all logged: `admin: tmdb: <action> <title>`), the N-months setting with its
+  warning. No download or export.
+- **Details of the implementation** (T13):
+  - **ČT GraphQL shapes** (introspection is off; found 2026-10-25 with 36 manual requests, our User-Agent; the
+    error messages are masked, so an unknown field shows only as `GRAPHQL_VALIDATION_FAILED`):
+    rows `showFindByGenre(categoryId, limit, offset, orderBy: popular_previous_seven_days | catchup_broadcast |
+    alphabet[, order: asc]) { totalCount items { id title year showType playableEpisodeCount durationText images
+    { card } flatGenres { id title } } }` (a sub-genre id works as `categoryId`; "newest" = `catchup_broadcast`,
+    ČT's "Naposledy vysílané"; `alphabet` alone is Z–A); sub-genres `category(categoryId) { categoryBlocks { title
+    categoryId } }` (the blocks with a `categoryId`); search `searchShows(keyword, limit, offset) { items { id title
+    images { card } } }` (a `ShowCard`: no `showType`, `year`, `flatGenres`; `totalCount` not checked); show
+    `programme(legacySidpOrIdp: id) { ... on Show { … description shortDescription creators (a string)
+    countriesOfOrigin { title } seasons { id title } } }` (unknown id → error code `NOT_FOUND`) and its episodes
+    `episodes(limit, offset, onlyPlayable: true, orderBy: oldest | newest[, seasonId]) { totalCount items { id title
+    description duration playable date { datetime channelName } } }`. `year` is a string; `durationText` "98 min"
+    with a no-break space. Home rows use `showFindByGenre` with the popular sort instead of the category's
+    `categoryBlocks` cards (their `CategoryBlockCard` fields are not known). Variables carry ids and the search
+    text; page numbers, sorts and the season id (checked against the show's seasons) are written into the query.
+  - Pages: 20 ČT shows, pages 1–3 (`400` beyond); `recordings` 20 per page, pages 1–50; a show's episodes 20 per
+    page, pages 1–10. A series with seasons lists the first season unless `season` is given, oldest first; without
+    seasons newest first. Inputs: `q` 1–100 characters after collapsing spaces, no control characters (`400`);
+    `slug` `recordings` or one of the 14 (`404`); `sort` `popular|newest|az`; `genre` digits and one of the
+    category's sub-genres (`400`; none for `recordings`); show id `ct:[A-Za-z0-9]{1,32}` or `rec:<letters and
+    digits>` (`400`), unknown `404`.
+  - Our shows mixed into ČT's: a merged card where the key matches, the rest of ours into every third place (A–Z:
+    by title), up to 10 per page; in a sub-genre none of ours. "Naše nahrávky" in the home row: the newest 20.
+    "Completed" is `/dvb/epg`'s state: at least 30 s of the programme recorded, so a partly recorded programme is
+    listed. Programmes that started before the retention window are left out. A card of ours is a film only with
+    one recording and a TMDb film match, or without a match a "Film / drama" programme without an episode number.
+    Its image is the newest recording's thumbnail (thumbnails on), else the TMDb poster. Card images are only an
+    `https` URL on a `*.ceskatelevize.cz` host (anything else from ČT becomes `null`), `/dvb/details/image/w342/…`
+    or `/dvb/recording/<id>/thumb.jpg`. The samples use the invented host `img.example.invalid`.
+  - `rec:` ids are ASCII: the normalised title, with any letter `normalise` keeps but is not ASCII ("ł", "ø",
+    Cyrillic) written as `u` + 4 hex digits (`łodz` → `u0142odz`); the route accepts `rec:[a-z0-9]{1,600}`.
+  - Store: a "month" is 30 days (N = 6 → 180 days, inside TMDb's 6 months); the worker refreshes an entry still
+    listed from N months − 7 days (− N/4 for short periods) and it is deleted at N months; N up to 999 999 999.
+    "Listed" = our shows within retention, and ČT shows in any archive answer of the last 7 days (memory only).
+    Worker: every 5 min (sooner after an answer listed new titles); one TMDb request at a time, at most 20 per
+    minute for the worker (the other 10 for pages), never while a page lookup waits; a refusal ends the round (next
+    try in 20 s), a failed title waits an hour. TMDb `429`: no request for `Retry-After` seconds (number form;
+    otherwise 60 s, at most 1 h), also for pages; never retried by itself.
+  - `/admin`: `GET /admin/api/tmdb?page=n` (50 per page, by title), `POST /admin/api/tmdb` `{"months": N}` |
+    `{"refresh": key}` (the stored cleaned title only) | `{"delete": key}` | `{"deleteAll": true}`; logged `admin:
+    tmdb: refresh after N month(s)`, `… refresh <title>: match | no match | failed (…)`, `… delete <title>`, `…
+    delete all (n entries)`. A shorter N deletes older entries at once. Without `[tmdb] key` the tab says TMDb is
+    off; the months setting can still be changed.
+- legal-guard 2026-10-25: approve with changes (all in this section); approved by the owner the same day.
 
 ## EPG history (`src/cztvhub/dvb/epgstore.py`)
 The gateway remembers the EPG events it sees (every 30 min the next 3 days, plus every `/dvb/epg` answer) in

@@ -3,6 +3,17 @@
     <string name="app_name">Televize</string>
     <string name="tab_live">Živě</string>
     <string name="tab_guide">TV průvodce</string>
+    <string name="tab_archive">Archiv</string>
+    <string name="archive_search_hint">Hledat v archivu</string>
+    <string name="archive_continue">Pokračovat ve sledování</string>
+    <string name="archive_remove">Odebrat z řady</string>
+    <string name="archive_all">Vše</string>
+    <string name="archive_sort_popular">Nejsledovanější</string>
+    <string name="archive_sort_newest">Naposledy vysílané</string>
+    <string name="archive_sort_az">A–Z</string>
+    <string name="archive_play">Přehrát</string>
+    <string name="archive_play_from_start">Přehrát od začátku</string>
+    <string name="archive_all_more">Vše ›</string>
     <string name="loading">Načítám…</string>
     <string name="retry">Zkusit znovu</string>
     <string name="next_up">Potom: %1$s</string>

@@ -1,0 +1,51 @@
+{
+ "status": 200,
+ "body": {
+  "title": "Filmy",
+  "genres": [
+   {
+    "id": "3951",
+    "title": "Drama"
+   }
+  ],
+  "cards": [
+   {
+    "id": "ct:10000000002",
+    "source": "ct",
+    "title": "Noční vlak",
+    "kind": "movie",
+    "year": 2019,
+    "image": "https://img.example.invalid/archive/card/10000000002.jpg",
+    "rating": {
+     "value": 6.4,
+     "votes": 80
+    },
+    "genres": [
+     "Drama"
+    ],
+    "durationMinutes": 98,
+    "tmdb": true
+   },
+   {
+    "id": "rec:tichahora",
+    "source": "rec",
+    "title": "Tichá hora",
+    "kind": "movie",
+    "year": 2015,
+    "image": "/dvb/recording/b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792287000-1792292400/thumb.jpg",
+    "rating": {
+     "value": 7.1,
+     "votes": 250
+    },
+    "genres": [
+     "Drama",
+     "Historický"
+    ],
+    "durationMinutes": 90,
+    "tmdb": true
+   }
+  ],
+  "nextPage": null,
+  "attribution": "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB."
+ }
+}

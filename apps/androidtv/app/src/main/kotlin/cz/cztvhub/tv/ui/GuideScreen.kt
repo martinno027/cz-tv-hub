@@ -82,8 +82,8 @@ import cz.cztvhub.core.ImagePrefetch
 import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
+import cz.cztvhub.core.ResumeCard
 import cz.cztvhub.core.PspState
-import cz.cztvhub.core.TailnetStatus
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbDecisions
 import cz.cztvhub.core.dvb.DvbEvent
@@ -174,7 +174,12 @@ private data class OpenPage(val model: ProgrammePageModel, val day: LocalDate)
 
 /** "TV průvodce": EPG grid with channels as rows and time on the horizontal axis. */
 @Composable
-fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
+fun GuideScreen(
+    viewModel: MainViewModel,
+    onPlay: (PlayRequest) -> Unit,
+    /** Playing from a programme page, with what "Pokračovat ve sledování" keeps (T13). */
+    onPlayCard: (PlayRequest, ResumeCard?) -> Unit = { request, _ -> onPlay(request) },
+) {
     val day by viewModel.selectedDay.collectAsStateWithLifecycle()
     val plans by viewModel.plans.collectAsStateWithLifecycle()
     val now by viewModel.now.collectAsStateWithLifecycle()
@@ -215,9 +220,10 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
     val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
     val pspStates by viewModel.psp.collectAsStateWithLifecycle()
-    // Tailscale is being checked: the Anténa rows come back once it answers (spec/apps.md T18).
-    val checking by viewModel.tailnetChecking.collectAsStateWithLifecycle()
-    val connecting = checking && dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB)
+    // Tailscale is not Running yet or being checked: the Anténa rows come back once it answers (spec/apps.md T21, T18).
+    val tailnetNotice by viewModel.tailnetNotice.collectAsStateWithLifecycle()
+    val notice = tailnetNotice?.takeIf { prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) }
+    val connecting = notice != null
     PspPolling(viewModel)
     val today = Days.today(now)
 
@@ -286,7 +292,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         Spacer(Modifier.height(8.dp))
         DetailPanel(selection, now, appButton, onOpenApp, images, imageOf)
         Spacer(Modifier.height(8.dp))
-        if (connecting) Text(TailnetStatus.CONNECTING, color = Palette.textDim)
+        if (notice != null) Text(notice, color = Palette.textDim)
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
             is Load.Failed -> CenteredMessage(plan.message) {
@@ -299,8 +305,8 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                     guideRows(plan.value, ChannelOrder.visible(prefs, dvbChannels), dvbPlan, day)
                 }
                 // Anténa on but its channels not loaded yet: not "everything hidden".
-                val antennaPending = dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
-                    dvbChannels.isEmpty() && (dvb?.error == null || connecting)
+                val antennaPending = connecting || dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
+                    dvbChannels.isEmpty() && dvb?.error == null
                 if (rows.isEmpty() && !antennaPending) {
                     CenteredMessage(stringResource(R.string.channels_all_hidden))
                 } else if (rows.all { it.entries.isEmpty() }) {
@@ -354,7 +360,7 @@ fun GuideScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
             // The page stays under the player (spec/apps.md).
             onPlay = { request ->
                 selection.notice = null
-                onPlay(request)
+                onPlayCard(request, entry.resumeCard(imageOf(entry)?.url))
             },
             onOpenApp = onOpenApp,
             onDismiss = {

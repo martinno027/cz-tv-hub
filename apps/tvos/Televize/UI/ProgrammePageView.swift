@@ -264,7 +264,7 @@ struct ProgrammePageView: View {
 }
 
 /// TMDb's logo (spec/assets/tmdb-logo-short.svg, copied into the asset catalog), small: less prominent than the app.
-private struct TMDBLogo: View {
+struct TMDBLogo: View {
     var body: some View {
         Image("TMDBLogo")
             .resizable()

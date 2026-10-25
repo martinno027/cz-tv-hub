@@ -12,6 +12,15 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
   záznamu. Budoucí a nedostupné pořady tlačítko nemají, stav řekne proč. S bránou, která má zapnuté podrobnosti
   z TMDB, přibude plakát, rok, „Hodnocení TMDB 7,4 (1 234 hlasů)“, původní název a dole věta o TMDB. Zpět vrátí
   průvodce na stejné místo. Nedostupné pořady jsou v mřížce ztlumené.
+- **Archiv** (potřebuje bránu; bez ní jen řekne, kde ji nastavit): nahoře hledání (klávesnice televize, výsledky
+  půl sekundy po dopsání, aspoň 2 znaky), pod ním řady **Pokračovat ve sledování** (rozkoukané pořady z této
+  televize, nejnovější první; podržené OK nabídne „Odebrat z řady“), **Naše nahrávky** a kategorie iVysílání.
+  Konec řady („Vše ›“) otevře celou kategorii s podžánry, řazením a dalšími stránkami. Karta otevře stránku pořadu:
+  film má **Přehrát** / **Pokračovat od …**, seriál řady a díly (rozkoukaný díl: OK pokračuje, podržené OK nabídne
+  „Přehrát od začátku“), „Nahráno z antény“ jsou naše nahrávky. Když iVysílání neodpovídá, nad řadami je text brány
+  a naše nahrávky zůstanou. Díly
+  z iVysílání hrají jako archiv v průvodci (bez práv ukáže text ČT), naše nahrávky v přehrávači antény. Zpět
+  vrací po krocích. S údaji z TMDB je dole logo a věta o TMDB.
 - **Poslanecká sněmovna**: pět veřejných přímých přenosů Poslanecké sněmovny PČR (schůze, tiskové konference,
   výbory a semináře), jen živě: nic se nenahrává, žádné „Od začátku“ ani „Pokračovat“. Karta v Živě ukazuje
   červené **● ŽIVĚ**, ztlumené „Nevysílá se“ nebo „Zjišťuji…“; zjišťuje se jen při otevřeném Živě nebo průvodci,
@@ -80,8 +89,10 @@ a ukládání profilu selže jako při nedostupné bráně (stav „Čeká na ul
 Výchozí seznam kanálů domácnosti (`/dvb/defaults`) má ukázka v paměti (ČT24 první, ČT art skrytý, verze 1);
 `?demo&defaults=none` = bez výchozího seznamu. Novější verzi lze nastavit v konzoli (`CT.Demo.defaults`) a otevřít
 Nastavení. Stránka pořadu dostane v ukázce podrobnosti z paměti: anténní pořady „Film: …“ mají vymyšlenou shodu
-(hodnocení, původní název, vygenerovaný plakát), ostatní pořady shodu nemají. Ukázka si pamatuje stav v
-`localStorage` prohlížeče; čistý start = `localStorage.clear()`.
+(hodnocení, původní název, vygenerovaný plakát), ostatní pořady shodu nemají. Archiv odpovídá ze sdílených
+vzorků `spec/fixtures/dvb/dvb_archive_*.json`, a dokud nejsou, z vymyšlených pořadů v paměti (`?demo&archive=memory`
+je použije vždy, `?demo&archive=ctdown` předvede nedostupné iVysílání): kategorie mají 3 stránky, seriály 3 řady a „Nahráno z antény“, jejíž první díl otevře ukázkovou
+lištu antény. Ukázka si pamatuje stav v `localStorage` prohlížeče; čistý start = `localStorage.clear()`.
 
 ## Instalace do televize (bez obchodu Samsung)
 

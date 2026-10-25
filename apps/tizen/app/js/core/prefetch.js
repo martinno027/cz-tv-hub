@@ -128,14 +128,18 @@
     return null;
   };
 
-  /** Replaces what waits with `requests` (nearest first); requests already running finish. */
+  /**
+   * Replaces what waits with `requests` (nearest first); requests already running finish. Waiting requests marked
+   * `keep` (the Archiv cards on screen, not part of the guide's window) stay in front.
+   */
   ImageLoader.prototype.prefetch = function (requests) {
     var self = this;
     this.inWindow = {};
     requests.forEach(function (r) { self.inWindow[r.key] = true; });
-    this.queue = requests.filter(function (r) { return self.needed(r); }).map(function (r) {
+    var kept = this.queue.filter(function (q) { return q.request.keep; });
+    this.queue = kept.concat(requests.filter(function (r) { return self.needed(r); }).map(function (r) {
       return { key: r.key, kind: r.kind, final: r.final, request: r, done: null };
-    });
+    }));
     this.pump();
   };
 

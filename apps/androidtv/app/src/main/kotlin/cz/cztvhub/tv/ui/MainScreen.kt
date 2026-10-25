@@ -52,21 +52,24 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 
 @Composable
-fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
+fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: PlayWithCard) {
+    val play: (PlayRequest) -> Unit = remember(onPlay) { { onPlay(it, null) } }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     // An open Nastavení section is full screen: no tab row (spec/apps.md).
     var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     val tabs = listOf(
         stringResource(R.string.tab_live),
         stringResource(R.string.tab_guide),
+        stringResource(R.string.tab_archive),
         stringResource(R.string.tab_settings),
     )
 
-    val numbers = rememberNumberKeys(viewModel, onPlay)
+    val numbers = rememberNumberKeys(viewModel, play)
     val notice by viewModel.notice.collectAsStateWithLifecycle()
 
     CompositionLocalProvider(LocalContentColor provides Palette.text) {
-    Box(Modifier.fillMaxSize().onPreviewKeyEvent { tab != 2 && numbers.onKey(it.nativeKeyEvent) }) {
+    // Number keys zap on Živě and the guide only (the archive's search field takes digits).
+    Box(Modifier.fillMaxSize().onPreviewKeyEvent { tab <= 1 && numbers.onKey(it.nativeKeyEvent) }) {
     Column(
         Modifier
             .fillMaxSize()
@@ -75,7 +78,7 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     ) {
         // The tab row, or an open section's title in its place; the clock stays top right on both (spec/apps.md
         // "Clock"), at the height the tab row had.
-        val section = settingsSection.takeIf { tab == 2 }
+        val section = settingsSection.takeIf { tab == SETTINGS_TAB }
         val density = LocalDensity.current
         var tabRowHeight by remember { mutableIntStateOf(0) }
         Row(
@@ -108,8 +111,9 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
         }
         Spacer(Modifier.height(12.dp))
         when (tab) {
-            0 -> LiveScreen(viewModel, onPlay)
-            1 -> GuideScreen(viewModel, onPlay)
+            0 -> LiveScreen(viewModel, play)
+            1 -> GuideScreen(viewModel, play, onPlay)
+            2 -> ArchiveScreen(archive, viewModel, onPlay)
             else -> SettingsScreen(viewModel, settingsSection) { settingsSection = it }
         }
     }
@@ -130,6 +134,8 @@ fun MainScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     }
     }
 }
+
+private const val SETTINGS_TAB = 3
 
 /** Number keys on Živě and the guide start that channel live (spec/apps.md "Channel numbers and zapping"). */
 private class NumberKeys(private val entry: DigitEntry) {

@@ -12,7 +12,9 @@ Showing the channel again reverses the switches (recordings start with the next 
 already offered channel repairs its reception (services / multiplex switched off elsewhere).
 
 The tab "Výchozí kanály" edits the household default channel list (``defaults.py``); "Použít jako výchozí" on
-the tab "Profily" copies a profile's list into it once.
+the tab "Profily" copies a profile's list into it once. The tab "TMDb" shows the TMDb store (``tmdbstore.py``)
+read-only and paginated, with refresh / delete per entry, delete all and the refresh period; every change is
+logged (``admin: tmdb: …``). The store is never downloadable.
 
 Login: HTTP Basic, user ``admin``, ``[admin] password``. State-changing requests must carry the
 ``X-Cztvhub-Admin`` header (a cross-site page cannot send it without a CORS preflight, which this
@@ -31,7 +33,9 @@ from typing import Any, Callable, Mapping
 from .. import channels as ct_channels
 from ..config import Config
 from . import defaults as dflt
+from . import details as tmdb
 from . import epg
+from . import tmdbstore
 from .gateway import DvbGateway, Response, error, json_response
 from .profiles import ProfileError, parse_body
 from .setup import RULE_COMMENT, apply_setup, plan_setup, recording_set_up
@@ -40,6 +44,8 @@ from .tvheadend import MUX_DISABLE, MUX_ENABLE, Channel, TvheadendClient, TvhErr
 ADMIN_USER = "admin"
 CHANNEL_RE = re.compile(r"^/admin/api/channels/([A-Za-z0-9_-]{1,64})$")
 PROFILE_RE = re.compile(r"^/admin/api/profiles/([0-9a-f]{16})$")
+TMDB_PATH = "/admin/api/tmdb"
+TMDB_KEY_MAX = 600  # a store key: ["kind", year, "cleaned title"]
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BULK = 500
 MAX_NAME = 64
@@ -225,7 +231,8 @@ class AdminSite:
         self.gateway = gateway
         self.admin = admin or ChannelAdmin(cfg, gateway.client, gateway.log, gateway.now)
 
-    def handle(self, method: str, path: str, headers: Mapping[str, str], body: bytes = b"") -> Response:
+    def handle(self, method: str, path: str, headers: Mapping[str, str], body: bytes = b"",
+               query: Mapping[str, str] | None = None) -> Response:
         if not self._authorized(headers.get("Authorization") or ""):
             return Response(401, "Přihlaste se jménem admin.\n".encode("utf-8"), "text/plain; charset=utf-8",
                             {"WWW-Authenticate": 'Basic realm="cz-tv-hub admin", charset="UTF-8"',
@@ -259,8 +266,14 @@ class AdminSite:
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
                 return self._defaults(body)
+            if method == "GET" and path == TMDB_PATH:
+                return self._tmdb_overview((query or {}).get("page"))
+            if method == "POST" and path == TMDB_PATH:
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._tmdb(body)
             if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles") \
-                    or path == "/admin/api/defaults":
+                    or path in ("/admin/api/defaults", TMDB_PATH):
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -452,6 +465,85 @@ class AdminSite:
             return json_response(exc.status, exc.payload(), exc.headers)
         return json_response(200, doc)
 
+    # -- tab "TMDb" (tmdbstore.py) ---------------------------------------------------------
+    def _tmdb_overview(self, page_param: str | None) -> Response:
+        """The store, read-only: one page of entries by title, the refresh period and its warning."""
+        details = self.gateway.details
+        months = self.gateway.tmdb_months()
+        doc: dict[str, Any] = {"enabled": details is not None, "months": months,
+                               "licenceMonths": tmdbstore.LICENCE_MONTHS,
+                               "warning": tmdbstore.WARNING if months > tmdbstore.LICENCE_MONTHS else None}
+        if details is None:
+            return json_response(200, {**doc, "total": 0, "page": 1, "pages": 1, "entries": []})
+        try:
+            page = int(page_param or "1")
+        except ValueError:
+            page = 0
+        if not 1 <= page <= 100000:
+            return error(400, "Neplatná stránka")
+        store = details.store
+        entries = store.page(page)
+        total = len(store)
+        pages = max(1, -(-total // tmdbstore.PAGE_SIZE))
+        return json_response(200, {**doc, "total": total, "page": page, "pages": pages,
+                                   "entries": [self._tmdb_row(e, store) for e in entries]})
+
+    @staticmethod
+    def _tmdb_row(entry: tmdbstore.Entry, store: tmdbstore.TmdbStore) -> dict:
+        return {"key": entry.key, "title": entry.title, "kind": entry.kind, "year": entry.year,
+                "match": entry.matched, "matchKind": entry.match_kind, "tmdbId": entry.tmdb_id,
+                "rating": entry.rating, "genres": list(entry.genres), "matchYear": entry.match_year,
+                "fetchedAt": epg.iso(int(entry.fetched_at)),
+                "deleteAt": epg.iso(int(min(entry.fetched_at + store.max_age, 253402300799)))}
+
+    def _tmdb(self, body: bytes) -> Response:
+        """``POST /admin/api/tmdb`` {"months": N} | {"refresh": key} | {"delete": key} | {"deleteAll": true}."""
+        try:
+            payload = parse_body(body, 2048)
+        except ProfileError as exc:
+            return json_response(exc.status, exc.payload(), exc.headers)
+        details = self.gateway.details
+        if "months" in payload:
+            months = payload["months"]
+            if not isinstance(months, int) or isinstance(months, bool) or not 1 <= months <= tmdbstore.MAX_MONTHS:
+                return error(400, "Počet měsíců musí být kladné celé číslo")
+            self.gateway.settings.update(**{tmdbstore.SETTING: months})
+            removed = details.store.purge() if details is not None else 0
+            self.gateway.log(f"admin: tmdb: refresh after {months} month(s)"
+                             + (f", deleted {removed} older entr{'y' if removed == 1 else 'ies'}" if removed else ""))
+            return self._tmdb_overview("1")
+        if details is None:
+            return error(404, "TMDb není zapnuté (chybí [tmdb] key)")
+        store = details.store
+        if payload.get("deleteAll") is True:
+            removed = store.delete_all()
+            self.gateway.log(f"admin: tmdb: delete all ({removed} entr{'y' if removed == 1 else 'ies'})")
+            return json_response(200, {"deleted": removed})
+        for action in ("refresh", "delete"):
+            key = payload.get(action)
+            if key is None:
+                continue
+            if not isinstance(key, str) or not 0 < len(key) <= TMDB_KEY_MAX:
+                return error(400, "Neplatný záznam")
+            if action == "delete":
+                entry = store.delete(key)
+                if entry is None:
+                    return error(404, "Záznam nenalezen")
+                self.gateway.log(f"admin: tmdb: delete {entry.title}")
+                return json_response(200, {"deleted": 1})
+            entry = store.get(key)
+            if entry is None:
+                return error(404, "Záznam nenalezen")
+            try:  # the stored, cleaned title is all that goes to TMDb
+                match = details.refresh(tmdb.Query(entry.title, entry.year, entry.kind))
+            except tmdb.TmdbError as exc:
+                self.gateway.log(f"admin: tmdb: refresh {entry.title}: failed ({exc})")
+                return error(502, exc.user_message)
+            self.gateway.log(f"admin: tmdb: refresh {entry.title}: {'match' if match else 'no match'}")
+            refreshed = store.get(key)
+            return json_response(200, {"entry": self._tmdb_row(refreshed, store) if refreshed else None})
+        return error(400, 'Očekávám {"months": N}, {"refresh": "…"}, {"delete": "…"} nebo {"deleteAll": true}')
+
     def _rename(self, channel_id: str | None, payload: dict) -> Response:
         raw = {channel_id: payload.get("name")} if channel_id else payload.get("names")
         if not isinstance(raw, dict) or not 0 < len(raw) <= MAX_BULK or \
@@ -580,6 +672,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
   <button role="tab" id="tab-storage" aria-selected="false">Přehled nahrávek</button>
   <button role="tab" id="tab-profiles" aria-selected="false">Profily</button>
   <button role="tab" id="tab-defaults" aria-selected="false">Výchozí kanály</button>
+  <button role="tab" id="tab-tmdb" aria-selected="false">TMDb</button>
 </div>
 <p class="legal">Nahrávání je soukromá kopie jen pro tuto domácnost. Záznam zůstává na disku tohoto Raspberry, maže se
 automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostatku místa a nelze ho stáhnout ani sdílet.</p>
@@ -622,6 +715,26 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
   nebo vypne zdroj, má televize vlastní seznam; „Obnovit výchozí pořadí“ ji vrátí k tomuto. Profil se tímto nemění
   a výchozí seznam nesleduje změny profilu („Použít jako výchozí“ v záložce Profily ho jednou zkopíruje).
   Zrušit výchozí vrátí televize k vestavěnému pořadí.</p>
+</section>
+<section id="tmdb" hidden>
+  <p class="sub" id="tmdb-state"></p>
+  <form id="tmdb-months-form" class="setting">
+    <label for="tmdb-months">Obnovit údaje z TMDb po</label>
+    <input id="tmdb-months" type="number" min="1" step="1" inputmode="numeric" style="width: 7em">
+    <span>měsících</span> <button type="submit">Uložit</button>
+  </form>
+  <p class="warn" id="tmdb-warning" hidden></p>
+  <table><thead><tr><th>Název</th><th>Shoda</th><th class="n">Hodnocení</th><th>Žánry</th><th class="n">Rok</th>
+    <th>Získáno</th><th>Smaže se</th><th></th></tr></thead><tbody id="tmdb-rows"></tbody></table>
+  <div class="dactions">
+    <button id="tmdb-prev">Předchozí</button> <span class="meta" id="tmdb-pages"></span> <button id="tmdb-next">Další</button>
+    <span id="tmdb-all"></span>
+  </div>
+  <p class="help">Údaje z TMDb (shoda, hodnocení, žánry, rok, plakát) pro stránku pořadu a archiv. Raspberry se TMDb
+  ptá jen na očištěný název pořadu, který archiv nebo otevřená stránka ukazuje, nikdy na nic, co kdo napíše do
+  hledání. Záznam se obnoví, dokud ho archiv ukazuje, a smaže se po nastaveném počtu měsíců od získání. Seznam se
+  nedá stáhnout ani exportovat. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or
+  otherwise approved by TMDB.</p>
 </section>
 <section id="channels">
 <label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
@@ -679,7 +792,7 @@ function api(method, path, body) {
   });
 }
 
-var TABS = ["channels", "storage", "profiles", "defaults"];
+var TABS = ["channels", "storage", "profiles", "defaults", "tmdb"];
 function showTab(name) {
   TABS.forEach(function (t) {
     document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
@@ -688,9 +801,87 @@ function showTab(name) {
   if (name === "storage") loadStorage();
   if (name === "profiles") loadProfiles();
   if (name === "defaults" && !dfltDirty) loadDefaults();  // unsaved edits survive a look at another tab
+  if (name === "tmdb") loadTmdb(tmdbPage);
 }
 TABS.forEach(function (t) {
   document.getElementById("tab-" + t).addEventListener("click", function () { showTab(t); });
+});
+
+var tmdbPage = 1, tmdbConfirm = null;
+function months(n) { return n + " " + plural(n, "měsíc", "měsíce", "měsíců"); }
+function entries(n) { return n + " " + plural(n, "záznam", "záznamy", "záznamů"); }
+function loadTmdb(page) {
+  return api("GET", "/admin/api/tmdb?page=" + page).then(function (data) {
+    tmdbPage = data.page;
+    document.getElementById("tmdb-state").textContent = data.enabled
+      ? "Uloženo " + entries(data.total) + ", obnova po " + months(data.months) + "."
+      : "TMDb je vypnuté (v konfiguraci chybí [tmdb] key), nic se neukládá.";
+    var input = document.getElementById("tmdb-months");
+    if (document.activeElement !== input) input.value = String(data.months);
+    var warning = document.getElementById("tmdb-warning");
+    warning.hidden = !data.warning;
+    warning.textContent = data.warning || "";
+    var body = document.getElementById("tmdb-rows");
+    body.textContent = "";
+    if (!data.entries.length) {
+      var tr = el("tr"), td = el("td", null, "Žádné uložené údaje.");
+      td.colSpan = 8; tr.appendChild(td); body.appendChild(tr);
+    }
+    data.entries.forEach(function (e) {
+      var tr = el("tr");
+      tr.appendChild(el("td", "name", e.title + (e.year ? " (" + e.year + ")" : "")));
+      tr.appendChild(el("td", null, e.match ? (e.matchKind === "movie" ? "film" : "seriál") + " #" + e.tmdbId : "bez shody"));
+      tr.appendChild(el("td", "n", e.rating ? String(e.rating.value).replace(".", ",") + " (" + e.rating.votes + ")" : "–"));
+      tr.appendChild(el("td", null, e.genres.join(", ") || "–"));
+      tr.appendChild(el("td", "n", e.matchYear ? String(e.matchYear) : "–"));
+      tr.appendChild(el("td", null, when(e.fetchedAt)));
+      tr.appendChild(el("td", null, when(e.deleteAt)));
+      var cell = el("td", "confirm");
+      if (tmdbConfirm === e.key) {
+        var yes = el("button", "danger", "Smazat"), no = el("button", null, "Zpět");
+        yes.addEventListener("click", function () { tmdbConfirm = null; tmdbAction({"delete": e.key}, "Smazáno: " + e.title); });
+        no.addEventListener("click", function () { tmdbConfirm = null; loadTmdb(tmdbPage); });
+        cell.appendChild(yes); cell.appendChild(no);
+      } else {
+        var refresh = el("button", null, "Obnovit"), del = el("button", null, "Smazat");
+        refresh.addEventListener("click", function () { tmdbAction({refresh: e.key}, "Obnoveno: " + e.title); });
+        del.addEventListener("click", function () { tmdbConfirm = e.key; loadTmdb(tmdbPage); });
+        cell.appendChild(refresh); cell.appendChild(del);
+      }
+      tr.appendChild(cell);
+      body.appendChild(tr);
+    });
+    document.getElementById("tmdb-pages").textContent = "strana " + data.page + " z " + data.pages;
+    document.getElementById("tmdb-prev").disabled = data.page <= 1;
+    document.getElementById("tmdb-next").disabled = data.page >= data.pages;
+    var all = document.getElementById("tmdb-all");
+    all.textContent = "";
+    if (tmdbConfirm === "*") {
+      all.appendChild(el("span", null, "Smazat všechny uložené údaje z TMDb? "));
+      var yesAll = el("button", "danger", "Smazat vše"), noAll = el("button", null, "Zpět");
+      yesAll.addEventListener("click", function () { tmdbConfirm = null; tmdbAction({deleteAll: true}, "Údaje z TMDb jsou smazané."); });
+      noAll.addEventListener("click", function () { tmdbConfirm = null; loadTmdb(tmdbPage); });
+      all.appendChild(yesAll); all.appendChild(noAll);
+    } else if (data.enabled && data.total) {
+      var delAll = el("button", null, "Smazat vše");
+      delAll.addEventListener("click", function () { tmdbConfirm = "*"; loadTmdb(tmdbPage); });
+      all.appendChild(delAll);
+    }
+  }, function (e) { say("Údaje z TMDb se nepodařilo načíst: " + e.message, true); });
+}
+function tmdbAction(body, done) {
+  api("POST", "/admin/api/tmdb", body).then(function () { say(done); },
+    function (e) { say(e.message, true); }).then(function () { loadTmdb(tmdbPage); });
+}
+document.getElementById("tmdb-prev").addEventListener("click", function () { loadTmdb(Math.max(1, tmdbPage - 1)); });
+document.getElementById("tmdb-next").addEventListener("click", function () { loadTmdb(tmdbPage + 1); });
+document.getElementById("tmdb-months-form").addEventListener("submit", function (ev) {
+  ev.preventDefault();
+  var n = Number(document.getElementById("tmdb-months").value);
+  if (!(n >= 1) || Math.floor(n) !== n) { say("Zadejte kladné celé číslo měsíců.", true); return; }
+  api("POST", "/admin/api/tmdb", {months: n}).then(function (data) {
+    say("Údaje z TMDb se obnoví po " + months(data.months) + "." + (data.warning ? " " + data.warning : ""));
+  }, function (e) { say(e.message, true); }).then(function () { loadTmdb(1); });
 });
 
 function tvs(n) { return n + " " + plural(n, "televize", "televize", "televizí"); }

@@ -47,6 +47,7 @@ import cz.cztvhub.core.PlayTarget
 import cz.cztvhub.core.PspMessages
 import cz.cztvhub.core.PspState
 import cz.cztvhub.core.PspStreams
+import cz.cztvhub.core.ResumeCard
 import cz.cztvhub.core.ResumeRules
 import cz.cztvhub.core.ResumeSpot
 import cz.cztvhub.core.dvb.AdBreak
@@ -106,6 +107,13 @@ class PlayerActivity : ComponentActivity() {
 
     /** Where progress is remembered for "Pokračovat"; null for live. */
     private var spot: ResumeSpot? = null
+
+    /**
+     * What the archive's "Pokračovat ve sledování" row keeps with the entry of the programme opened (T13, its key
+     * [cardKey]); null = keep the stored one.
+     */
+    private var card: ResumeCard? = null
+    private var cardKey: String? = null
     private var progressJob: Job? = null
 
     /** Pending start-over seek, applied once the live window is known. */
@@ -155,6 +163,8 @@ class PlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         request = PlayRequests.from(intent) ?: return finish()
         spot = ResumeRules.spot(request)
+        card = PlayRequests.card(intent)
+        cardKey = (request as? PlayRequest.DvbRecorded)?.let { ResumeRules.dvbKey(it.recordingId) } ?: spot?.key
         zapChannels = PlayRequests.channels(intent)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -558,7 +568,7 @@ class PlayerActivity : ComponentActivity() {
         if (isTimeline) return saveTimelineProgress()
         val remembered = spot ?: return
         val seconds = progressSeconds(remembered) ?: return
-        tvApp.resume.save(remembered.key, seconds, remembered.lengthSeconds)
+        tvApp.resume.save(remembered.key, seconds, remembered.lengthSeconds, card?.takeIf { remembered.key == cardKey })
     }
 
     /**
@@ -706,7 +716,19 @@ class PlayerActivity : ComponentActivity() {
         val time = playheadTime() ?: return
         val remembered = TimelineRules.resumeSpot(t.programmes, time) ?: return
         val start = remembered.start ?: return
-        tvApp.resume.save(remembered.key, TimelineRules.resumeProgress(start, time), remembered.lengthSeconds)
+        // The programme the viewer opened keeps its card; one the playhead moved into gets its own titles.
+        val opened = card?.takeIf { remembered.key == cardKey }
+        val programme = TimelineRules.programmeAt(t.programmes, time)?.let { t.programmes[it] }
+        val saved = opened ?: programme?.takeIf { it.title.isNotBlank() }?.let {
+            ResumeCard(
+                title = it.subtitle.ifBlank { it.title },
+                showTitle = it.title.takeIf { _ -> it.subtitle.isNotBlank() },
+                source = ResumeRules.source(remembered.key),
+                start = it.start,
+                channelId = request.channelId.ifBlank { null },
+            )
+        }
+        tvApp.resume.save(remembered.key, TimelineRules.resumeProgress(start, time), remembered.lengthSeconds, saved)
     }
 
     /** Shows the bar for [BAR_MS]; it stays while paused, while a seek is chosen and across a window switch. */

@@ -1,0 +1,213 @@
+{
+ "status": 200,
+ "body": {
+  "rows": [
+   {
+    "id": "recordings",
+    "title": "Naše nahrávky",
+    "cards": [
+     {
+      "id": "rec:zahradniserial",
+      "source": "rec",
+      "title": "Zahradní seriál",
+      "kind": "series",
+      "image": "/dvb/recording/b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792294200-1792296900/thumb.jpg",
+      "rating": null,
+      "genres": [
+       "Film / drama"
+      ],
+      "episodeCount": 1,
+      "tmdb": false
+     },
+     {
+      "id": "rec:tichahora",
+      "source": "rec",
+      "title": "Tichá hora",
+      "kind": "movie",
+      "year": 2015,
+      "image": "/dvb/recording/b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792287000-1792292400/thumb.jpg",
+      "rating": {
+       "value": 7.1,
+       "votes": 250
+      },
+      "genres": [
+       "Drama",
+       "Historický"
+      ],
+      "durationMinutes": 90,
+      "tmdb": true
+     },
+     {
+      "id": "rec:dilnapananovaka",
+      "source": "rec",
+      "title": "Dílna pana Nováka",
+      "kind": "series",
+      "image": "/dvb/recording/b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792285200-1792287000/thumb.jpg",
+      "rating": null,
+      "genres": [
+       "Volný čas"
+      ],
+      "episodeCount": 2,
+      "tmdb": false
+     }
+    ],
+    "more": false
+   },
+   {
+    "id": "3947-filmy",
+    "title": "Filmy",
+    "cards": [
+     {
+      "id": "ct:10000000002",
+      "source": "ct",
+      "title": "Noční vlak",
+      "kind": "movie",
+      "year": 2019,
+      "image": "https://img.example.invalid/archive/card/10000000002.jpg",
+      "rating": {
+       "value": 6.4,
+       "votes": 80
+      },
+      "genres": [
+       "Drama"
+      ],
+      "durationMinutes": 98,
+      "tmdb": true
+     },
+     {
+      "id": "rec:tichahora",
+      "source": "rec",
+      "title": "Tichá hora",
+      "kind": "movie",
+      "year": 2015,
+      "image": "/dvb/recording/b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792287000-1792292400/thumb.jpg",
+      "rating": {
+       "value": 7.1,
+       "votes": 250
+      },
+      "genres": [
+       "Drama",
+       "Historický"
+      ],
+      "durationMinutes": 90,
+      "tmdb": true
+     }
+    ],
+    "more": false
+   },
+   {
+    "id": "3976-serialy",
+    "title": "Seriály",
+    "cards": [
+     {
+      "id": "ct:10000000001",
+      "source": "both",
+      "title": "Zahradní seriál",
+      "kind": "series",
+      "image": "https://img.example.invalid/archive/card/10000000001.jpg",
+      "rating": null,
+      "genres": [
+       "Komedie"
+      ],
+      "episodeCount": 52,
+      "tmdb": false
+     },
+     {
+      "id": "ct:10000000003",
+      "source": "ct",
+      "title": "Kuchyně u sousedů",
+      "kind": "series",
+      "image": "https://img.example.invalid/archive/card/10000000003.jpg",
+      "rating": null,
+      "genres": [],
+      "episodeCount": 12,
+      "tmdb": false
+     }
+    ],
+    "more": false
+   },
+   {
+    "id": "4003-dokumenty",
+    "title": "Dokumenty",
+    "cards": [
+     {
+      "id": "ct:10000000004",
+      "source": "ct",
+      "title": "Příběh řeky",
+      "kind": "series",
+      "image": "https://img.example.invalid/archive/card/10000000004.jpg",
+      "rating": null,
+      "genres": [],
+      "episodeCount": 6,
+      "tmdb": false
+     }
+    ],
+    "more": false
+   },
+   {
+    "id": "4079-historie",
+    "title": "Historie",
+    "cards": [
+     {
+      "id": "rec:tichahora",
+      "source": "rec",
+      "title": "Tichá hora",
+      "kind": "movie",
+      "year": 2015,
+      "image": "/dvb/recording/b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792287000-1792292400/thumb.jpg",
+      "rating": {
+       "value": 7.1,
+       "votes": 250
+      },
+      "genres": [
+       "Drama",
+       "Historický"
+      ],
+      "durationMinutes": 90,
+      "tmdb": true
+     }
+    ],
+    "more": false
+   },
+   {
+    "id": "4106-priroda",
+    "title": "Příroda",
+    "cards": [
+     {
+      "id": "ct:10000000004",
+      "source": "ct",
+      "title": "Příběh řeky",
+      "kind": "series",
+      "image": "https://img.example.invalid/archive/card/10000000004.jpg",
+      "rating": null,
+      "genres": [],
+      "episodeCount": 6,
+      "tmdb": false
+     }
+    ],
+    "more": false
+   },
+   {
+    "id": "4055-rady-a-recepty",
+    "title": "Rady a recepty",
+    "cards": [
+     {
+      "id": "rec:dilnapananovaka",
+      "source": "rec",
+      "title": "Dílna pana Nováka",
+      "kind": "series",
+      "image": "/dvb/recording/b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792285200-1792287000/thumb.jpg",
+      "rating": null,
+      "genres": [
+       "Volný čas"
+      ],
+      "episodeCount": 2,
+      "tmdb": false
+     }
+    ],
+    "more": false
+   }
+  ],
+  "attribution": "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB."
+ }
+}

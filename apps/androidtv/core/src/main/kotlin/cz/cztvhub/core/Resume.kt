@@ -1,5 +1,10 @@
 package cz.cztvhub.core
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.time.Duration
 import java.time.Instant
 
@@ -22,6 +27,9 @@ object ResumeRules {
     const val MAX_ENTRIES = 200
     const val MAX_AGE_DAYS = 30L
 
+    /** Cards in the archive's "Pokračovat ve sledování" row. */
+    const val ROW_SIZE = 20
+
     fun action(progressSeconds: Double, lengthSeconds: Double): ResumeAction = when {
         progressSeconds >= lengthSeconds - END_MARGIN_SECONDS -> ResumeAction.CLEAR
         progressSeconds >= MIN_SECONDS -> ResumeAction.OFFER
@@ -37,6 +45,19 @@ object ResumeRules {
         fun two(n: Long) = n.toString().padStart(2, '0')
         return if (h > 0) "$h:${two(m)}:${two(s)}" else "$m:${two(s)}"
     }
+
+    /**
+     * The archive's "Pokračovat ve sledování" row (golden `archive_cases.json` "continueRow"): entries with a card
+     * title, newest first, at most [ROW_SIZE].
+     */
+    fun continueRow(entries: Map<String, ResumeEntry>): List<ContinueItem> = entries
+        .filter { it.value.card != null }
+        .map { ContinueItem(it.key, it.value) }
+        .sortedByDescending { it.entry.savedAt }
+        .take(ROW_SIZE)
+
+    /** `ct` / `dvb` of a resume key, as stored with its card. */
+    fun source(key: String): String = key.substringBefore(':')
 
     fun ctKey(idec: String): String = "ct:$idec"
 
@@ -70,12 +91,47 @@ object ResumeRules {
 /** A remembered programme: [key] in the store, its [start] (CT, for wall-clock progress) and length. */
 data class ResumeSpot(val key: String, val start: Instant?, val lengthSeconds: Double)
 
-/** One remembered position. */
-data class ResumeEntry(val progressSeconds: Double, val lengthSeconds: Double, val savedAt: Instant) {
-    fun encode(): String = "$progressSeconds;$lengthSeconds;${savedAt.toEpochMilli()}"
+/**
+ * What the "Pokračovat ve sledování" row shows of an entry (spec/apps.md "Archiv", T13), kept on the device only:
+ * [title] (programme or episode), [showTitle], [image] (a card image URL or a gateway path, never a full gateway
+ * URL) and [source] (`ct` / `dvb`). [start] and [channelId] let the row play a CT programme by the decision rules
+ * (within 3 h of its start from the channel's buffer), as the guide would.
+ */
+data class ResumeCard(
+    val title: String,
+    val showTitle: String? = null,
+    val image: String? = null,
+    val source: String,
+    val start: Instant? = null,
+    val channelId: String? = null,
+)
+
+/** One remembered position; [card] null for entries saved before T13 (left out of the row). */
+data class ResumeEntry(
+    val progressSeconds: Double,
+    val lengthSeconds: Double,
+    val savedAt: Instant,
+    val card: ResumeCard? = null,
+) {
+    /** The pre-T13 `progress;length;savedAt` without a card, JSON with one (titles can hold any character). */
+    fun encode(): String {
+        val card = card ?: return "$progressSeconds;$lengthSeconds;${savedAt.toEpochMilli()}"
+        return buildJsonObject {
+            put("progress", progressSeconds)
+            put("length", lengthSeconds)
+            put("savedAt", savedAt.toEpochMilli())
+            put("title", card.title)
+            card.showTitle?.let { put("showTitle", it) }
+            card.image?.let { put("image", it) }
+            put("source", card.source)
+            card.start?.let { put("start", it.toEpochMilli()) }
+            card.channelId?.let { put("channel", it) }
+        }.toString()
+    }
 
     companion object {
         fun decode(text: String): ResumeEntry? {
+            if (text.startsWith("{")) return decodeJson(text)
             val parts = text.split(';')
             if (parts.size != 3) return null
             val progress = parts[0].toDoubleOrNull() ?: return null
@@ -83,7 +139,32 @@ data class ResumeEntry(val progressSeconds: Double, val lengthSeconds: Double, v
             val saved = parts[2].toLongOrNull() ?: return null
             return ResumeEntry(progress, length, Instant.ofEpochMilli(saved))
         }
+
+        private fun decodeJson(text: String): ResumeEntry? {
+            val o = try {
+                Json.parseToJsonElement(text) as? JsonObject
+            } catch (_: Exception) {
+                null
+            } ?: return null
+            fun str(key: String) = (o[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.ifEmpty { null }
+            fun num(key: String) = (o[key] as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toDoubleOrNull()
+            val progress = num("progress") ?: return null
+            val length = num("length") ?: return null
+            val saved = num("savedAt")?.toLong() ?: return null
+            val card = str("title")?.let { title ->
+                ResumeCard(
+                    title, str("showTitle"), str("image"), str("source").orEmpty(),
+                    num("start")?.toLong()?.let(Instant::ofEpochMilli), str("channel"),
+                )
+            }
+            return ResumeEntry(progress, length, Instant.ofEpochMilli(saved), card)
+        }
     }
+}
+
+/** A card of the "Pokračovat ve sledování" row: the resume [key] and its entry (with a card). */
+data class ContinueItem(val key: String, val entry: ResumeEntry) {
+    val card: ResumeCard get() = entry.card!!
 }
 
 /** Minimal persistent string map (SharedPreferences on the device, a map in tests). */
@@ -126,15 +207,29 @@ class ResumeStore(
      * Remember [progressSeconds]: stored when it can be offered, removed when watched; below the minimum an
      * existing entry is kept (starting over by mistake does not lose the resume point).
      */
-    fun save(key: String, progressSeconds: Double, lengthSeconds: Double) {
+    fun save(key: String, progressSeconds: Double, lengthSeconds: Double, card: ResumeCard? = null) {
         when (ResumeRules.action(progressSeconds, lengthSeconds)) {
             ResumeAction.CLEAR -> backend.remove(listOf(key))
             ResumeAction.NONE -> Unit
             ResumeAction.OFFER -> {
-                backend.put(key, ResumeEntry(progressSeconds, lengthSeconds, clock()).encode())
+                // A save without a card (e.g. the timeline's playhead moved into a programme) keeps the stored one.
+                val kept = card ?: entry(key)?.card
+                backend.put(key, ResumeEntry(progressSeconds, lengthSeconds, clock(), kept).encode())
                 prune()
             }
         }
+    }
+
+    /** "Pokračovat ve sledování": entries that can be offered and have a card, newest first, at most 20. */
+    fun continueRow(): List<ContinueItem> {
+        val now = clock()
+        val entries = backend.all().mapNotNull { (key, value) ->
+            val entry = ResumeEntry.decode(value) ?: return@mapNotNull null
+            if (isExpired(entry, now)) return@mapNotNull null
+            if (ResumeRules.action(entry.progressSeconds, entry.lengthSeconds) != ResumeAction.OFFER) return@mapNotNull null
+            key to entry
+        }.toMap()
+        return ResumeRules.continueRow(entries)
     }
 
     fun remove(key: String) = backend.remove(listOf(key))

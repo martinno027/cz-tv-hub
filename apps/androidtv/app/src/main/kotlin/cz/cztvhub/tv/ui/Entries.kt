@@ -12,7 +12,9 @@ import cz.cztvhub.core.ProgrammePage
 import cz.cztvhub.core.PspMessages
 import cz.cztvhub.core.PspState
 import cz.cztvhub.core.PspStream
+import cz.cztvhub.core.ResumeCard
 import cz.cztvhub.core.ResumeRules
+import cz.cztvhub.core.archive.ArchiveParser
 import cz.cztvhub.core.Timed
 import cz.cztvhub.core.dvb.DvbAction
 import cz.cztvhub.core.dvb.DvbChannel
@@ -194,6 +196,27 @@ private fun Entry.model(buttons: List<PageButton>, offer: Double?, request: (Pag
         buttons.map { PageAction(it, request(it)) },
         offer?.takeIf { PageButton.RESUME in buttons }?.let(ResumeRules::label),
     )
+
+/**
+ * What "Pokračovat ve sledování" keeps with the entry of a programme played from the guide (T13): the episode title
+ * when there is one under the programme's, [imageUrl] (the detail's image) only as ČT's `https://` URL, else for an
+ * Anténa recording its thumbnail as a gateway path (shown only where thumbnails are allowed). Null without a title.
+ */
+fun Entry.resumeCard(imageUrl: String?): ResumeCard? {
+    if (title.isBlank()) return null
+    val image = imageUrl?.takeIf { it.startsWith("https://") }
+    return when (this) {
+        is CtEntry -> ResumeCard(
+            subtitle.ifBlank { title }, title.takeIf { subtitle.isNotBlank() }, image, "ct", start, channel.id,
+        )
+        is DvbEntry -> ResumeCard(
+            subtitle.ifBlank { title }, title.takeIf { subtitle.isNotBlank() },
+            image ?: event.recording?.id?.let { "/dvb/recording/$it/thumb.jpg" }?.takeIf(ArchiveParser::isThumbnail),
+            "dvb", start, channel.id,
+        )
+        is PspEntry -> null
+    }
+}
 
 /** Live only: no resume, no start-over. */
 fun PspEntry.select(now: Instant, psp: PspState = PspState.UNKNOWN): Selection = when {

@@ -1,0 +1,275 @@
+{
+ "status": 200,
+ "body": {
+  "card": {
+   "id": "ct:10000000001",
+   "source": "both",
+   "title": "Zahradní seriál",
+   "kind": "series",
+   "image": "https://img.example.invalid/archive/card/10000000001.jpg",
+   "rating": null,
+   "genres": [
+    "Komedie"
+   ],
+   "episodeCount": 52,
+   "tmdb": false
+  },
+  "description": "Smyšlený seriál o jedné zahradě.",
+  "creators": "Režie: Jan Příklad. Hrají: Eva Vzorová, Petr Ukázka a další.",
+  "seasons": [
+   {
+    "id": "season:00000000000000000000aa01",
+    "title": "I. řada"
+   },
+   {
+    "id": "season:00000000000000000000aa02",
+    "title": "II. řada"
+   }
+  ],
+  "groups": [
+   {
+    "title": "I. řada",
+    "season": "season:00000000000000000000aa01",
+    "episodes": [
+     {
+      "source": "ct",
+      "idec": "208522161400001",
+      "title": "1/26 Smyšlený díl 1",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-01T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400002",
+      "title": "2/26 Smyšlený díl 2",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-02T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400003",
+      "title": "3/26 Smyšlený díl 3",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-03T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400004",
+      "title": "4/26 Smyšlený díl 4",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-04T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400005",
+      "title": "5/26 Smyšlený díl 5",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-05T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400006",
+      "title": "6/26 Smyšlený díl 6",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-06T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400007",
+      "title": "7/26 Smyšlený díl 7",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-07T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400008",
+      "title": "8/26 Smyšlený díl 8",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-08T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400009",
+      "title": "9/26 Smyšlený díl 9",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-09T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400010",
+      "title": "10/26 Smyšlený díl 10",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-10T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400011",
+      "title": "11/26 Smyšlený díl 11",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-11T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400012",
+      "title": "12/26 Smyšlený díl 12",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-12T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400013",
+      "title": "13/26 Smyšlený díl 13",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-13T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400014",
+      "title": "14/26 Smyšlený díl 14",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-14T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400015",
+      "title": "15/26 Smyšlený díl 15",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-15T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400016",
+      "title": "16/26 Smyšlený díl 16",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-16T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400017",
+      "title": "17/26 Smyšlený díl 17",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-17T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400018",
+      "title": "18/26 Smyšlený díl 18",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-18T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400019",
+      "title": "19/26 Smyšlený díl 19",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-19T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "208522161400020",
+      "title": "20/26 Smyšlený díl 20",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 3113,
+      "aired": "2026-04-20T18:10:00Z",
+      "channel": "ČT1",
+      "channelId": "CH_1",
+      "playable": true
+     }
+    ],
+    "nextPage": 2
+   },
+   {
+    "title": "Nahráno z antény",
+    "episodes": [
+     {
+      "source": "rec",
+      "recordingId": "b0b3e1d5a7c9f4e2a8b6d4c2e0f1a3b5c-1792294200-1792296900",
+      "title": "Zahradní seriál (3)",
+      "description": "Třetí díl.",
+      "durationSeconds": 2700,
+      "aired": "2026-10-18T03:30:00Z",
+      "channel": "Nova HD",
+      "channelId": null,
+      "playable": true
+     }
+    ]
+   }
+  ]
+ }
+}

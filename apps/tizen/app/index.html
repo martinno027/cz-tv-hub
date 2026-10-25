@@ -15,6 +15,7 @@
       <nav id="tabs">
         <div class="tab" data-tab="live">Živě</div>
         <div class="tab" data-tab="guide">TV průvodce</div>
+        <div class="tab" data-tab="archive">Archiv</div>
         <div class="tab" data-tab="settings">Nastavení</div>
       </nav>
       <div id="clock"></div>
@@ -42,6 +43,26 @@
             <div id="grid-rows"></div>
           </div>
         </div>
+      </section>
+
+      <!-- Archiv (spec/apps.md "Archiv"): iVysílání and our recordings from the gateway's /dvb/archive -->
+      <section id="screen-archive" class="screen">
+        <div id="ar-message" class="hidden"></div>
+        <div id="ar-home">
+          <div id="ar-search-box"><input id="ar-search" type="text" autocomplete="off" spellcheck="false"
+            placeholder="Hledat v archivu"></div>
+          <div id="ar-notice" class="ar-notice hidden"></div>
+          <div id="ar-rows" class="ar-viewport"><div class="ar-track"></div></div>
+          <div id="ar-results" class="ar-viewport hidden"><div class="ar-track"></div><div class="ar-note"></div></div>
+        </div>
+        <div id="ar-category" class="hidden">
+          <h1 id="ar-cat-title" class="page-title"></h1>
+          <div id="ar-genres" class="ar-chips"></div>
+          <div id="ar-sorts" class="ar-chips"></div>
+          <div id="ar-cat-notice" class="ar-notice hidden"></div>
+          <div id="ar-cat-grid" class="ar-viewport"><div class="ar-track"></div><div class="ar-note"></div></div>
+        </div>
+        <div id="ar-tmdb" class="tmdb-note hidden"><img class="tmdb-logo" src="img/tmdb-logo-short.svg" alt="TMDB"><span></span></div>
       </section>
 
       <section id="screen-settings" class="screen">
@@ -136,6 +157,29 @@
       <div id="pg-tmdb" class="hidden"><img class="tmdb-logo" src="img/tmdb-logo-short.svg" alt="TMDB"><span id="pg-attribution"></span></div>
     </div>
 
+    <!-- Archiv show page (spec/apps.md "Archiv" → "Show page"): the programme page of T15 for a whole show -->
+    <div id="show" class="hidden">
+      <div id="sh-head">
+        <div id="sh-image"></div>
+        <div id="sh-text">
+          <div id="sh-title"></div>
+          <div id="sh-facts"></div>
+          <div id="sh-rating" class="hidden"></div>
+          <div id="sh-description"></div>
+          <div id="sh-creators"></div>
+          <div id="sh-state"></div>
+          <div id="sh-buttons" class="buttons"></div>
+        </div>
+      </div>
+      <div id="sh-notice" class="ar-notice hidden"></div>
+      <div id="sh-seasons" class="ar-chips"></div>
+      <div id="sh-episodes"><div class="ar-track"></div></div>
+      <div id="sh-tmdb" class="tmdb-note hidden"><img class="tmdb-logo" src="img/tmdb-logo-short.svg" alt="TMDB"><span></span></div>
+    </div>
+
+    <!-- Archiv long-OK menu ("Odebrat z řady", "Přehrát od začátku"), above the tab and the show page -->
+    <div id="ar-menu" class="hidden"><div id="ar-menu-title"></div><div id="ar-menu-buttons" class="buttons"></div></div>
+
     <div id="player" class="hidden">
       <object id="avplayer" type="application/avplayer"></object>
       <video id="html5player" playsinline></video>
@@ -189,6 +233,7 @@
   <script src="js/core/profile.js"></script>
   <script src="js/core/household.js"></script>
   <script src="js/core/programme.js"></script>
+  <script src="js/core/archive.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
   <!-- Optional, written only into the build by build.py (version, build number, commit, build time). -->
@@ -202,6 +247,9 @@
   <script src="js/ui/live.js"></script>
   <script src="js/ui/guide.js"></script>
   <script src="js/ui/programme.js"></script>
+  <script src="js/ui/archive-cards.js"></script>
+  <script src="js/ui/show.js"></script>
+  <script src="js/ui/archive.js"></script>
   <script src="js/ui/settings.js"></script>
   <script src="js/ui/app.js"></script>
 </body>

@@ -6,7 +6,7 @@
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
-  var TABS = ['live', 'guide', 'settings'];
+  var TABS = ['live', 'guide', 'archive', 'settings'];
   var REFRESH_MS = 30 * 1000;
   var PSP_TICK_MS = 1000;
   var PROFILE_RETRY_MS = 60 * 1000;
@@ -104,9 +104,11 @@
       this.screens = {
         live: new CT.LiveScreen(this),
         guide: new CT.GuideScreen(this),
+        archive: null, // after the resume store (its rows read it)
         settings: new CT.SettingsScreen(this)
       };
       this.resumeStore = new CT.ResumeStore(localBackend('cztvhub.resume'));
+      this.screens.archive = new CT.ArchiveScreen(this);
       this.channelPrefs = CT.ChannelPrefsStore.load();
       this.profile = this.makeProfile();
       this.household = this.makeHousehold();
@@ -124,6 +126,7 @@
       document.addEventListener('keyup', function (e) {
         var key = CT.Keys.name(e);
         if (key && self.player.isOpen()) self.player.onKeyUp(key);
+        else if (key && self.tab === 'archive') self.screens.archive.onKeyUp(key);
       });
       document.addEventListener('visibilitychange', function () {
         if (document.hidden) {
@@ -279,6 +282,7 @@
       this.dvbState = config ? { channels: [], onAir: {}, error: null } : null;
       this.dvbThumbs = false;
       this.images.clear('gw');
+      this.screens.archive.reset();
       this.checkThumbs();
       if (initial) return;
       if (!before || !config || before.baseUrl !== config.baseUrl) {
@@ -288,6 +292,7 @@
       }
       this.refresh();
       this.screens.guide.reload();
+      if (this.tab === 'archive') this.screens.archive.show();
       this.fetchDefaults();
     },
 
@@ -310,6 +315,7 @@
       if (!on) this.images.clear('gw');
       this.screens.guide.refreshDetail();
       if (this.tab === 'settings') this.screens.settings.renderThumbs();
+      if (this.tab === 'archive') this.screens.archive.show(); // the recordings' thumbnails on the cards
     },
 
     /** Thumbnails shown on this TV: the gateway offers them and this TV's switch is on. */
@@ -465,6 +471,7 @@
     },
 
     showTab: function (tab) {
+      if (tab !== 'archive') this.screens.archive.hide();
       this.tab = tab;
       Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
         t.classList.toggle('selected', t.dataset.tab === tab);
@@ -595,6 +602,7 @@
     onPlayerClosed: function (request) {
       if (request && CT.LIVE_PREFIX[request.kind]) this.screens.live.focusKey(CT.LIVE_PREFIX[request.kind] + request.channelId);
       this.programme.refresh(true); // a "Pokračovat" position may have been saved
+      this.screens.archive.onPlayerClosed();
       this.refresh();
     },
 
