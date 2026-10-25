@@ -86,6 +86,8 @@ public enum TailnetRules {
     public static let connectingLine = "Připojuji se k Tailscale…"
     public static let loginLine = "Naskenujte QR kód telefonem a přihlaste se do Tailscale."
     public static let approvalLine = "Televize čeká na schválení v administraci Tailscale."
+    /// Živě and the guide while the node waits for a login or an approval (T21).
+    public static let waitingLine = "Tailscale čeká na přihlášení (Nastavení → Server)."
     /// The start error when the switch is on but there is no gateway address: the node is not started.
     public static let missingAddress = "chybí adresa brány."
     /// "Uložit a ověřit" after a restart: the check waits this long for `Running` (else it would get the bridge's 502).
@@ -151,10 +153,13 @@ public enum TailnetRules {
         }
     }
 
-    /// Živě and the guide say `connectingLine` instead of an empty Anténa group: while a bridge check runs (T18), or
-    /// while the switch is on and the node is not `Running` yet (T21).
-    public static func connecting(enabled: Bool, info: TailnetInfo?, checking: Bool) -> Bool {
-        checking || (enabled && info.map { $0.state != "Running" } == true)
+    /// What Živě and the guide say instead of an empty Anténa group: `connectingLine` while a bridge check runs (T18)
+    /// or the node is connecting, `waitingLine` in `NeedsLogin` / `NeedsMachineAuth` (T21); nil when `Running`, the
+    /// switch is off or there is no node.
+    public static func screenLine(enabled: Bool, info: TailnetInfo?, checking: Bool) -> String? {
+        if checking { return connectingLine }
+        guard enabled, let info, info.state != "Running" else { return nil }
+        return info.state == "NeedsLogin" || info.state == "NeedsMachineAuth" ? waitingLine : connectingLine
     }
 
     /// The bridge's `QRMatrix` (rows of `1`/`0`, quiet zone included) → dark modules; nil when empty or not square.
@@ -202,7 +207,7 @@ public struct BridgeWatchTransport: HTTPTransport {
 @Observable
 public final class TailnetRecovery {
     public static let checkTimeout: TimeInterval = 4
-    public static let runningPoll: TimeInterval = 2
+    public static let runningPoll: TimeInterval = 1
     public static let runningWait: TimeInterval = 20
     public static let quietAfterStart: TimeInterval = 30
     /// Status polling after a node start until `Running` (T21), for at most `startPollWindow`.

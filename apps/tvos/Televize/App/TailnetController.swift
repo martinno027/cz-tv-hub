@@ -84,9 +84,9 @@ final class TailnetController {
 
     /// "Back in front (T18)": checks of the bridge and restarts of the node.
     let recovery = TailnetRecovery()
-    /// The bridge is being checked (or the node restarted), or the node is not `Running` yet: Živě and the guide say
-    /// "Připojuji se k Tailscale…".
-    var connecting: Bool { TailnetRules.connecting(enabled: enabled, info: info, checking: recovery.checking) }
+    /// The bridge is being checked (or the node restarted), or the node is not `Running` yet: what Živě and the guide
+    /// say instead of an empty Anténa group ("Připojuji se k Tailscale…", or the wait for a login).
+    var screenLine: String? { TailnetRules.screenLine(enabled: enabled, info: info, checking: recovery.checking) }
     /// After a restart, and whenever the node's state changes to `Running` (spec/apps.md "Start (T21)"): load the
     /// gateway data the screens need again.
     @ObservationIgnored var onRecovered: () async -> Void = {}
@@ -337,9 +337,10 @@ extension TailnetController {
     }
 
     /// `-tailnetFakeRunningAfter 8` with `-gatewayAddress 127.0.0.1:<port>`: a cold start without a tailnet
-    /// (spec/apps.md "Start (T21)"). A fake node "starts" with the dev gateway as its bridge, says `Starting` for that
-    /// many seconds and then `Running`; until then gateway requests get the bridge's 502 (`debugBridgeDown`).
-    func debugFakeStart(address: String, runningAfter: TimeInterval) {
+    /// (spec/apps.md "Start (T21)"). A fake node "starts" with the dev gateway as its bridge, says `state` (`Starting`,
+    /// or `-tailnetFakeState NeedsLogin`) for that many seconds and then `Running`; until then gateway requests get
+    /// the bridge's 502 (`debugBridgeDown`).
+    func debugFakeStart(address: String, runningAfter: TimeInterval, state: String = "Starting") {
         guard let target = TailnetRules.target(address: address), let url = GatewayConfig.baseURL(address: address),
               url.host() == "127.0.0.1", let port = url.port else { return }
         enabled = true
@@ -347,7 +348,7 @@ extension TailnetController {
         self.target = target
         recovery.nodeStarted()
         Task {
-            await apply(TailnetInfo(state: "Starting"), reload: false)
+            await apply(TailnetInfo(state: state), reload: false)
             try? await Task.sleep(for: .seconds(runningAfter))
             log.info("tailnet: fake node Running")
             await apply(TailnetInfo(state: "Running", selfName: TailnetRules.hostname, ip: "100.64.0.9"))

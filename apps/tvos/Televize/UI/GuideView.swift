@@ -452,15 +452,20 @@ struct GuideView: View {
                     .buttonStyle(DayChipStyle(isSelected: option == highlighted))
                     .focused($focusedChip, equals: option)
             }
-            // Tailscale is being checked or not connected yet: the Anténa rows come back once it answers (spec/apps.md T18, T21).
-            if model.tailnet.connecting, model.antenna != nil, model.channelPrefs.prefs.isOn(.dvb) {
-                Spacer(minLength: 24)
-                Text(TailnetRules.connectingLine).font(.callout).foregroundStyle(.secondary)
-            }
         }
         // Full width, so moving up from any column of the grid lands in the strip, on the highlighted chip
         // (not whichever chip is above the focused cell).
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Tailscale is being checked or not connected yet: the Anténa rows come back once it answers (spec/apps.md
+        // T18, T21). An overlay right of the chips, so the longer login line does not move the grid down.
+        .overlay(alignment: .trailing) {
+            if let line = model.tailnet.screenLine, model.antenna != nil, model.channelPrefs.prefs.isOn(.dvb) {
+                Text(line).font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing).lineLimit(2).minimumScaleFactor(0.8)
+                    .frame(maxWidth: 380, alignment: .trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
         .focusSection()
         .defaultFocus($focusedChip, highlighted, priority: .userInitiated)
     }
