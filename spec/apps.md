@@ -410,6 +410,28 @@ app** (Tizen web apps cannot run it): it reaches the gateway on the LAN as befor
   failed check moves the bridge back to the saved address. Anything stored per gateway (the household default list's
   cache) is keyed by the **saved** address, never by `127.0.0.1:<port>` (the port changes on every start).
 - The node state is also saved when the app goes to the background (polling stops once `Running`).
+- **Back in front (T18)**: tvOS and Android suspend the app in the background and the node's connections can die
+  there while its state still says `Running` (seen 2026-10-24: the Apple TV node `offline` in the tailnet, every
+  gateway request answered by the bridge's 502, the Anténa group gone away from home). So whenever the app becomes
+  active with the switch on, and whenever a gateway request through the bridge answers the bridge's own 502, the app
+  **checks the bridge**: `GET http://127.0.0.1:<port>/health` (the gateway's health, no key needed) with a 4 s
+  timeout. Answered → nothing to do. Not answered → the node is **restarted** with its saved state (stop + start, no
+  new login), the status polled every 2 s until `Running` (at most 20 s), checked again, and then the gateway data
+  the screen needs (channels, guide, defaults, profile) are loaded again — the Anténa group comes back by itself. At
+  most one check at a time, and after any node start (app start, switch on, new address, restart) the next check
+  waits at least 30 s. While checking, Živě/guide show "Připojuji se k Tailscale…" instead of hiding Anténa.
+  Details (T18): the restart (`Node.Restart()` / `TailnetRestart()` / gomobile `restart()`) keeps the bridge on the
+  **same port**, so the app's gateway URL and a playing player stay valid; triggers are the bridge's own 502 (its
+  exact error text, not the gateway's 502) and a request through the bridge that gets no answer (timeout or
+  connection error, not a cancel); the health check counts only HTTP 200; after a failed restart the data are still
+  reloaded, so the screens show the error instead of "Připojuji se…" for ever; thumbnails do not trigger a check.
+  The bridge's dial to the gateway times out after 8 s (a tsnet dial while the node is not connected hangs, so
+  without it the app saw a client timeout instead of the 502).
+- **Connection line (T18)**: `Info()` also gives the gateway peer's path, `"gateway": {"direct": bool, "relay":
+  "<DERP region code>", "latencyMs": <int> | null}` (from the node's peer status and a ping, refreshed with the
+  status). Nastavení → Server shows it after "Připojeno jako …": "· k bráně přímo, 32 ms" or "· přes relé fra,
+  85 ms" (relé = Tailscale's DERP relay, which is slow for video), nothing when unknown. Golden cases in
+  `spec/fixtures/tailnet_cases.json` "status".
 - **Lifecycle**: with the switch on the node starts at app start before the first gateway request (`Start` returns at
   once; login and connection go on in the background) and runs while the app runs; switch off stops it (the saved state
   is kept, so switching on again needs no login; "Odebrat bránu" leaves Tailscale as it is). The status is polled every 2 s while Nastavení → Server is open, else

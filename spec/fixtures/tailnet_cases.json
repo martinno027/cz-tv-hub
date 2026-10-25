@@ -1,37 +1,275 @@
 {
-  "comment": "Tailscale v aplikaci (spec/apps.md, T12; Apple TV and Android TV only). 'target': the gateway address as typed in Nastavení → Server → the host:port the bridge dials over the tailnet (null = unusable). 'status': the bridge's Info() JSON (plus a start error) → what Nastavení → Server shows. Synthetic values only.",
-  "target": [
-    {"address": "raspberrypi", "target": "raspberrypi:8098"},
-    {"address": "  raspberrypi  ", "target": "raspberrypi:8098"},
-    {"address": "http://raspberrypi:8098/", "target": "raspberrypi:8098"},
-    {"address": "pi.tail1234.ts.net", "target": "pi.tail1234.ts.net:8098"},
-    {"address": "100.101.102.103", "target": "100.101.102.103:8098"},
-    {"address": "100.101.102.103:9000", "target": "100.101.102.103:9000"},
-    {"address": "http://pi.tail1234.ts.net:8098/dvb/channels?x=1", "target": "pi.tail1234.ts.net:8098"},
-    {"address": "https://pi.tail1234.ts.net", "target": "pi.tail1234.ts.net:8098"},
-    {"address": "", "target": null},
-    {"address": "ftp://raspberrypi", "target": null}
-  ],
-  "status": [
-    {"name": "off", "enabled": false, "info": null, "error": null,
-     "line": "Vypnuto", "qr": false, "logout": false, "usesBridge": false},
-    {"name": "start failed", "enabled": true, "info": null, "error": "listen tcp: address in use",
-     "line": "Tailscale se nepodařilo spustit: listen tcp: address in use", "qr": false, "logout": false, "usesBridge": false},
-    {"name": "starting", "enabled": true, "info": {"state": "NoState", "loginURL": "", "self": "", "ip": "", "stateVersion": 0}, "error": null,
-     "line": "Připojuji se k Tailscale…", "qr": false, "logout": false, "usesBridge": true},
-    {"name": "starting (backend)", "enabled": true, "info": {"state": "Starting", "loginURL": "", "self": "televize-appletv", "ip": "100.64.0.7", "stateVersion": 2}, "error": null,
-     "line": "Připojuji se k Tailscale…", "qr": false, "logout": true, "usesBridge": true},
-    {"name": "needs login, url not yet known", "enabled": true, "info": {"state": "NeedsLogin", "loginURL": "", "self": "", "ip": "", "stateVersion": 0}, "error": null,
-     "line": "Připojuji se k Tailscale…", "qr": false, "logout": false, "usesBridge": true},
-    {"name": "needs login", "enabled": true, "info": {"state": "NeedsLogin", "loginURL": "https://login.tailscale.com/a/1a2b3c4d5e6f7", "self": "", "ip": "", "stateVersion": 1}, "error": null,
-     "line": "Naskenujte QR kód telefonem a přihlaste se do Tailscale.", "qr": true, "logout": false, "usesBridge": true},
-    {"name": "needs approval", "enabled": true, "info": {"state": "NeedsMachineAuth", "loginURL": "", "self": "televize-appletv", "ip": "", "stateVersion": 3}, "error": null,
-     "line": "Televize čeká na schválení v administraci Tailscale.", "qr": false, "logout": true, "usesBridge": true},
-    {"name": "running", "enabled": true, "info": {"state": "Running", "loginURL": "", "self": "televize-appletv", "ip": "100.64.0.7", "stateVersion": 4}, "error": null,
-     "line": "Připojeno jako televize-appletv (100.64.0.7)", "qr": false, "logout": true, "usesBridge": true},
-    {"name": "running without ip yet", "enabled": true, "info": {"state": "Running", "loginURL": "", "self": "televize-androidtv-1", "ip": "", "stateVersion": 4}, "error": null,
-     "line": "Připojeno jako televize-androidtv-1", "qr": false, "logout": true, "usesBridge": true},
-    {"name": "stopped by the node", "enabled": true, "info": {"state": "Stopped", "loginURL": "", "self": "televize-appletv", "ip": "", "stateVersion": 5}, "error": null,
-     "line": "Připojuji se k Tailscale…", "qr": false, "logout": true, "usesBridge": true}
-  ]
+ "comment": "Tailscale v aplikaci (spec/apps.md, T12; Apple TV and Android TV only). 'target': the gateway address as typed in Nastavení → Server → the host:port the bridge dials over the tailnet (null = unusable). 'status': the bridge's Info() JSON (plus a start error) → what Nastavení → Server shows. Synthetic values only.",
+ "target": [
+  {
+   "address": "raspberrypi",
+   "target": "raspberrypi:8098"
+  },
+  {
+   "address": "  raspberrypi  ",
+   "target": "raspberrypi:8098"
+  },
+  {
+   "address": "http://raspberrypi:8098/",
+   "target": "raspberrypi:8098"
+  },
+  {
+   "address": "pi.tail1234.ts.net",
+   "target": "pi.tail1234.ts.net:8098"
+  },
+  {
+   "address": "100.101.102.103",
+   "target": "100.101.102.103:8098"
+  },
+  {
+   "address": "100.101.102.103:9000",
+   "target": "100.101.102.103:9000"
+  },
+  {
+   "address": "http://pi.tail1234.ts.net:8098/dvb/channels?x=1",
+   "target": "pi.tail1234.ts.net:8098"
+  },
+  {
+   "address": "https://pi.tail1234.ts.net",
+   "target": "pi.tail1234.ts.net:8098"
+  },
+  {
+   "address": "",
+   "target": null
+  },
+  {
+   "address": "ftp://raspberrypi",
+   "target": null
+  }
+ ],
+ "status": [
+  {
+   "name": "off",
+   "enabled": false,
+   "info": null,
+   "error": null,
+   "line": "Vypnuto",
+   "qr": false,
+   "logout": false,
+   "usesBridge": false
+  },
+  {
+   "name": "start failed",
+   "enabled": true,
+   "info": null,
+   "error": "listen tcp: address in use",
+   "line": "Tailscale se nepodařilo spustit: listen tcp: address in use",
+   "qr": false,
+   "logout": false,
+   "usesBridge": false
+  },
+  {
+   "name": "starting",
+   "enabled": true,
+   "info": {
+    "state": "NoState",
+    "loginURL": "",
+    "self": "",
+    "ip": "",
+    "stateVersion": 0
+   },
+   "error": null,
+   "line": "Připojuji se k Tailscale…",
+   "qr": false,
+   "logout": false,
+   "usesBridge": true
+  },
+  {
+   "name": "starting (backend)",
+   "enabled": true,
+   "info": {
+    "state": "Starting",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "100.64.0.7",
+    "stateVersion": 2
+   },
+   "error": null,
+   "line": "Připojuji se k Tailscale…",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "needs login, url not yet known",
+   "enabled": true,
+   "info": {
+    "state": "NeedsLogin",
+    "loginURL": "",
+    "self": "",
+    "ip": "",
+    "stateVersion": 0
+   },
+   "error": null,
+   "line": "Připojuji se k Tailscale…",
+   "qr": false,
+   "logout": false,
+   "usesBridge": true
+  },
+  {
+   "name": "needs login",
+   "enabled": true,
+   "info": {
+    "state": "NeedsLogin",
+    "loginURL": "https://login.tailscale.com/a/1a2b3c4d5e6f7",
+    "self": "",
+    "ip": "",
+    "stateVersion": 1
+   },
+   "error": null,
+   "line": "Naskenujte QR kód telefonem a přihlaste se do Tailscale.",
+   "qr": true,
+   "logout": false,
+   "usesBridge": true
+  },
+  {
+   "name": "needs approval",
+   "enabled": true,
+   "info": {
+    "state": "NeedsMachineAuth",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "",
+    "stateVersion": 3
+   },
+   "error": null,
+   "line": "Televize čeká na schválení v administraci Tailscale.",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "running",
+   "enabled": true,
+   "info": {
+    "state": "Running",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "100.64.0.7",
+    "stateVersion": 4
+   },
+   "error": null,
+   "line": "Připojeno jako televize-appletv (100.64.0.7)",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "running without ip yet",
+   "enabled": true,
+   "info": {
+    "state": "Running",
+    "loginURL": "",
+    "self": "televize-androidtv-1",
+    "ip": "",
+    "stateVersion": 4
+   },
+   "error": null,
+   "line": "Připojeno jako televize-androidtv-1",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "stopped by the node",
+   "enabled": true,
+   "info": {
+    "state": "Stopped",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "",
+    "stateVersion": 5
+   },
+   "error": null,
+   "line": "Připojuji se k Tailscale…",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "running, direct path to the gateway",
+   "enabled": true,
+   "info": {
+    "state": "Running",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "100.64.0.7",
+    "stateVersion": 4,
+    "gateway": {
+     "direct": true,
+     "relay": "fra",
+     "latencyMs": 32
+    }
+   },
+   "error": null,
+   "line": "Připojeno jako televize-appletv (100.64.0.7) · k bráně přímo, 32 ms",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "running, through a DERP relay",
+   "enabled": true,
+   "info": {
+    "state": "Running",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "100.64.0.7",
+    "stateVersion": 4,
+    "gateway": {
+     "direct": false,
+     "relay": "fra",
+     "latencyMs": 85
+    }
+   },
+   "error": null,
+   "line": "Připojeno jako televize-appletv (100.64.0.7) · přes relé fra, 85 ms",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "running, relay without a ping yet",
+   "enabled": true,
+   "info": {
+    "state": "Running",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "100.64.0.7",
+    "stateVersion": 4,
+    "gateway": {
+     "direct": false,
+     "relay": "fra",
+     "latencyMs": null
+    }
+   },
+   "error": null,
+   "line": "Připojeno jako televize-appletv (100.64.0.7) · přes relé fra",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  },
+  {
+   "name": "running, path unknown",
+   "enabled": true,
+   "info": {
+    "state": "Running",
+    "loginURL": "",
+    "self": "televize-appletv",
+    "ip": "100.64.0.7",
+    "stateVersion": 4,
+    "gateway": null
+   },
+   "error": null,
+   "line": "Připojeno jako televize-appletv (100.64.0.7)",
+   "qr": false,
+   "logout": true,
+   "usesBridge": true
+  }
+ ]
 }
