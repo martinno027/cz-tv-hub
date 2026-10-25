@@ -1,5 +1,5 @@
 {
- "_doc": "Archive (spec/dvb-gateway.md 'Archive', spec/apps.md 'Archiv'). categories: ČT category slugs for one of our recorded shows, from its stored TMDb match (kind + genre ids) or, without one, its DVB genre and title. normalise: the key that makes an iVysílání show and our recordings one card. merge: card source and order. continueRow: which resume entries the row shows, in order (max 20).",
+ "_doc": "Archive (spec/dvb-gateway.md 'Archive', spec/apps.md 'Archiv'). categories: ČT category slugs for one of our recorded shows, from its stored TMDb match (kind + genre ids) or, without one, its DVB genre and title. normalise: the key that makes an iVysílání show and our recordings one card. merge: card source and order. continueRow: which resume entries the row shows, in order (max 20). subgenres (T23): whether one of our recordings, already in the category, is also listed in a ČT sub-genre: by the sub-genre title (normalised as 'normalise') → any of the TMDb genre ids, or the TMDb kind for 'Filmy'/'Seriály'; any other title, or no TMDb match: not listed. menu (T23): the Archiv menu as a state machine: items of the main menu and of a category's sub-menu, the initial selection, and what OK / Back do (state after each step; 'grid' = what the grid shows, 'leave' = Back leaves the tab, 'focus' = where the focus goes).",
  "categories": [
   {
    "name": "movie comedy",
@@ -434,6 +434,637 @@
     "ct:22",
     "ct:2",
     "ct:21"
+   ]
+  }
+ ],
+ "subgenres": [
+  {
+   "name": "crime film in Krimi",
+   "category": "3947-filmy",
+   "subgenre": "Krimi",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     80,
+     18
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "comedy series in Komedie",
+   "category": "3976-serialy",
+   "subgenre": "Komedie",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     35
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "drama not in Krimi",
+   "category": "3947-filmy",
+   "subgenre": "Krimi",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     18
+    ]
+   },
+   "included": false
+  },
+  {
+   "name": "Thriller and Thrillery are one rule",
+   "category": "3976-serialy",
+   "subgenre": "Thrillery",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     53
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "Romantické",
+   "category": "3947-filmy",
+   "subgenre": "Romantické",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     10749,
+     35
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "Animované",
+   "category": "3947-filmy",
+   "subgenre": "Animované",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     16,
+     10751
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "Válečné (movie war)",
+   "category": "3947-filmy",
+   "subgenre": "Válečné",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     10752
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "Historické",
+   "category": "3947-filmy",
+   "subgenre": "Historické",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     36,
+     18
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "documentary Historie",
+   "category": "4003-dokumenty",
+   "subgenre": "Historie",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     99,
+     36
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "Rodinné",
+   "category": "3976-serialy",
+   "subgenre": "Rodinné",
+   "tmdb": {
+    "kind": "tv",
+    "genres": [
+     10751
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "documentary Hudba",
+   "category": "4003-dokumenty",
+   "subgenre": "Hudba",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     99,
+     10402
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "kids' Filmy by kind",
+   "category": "4118-pro-deti",
+   "subgenre": "Filmy",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     16,
+     10751
+    ]
+   },
+   "included": true
+  },
+  {
+   "name": "kids' Seriály by kind, not a film",
+   "category": "4118-pro-deti",
+   "subgenre": "Seriály",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     16,
+     10751
+    ]
+   },
+   "included": false
+  },
+  {
+   "name": "České has no TMDb counterpart",
+   "category": "3947-filmy",
+   "subgenre": "České",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     35
+    ]
+   },
+   "included": false
+  },
+  {
+   "name": "Pohádky has no TMDb counterpart",
+   "category": "3947-filmy",
+   "subgenre": "Pohádky",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     14,
+     10751
+    ]
+   },
+   "included": false
+  },
+  {
+   "name": "Klasika has no TMDb counterpart",
+   "category": "3947-filmy",
+   "subgenre": "Klasika",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     18
+    ]
+   },
+   "included": false
+  },
+  {
+   "name": "a decade title (as in Archiv) has no TMDb counterpart; our recordings never land in Archiv anyway",
+   "category": "3947-filmy",
+   "subgenre": "80. léta",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     35
+    ]
+   },
+   "included": false
+  },
+  {
+   "name": "no TMDb match: never in a sub-genre",
+   "category": "3947-filmy",
+   "subgenre": "Krimi",
+   "tmdb": null,
+   "included": false
+  },
+  {
+   "name": "title compared normalised (case, diacritics)",
+   "category": "3947-filmy",
+   "subgenre": "KRIMI ",
+   "tmdb": {
+    "kind": "movie",
+    "genres": [
+     80
+    ]
+   },
+   "included": true
+  }
+ ],
+ "menu": [
+  {
+   "name": "opens on Pokračovat when the row has an entry",
+   "categories": [
+    {
+     "id": "3947-filmy",
+     "title": "Filmy"
+    },
+    {
+     "id": "3976-serialy",
+     "title": "Seriály"
+    }
+   ],
+   "continueEntries": 1,
+   "steps": [
+    {
+     "do": "open",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "continue",
+      "grid": {
+       "show": "continue"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "no entry for the row: opens on the first category",
+   "categories": [
+    {
+     "id": "3947-filmy",
+     "title": "Filmy"
+    },
+    {
+     "id": "3976-serialy",
+     "title": "Seriály"
+    }
+   ],
+   "continueEntries": 0,
+   "steps": [
+    {
+     "do": "open",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "3947-filmy",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "OK on a category opens its sub-menu, Všechny selected; OK on a sub-genre filters; Back returns",
+   "categories": [
+    {
+     "id": "3947-filmy",
+     "title": "Filmy"
+    },
+    {
+     "id": "3976-serialy",
+     "title": "Seriály"
+    }
+   ],
+   "continueEntries": 0,
+   "genres": {
+    "3947-filmy": [
+     {
+      "id": "4012",
+      "title": "Krimi"
+     },
+     {
+      "id": "4013",
+      "title": "Komedie"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "do": "open",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "3947-filmy",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    },
+    {
+     "do": "ok",
+     "on": "3947-filmy",
+     "state": {
+      "level": "sub",
+      "category": "3947-filmy",
+      "title": "‹ Filmy",
+      "items": [
+       "back",
+       "all",
+       "4012",
+       "4013"
+      ],
+      "selected": "all",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    },
+    {
+     "do": "ok",
+     "on": "4012",
+     "state": {
+      "level": "sub",
+      "category": "3947-filmy",
+      "title": "‹ Filmy",
+      "items": [
+       "back",
+       "all",
+       "4012",
+       "4013"
+      ],
+      "selected": "4012",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": "4012"
+      }
+     }
+    },
+    {
+     "do": "back",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "3947-filmy",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    },
+    {
+     "do": "back",
+     "leave": true
+    }
+   ]
+  },
+  {
+   "name": "OK on the back item is Back",
+   "categories": [
+    {
+     "id": "3947-filmy",
+     "title": "Filmy"
+    },
+    {
+     "id": "3976-serialy",
+     "title": "Seriály"
+    }
+   ],
+   "continueEntries": 1,
+   "genres": {
+    "3947-filmy": [
+     {
+      "id": "4012",
+      "title": "Krimi"
+     },
+     {
+      "id": "4013",
+      "title": "Komedie"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "do": "open",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "continue",
+      "grid": {
+       "show": "continue"
+      }
+     }
+    },
+    {
+     "do": "ok",
+     "on": "3947-filmy",
+     "state": {
+      "level": "sub",
+      "category": "3947-filmy",
+      "title": "‹ Filmy",
+      "items": [
+       "back",
+       "all",
+       "4012",
+       "4013"
+      ],
+      "selected": "all",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    },
+    {
+     "do": "ok",
+     "on": "back",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "3947-filmy",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "Hledat and Naše nahrávky",
+   "categories": [
+    {
+     "id": "3947-filmy",
+     "title": "Filmy"
+    },
+    {
+     "id": "3976-serialy",
+     "title": "Seriály"
+    }
+   ],
+   "continueEntries": 0,
+   "steps": [
+    {
+     "do": "open",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "3947-filmy",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    },
+    {
+     "do": "ok",
+     "on": "recordings",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "recordings",
+      "grid": {
+       "show": "recordings"
+      }
+     }
+    },
+    {
+     "do": "ok",
+     "on": "search",
+     "focus": "searchField",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "search",
+      "grid": {
+       "show": "search"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "a category without sub-genres still has back and Všechny",
+   "categories": [
+    {
+     "id": "3947-filmy",
+     "title": "Filmy"
+    },
+    {
+     "id": "3976-serialy",
+     "title": "Seriály"
+    }
+   ],
+   "continueEntries": 0,
+   "genres": {
+    "3976-serialy": []
+   },
+   "steps": [
+    {
+     "do": "open",
+     "state": {
+      "level": "main",
+      "items": [
+       "search",
+       "continue",
+       "recordings",
+       "3947-filmy",
+       "3976-serialy"
+      ],
+      "selected": "3947-filmy",
+      "grid": {
+       "show": "category",
+       "category": "3947-filmy",
+       "genre": null
+      }
+     }
+    },
+    {
+     "do": "ok",
+     "on": "3976-serialy",
+     "state": {
+      "level": "sub",
+      "category": "3976-serialy",
+      "title": "‹ Seriály",
+      "items": [
+       "back",
+       "all"
+      ],
+      "selected": "all",
+      "grid": {
+       "show": "category",
+       "category": "3976-serialy",
+       "genre": null
+      }
+     }
+    }
    ]
   }
  ]

@@ -436,6 +436,15 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     (their ČT "popular" block with our recordings of that category mixed in by recording date), empty rows left out.
   - `GET /dvb/archive/category/<slug>?sort=popular|newest|az&genre=<sub-genre id>&page=<n>` → `{"title",
     "genres": [{"id","title"}], "cards": [...], "nextPage": n | null}` (`slug` `recordings` = ours only).
+    `genres` are ČT's sub-genres of the category in ČT's order (`categoryBlocks` with a `categoryId`; the sort
+    blocks "Nejsledovanější za 7 dní" / "Naposledy vysílané" have none and are left out). **With `genre` (T23)** our
+    recordings of the category are mixed in when their stored TMDb match fits the sub-genre by
+    `archive_cases.json` "subgenres" (sub-genre title → TMDb genre ids or kind; a sub-genre without a TMDb
+    counterpart — České, Zahraniční, Pohádky, Klasika, Psychologické, Literární adaptace, the decades of Archiv … —
+    and a recording without a TMDb match: ČT only) When ČT fails, the sub-genre's title is unknown: no recordings
+    either, `200` with empty cards and the `error`.
+  - `GET /dvb/archive/categories` (T23) → `{"categories": [{"id": "<slug>", "title"}]}`: the 14 categories in the
+    row order, from the gateway's own list (no ČT request), for the apps' menu.
   - `GET /dvb/archive/search?q=<text>&page=<n>` (text ≤ 100 chars) → `{"cards": [...], "nextPage"}`: ČT
     `searchShows` + our recordings whose title contains the text (no diacritics, case-insensitive), merged as above.
   - `GET /dvb/archive/show/<id>` (`ct:<ČT show id>` or `rec:<normalised title>`; the colon plain or as `%3A`) →

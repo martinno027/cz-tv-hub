@@ -1,0 +1,63 @@
+{
+ "status": 200,
+ "body": {
+  "categories": [
+   {
+    "id": "3947-filmy",
+    "title": "Filmy"
+   },
+   {
+    "id": "3976-serialy",
+    "title": "Seriály"
+   },
+   {
+    "id": "4003-dokumenty",
+    "title": "Dokumenty"
+   },
+   {
+    "id": "4124-zpravodajstvi",
+    "title": "Zpravodajství"
+   },
+   {
+    "id": "4142-sport",
+    "title": "Sport"
+   },
+   {
+    "id": "4118-pro-deti",
+    "title": "Pro děti"
+   },
+   {
+    "id": "4068-zabava",
+    "title": "Zábava"
+   },
+   {
+    "id": "4079-historie",
+    "title": "Historie"
+   },
+   {
+    "id": "4106-priroda",
+    "title": "Příroda"
+   },
+   {
+    "id": "4029-kultura",
+    "title": "Kultura"
+   },
+   {
+    "id": "4093-spolecnost",
+    "title": "Společnost"
+   },
+   {
+    "id": "4055-rady-a-recepty",
+    "title": "Rady a recepty"
+   },
+   {
+    "id": "4191-spiritualita",
+    "title": "Spiritualita"
+   },
+   {
+    "id": "4732-archiv",
+    "title": "Archiv"
+   }
+  ]
+ }
+}
