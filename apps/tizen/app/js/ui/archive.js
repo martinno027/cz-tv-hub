@@ -1,28 +1,36 @@
 /*
- * "Archiv" (spec/apps.md "Archiv"): iVysílání and our recordings from the gateway's /dvb/archive. Home = the search
- * field (the TV's keyboard; results 0.5 s after the last change, at least 2 characters) and rows: "Pokračovat ve
- * sledování" (this TV's resume entries), then the gateway's rows; the end of a row opens the whole category
- * (sub-genre chips, sort, a paged grid). A card opens the show page (show.js). Return goes back one step at a time.
- * Without a gateway the tab only says how to set one up.
+ * "Archiv" (spec/apps.md "Archiv", layout T23): iVysílání and our recordings from the gateway's /dvb/archive. A menu
+ * on the left (Hledat, Pokračovat ve sledování, Naše nahrávky, the gateway's categories; OK on a category opens its
+ * sub-menu "‹ Filmy" / Všechny / sub-genres) and a 3-column grid on the right that always shows what the selected
+ * item filters. The menu's rules are CT.ArchiveMenu (core, golden cases); this screen draws them, waits 0.4 s of
+ * resting focus before changing the grid, and moves the focus between the menu, the sort chips, the search field and
+ * the grid. A card opens the show page (show.js); a "Pokračovat" card plays at once. Without a gateway the tab only
+ * says how to set one up.
  */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
   var A = CT.Archive;
+  var M = CT.ArchiveMenu;
   var Cards = CT.ArchiveCards;
   var el = Cards.el;
 
-  var ROW_STEP = 340; // a home row: its title and a line of cards
-  var ROWS_VISIBLE = 2;
-  var GRID_STEP = 300;
-  var GRID_COLS = 5;
-  var GRID_VISIBLE = 2;
-  var HOME_FRESH_MS = 10 * 60 * 1000;
+  var GRID_COLS = 3;
+  var GRID_STEP_X = 460; // a grid card is 430 px wide (CSS #ar-grid .ar-card)
+  var GRID_STEP_Y = 350;
+  var GRID_VISIBLE = 2; // full lines on screen (the third shows in part)
   var PAGE_AHEAD_ROWS = 2; // the next page is asked for when the focus is this close to the grid's end
+  var MENU_STEP = 58; // a menu item (CSS .ar-menu-item)
+  var CATEGORIES_FRESH_MS = 10 * 60 * 1000;
   var Menu = Cards.Menu;
 
   function $(id) {
     return document.getElementById(id);
+  }
+
+  function emptyGrid(key) {
+    return { key: key, items: [], nextPage: null, loading: false, error: null, notice: '', attribution: '', focus: 0,
+      lines: null, builtFor: 0, token: 0 };
   }
 
   function ArchiveScreen(app) {
@@ -43,18 +51,21 @@
   /** Forgets everything the gateway said (start, another gateway or none). */
   ArchiveScreen.prototype.reset = function () {
     this.generation = (this.generation || 0) + 1;
-    this.home = { rows: [], loadedAt: 0, loading: false, error: null, attribution: '', notice: '' };
-    this.rows = []; // what home shows: [{id, title, items: [model], cards: [card | resume item], continue, slug}]
-    this.zone = 'search'; // 'search' | 'rows' | 'results' (home), 'genres' | 'sorts' | 'grid' (category)
-    this.row = 0;
-    this.cols = {}; // row id → focused column
-    this.firsts = {}; // row id → first visible column
-    this.view = 'home';
-    this.search = { text: '', query: null, cards: [], nextPage: null, loading: false, error: null, notice: '', attribution: '',
-      focus: 0, timer: null };
-    this.category = null;
+    this.cats = { list: null, loadedAt: 0, loading: false, error: null };
+    this.menu = null; // CT.ArchiveMenu state, once the categories are there
+    this.menuFocus = 0;
+    this.menuTop = 0;
+    this.zone = 'menu'; // 'menu' | 'sorts' | 'field' | 'grid'
+    this.sortFocus = 0;
+    this.visible = false;
+    clearTimeout(this.debounce);
+    if (this.grid && this.grid.lines) this.grid.lines.clear();
+    this.grid = emptyGrid(null);
+    if (this.search) clearTimeout(this.search.timer);
+    this.search = { text: '', query: null, timer: null };
+    var input = $('ar-search');
+    if (input) input.value = '';
     Menu.close();
-    if (this.homeLines) this.homeLines.clear();
     if (this.page && this.page.isOpen()) this.page.close();
   };
 
@@ -62,163 +73,316 @@
     return this.app.dvbRepo ? new CT.ArchiveClient(this.app.dvbRepo.client) : null;
   };
 
+  /** The tab is shown: opened anew (menu on its starting item) unless it was already on screen (a redraw). */
   ArchiveScreen.prototype.show = function () {
     var configured = !!this.app.dvbConfig;
     $('ar-message').classList.toggle('hidden', configured);
     $('ar-message').textContent = configured ? '' : A.NO_GATEWAY;
-    $('ar-home').classList.toggle('hidden', !configured || this.view !== 'home');
-    $('ar-category').classList.toggle('hidden', !configured || this.view !== 'category');
+    $('ar-layout').classList.toggle('hidden', !configured);
     if (!configured) {
       $('ar-tmdb').classList.add('hidden');
       return;
     }
-    if (!this.home.loading && (this.home.error || Date.now() - this.home.loadedAt > HOME_FRESH_MS)) this.loadHome();
-    this.buildRows();
+    var opening = !this.visible;
+    this.visible = true;
+    var c = this.cats;
+    if (!c.loading && (c.error || c.list === null || Date.now() - c.loadedAt > CATEGORIES_FRESH_MS)) this.loadCategories();
+    if (opening && c.list !== null) this.openMenu();
+    else this.rebuildGrid(); // e.g. thumbnails switched: the cards again
     this.render();
   };
 
-  /** The tab is left (another tab, or the gateway changed): the show page goes too. */
+  /** The tab is left (another tab, or the gateway changed): the show page goes too, the next visit opens anew. */
   ArchiveScreen.prototype.hide = function () {
     Menu.close();
     if (this.page.isOpen()) this.page.close();
+    this.visible = false;
+    clearTimeout(this.debounce);
   };
 
-  ArchiveScreen.prototype.loadHome = function () {
+  ArchiveScreen.prototype.loadCategories = function () {
     var self = this;
     var client = this.client();
     var generation = this.generation;
     if (!client) return;
-    this.home.loading = true;
-    client.home().then(function (home) {
+    this.cats.loading = true;
+    client.categories().then(function (list) {
       if (generation !== self.generation) return;
-      // `error` with a 200: iVysílání did not answer, our recordings are still there (the text goes above the rows)
-      self.home = { rows: home.rows, loadedAt: Date.now(), loading: false, error: null, attribution: home.attribution,
-        notice: home.error };
+      self.cats = { list: list, loadedAt: Date.now(), loading: false, error: null };
     }, function (e) {
       if (generation !== self.generation) return;
-      self.home.loading = false;
-      self.home.error = e.userMessage || A.FAILED;
+      // the menu still has Hledat, Pokračovat and Naše nahrávky; the categories are asked for again next time
+      self.cats = { list: self.cats.list || [], loadedAt: 0, loading: false, error: e.userMessage || A.FAILED };
     }).then(function () {
-      if (generation !== self.generation || self.app.tab !== 'archive') return;
-      self.buildRows();
+      if (generation !== self.generation || !self.visible) return;
+      if (!self.menu || !self.sameCategories()) self.openMenu();
       self.render();
     });
   };
 
-  /** Home rows: "Pokračovat ve sledování" first (this TV only), then the gateway's rows, each ending in "Vše ›". */
-  ArchiveScreen.prototype.buildRows = function () {
-    var focusedId = this.rows[this.row] ? this.rows[this.row].id : null;
-    var rows = [];
-    var resume = this.app.resumeStore.continueRow();
-    if (resume.length) {
-      rows.push({ id: 'continue', title: 'Pokračovat ve sledování', continue: true, cards: resume,
-        items: resume.map(Cards.fromResume) });
+  /** Whether the menu's categories are the ones loaded (a refresh with the same list keeps the place). */
+  ArchiveScreen.prototype.sameCategories = function () {
+    var a = this.menu.categories.map(function (c) { return c.id + '=' + c.title; }).join('|');
+    var b = this.cats.list.map(function (c) { return c.id + '=' + c.title; }).join('|');
+    return a === b;
+  };
+
+  ArchiveScreen.prototype.openMenu = function () {
+    var known = this.menu ? this.menu.genres : null; // sub-genres already seen stay (no request for them)
+    this.menu = M.open(this.cats.list || [], this.app.resumeStore.continueRow().length, known);
+    this.menuFocus = M.selectedIndex(this.menu);
+    this.zone = 'menu';
+    this.sortFocus = 0;
+    this.syncGrid();
+  };
+
+  // --- the menu ---
+
+  ArchiveScreen.prototype.focusedItem = function () {
+    return this.menu ? this.menu.items[this.menuFocus] || null : null;
+  };
+
+  /** The focus rests on a menu item: after 0.4 s it becomes the selection (no request per item passed). */
+  ArchiveScreen.prototype.moveMenu = function (dir) {
+    var self = this;
+    var next = this.menuFocus + dir;
+    if (next < 0 || next >= this.menu.items.length) return false;
+    this.menuFocus = next;
+    clearTimeout(this.debounce);
+    this.debounce = setTimeout(function () { self.commitFocus(); }, M.FOCUS_DEBOUNCE_MS);
+    return true;
+  };
+
+  /** The focused menu item becomes the selection at once (debounce over, Right, OK). */
+  ArchiveScreen.prototype.commitFocus = function () {
+    clearTimeout(this.debounce);
+    var item = this.focusedItem();
+    if (!item || !this.visible) return;
+    var before = this.menu;
+    this.menu = M.select(this.menu, item.id);
+    if (this.menu !== before) {
+      this.sortFocus = 0;
+      this.syncGrid();
+      if (this.app.tab === 'archive') this.render();
     }
-    this.home.rows.forEach(function (r) {
-      rows.push({ id: r.id, slug: r.id, title: r.title, continue: false, cards: r.cards.concat([null]),
-        items: r.cards.map(Cards.fromCard).concat([{ more: 'Vše ›' }]) });
+  };
+
+  ArchiveScreen.prototype.menuOk = function () {
+    clearTimeout(this.debounce);
+    var item = this.focusedItem();
+    if (!item) return;
+    var r = M.ok(this.menu, item.id);
+    var levelChanged = r.state.level !== this.menu.level;
+    this.menu = r.state;
+    if (levelChanged) this.menuFocus = M.selectedIndex(this.menu);
+    this.sortFocus = 0;
+    this.syncGrid();
+    if (r.focus === 'searchField') {
+      this.zone = 'field';
+      this.render();
+      $('ar-search').focus(); // opens the TV's on-screen keyboard
+      return;
+    }
+    this.render();
+  };
+
+  /** Back/Return in the menu: a sub-menu returns to the main menu; false = leave the tab. */
+  ArchiveScreen.prototype.menuBack = function () {
+    clearTimeout(this.debounce);
+    var r = M.back(this.menu);
+    if (r.leave) return false;
+    this.menu = r.state;
+    this.menuFocus = M.selectedIndex(this.menu);
+    this.syncGrid();
+    this.render();
+    return true;
+  };
+
+  /** Into the grid area (Right from the menu): the search field, the cards, else the sort chips. */
+  ArchiveScreen.prototype.enterGrid = function () {
+    var show = this.menu.grid.show;
+    if (show === 'search') this.zone = 'field';
+    else if (this.grid.items.length) this.zone = 'grid';
+    else if (M.sorts(this.menu).length) this.zone = 'sorts';
+    else return;
+    if (this.zone === 'grid') this.grid.focus = Math.min(this.grid.focus, this.grid.items.length - 1);
+  };
+
+  /** Back to the menu, on the selected item. */
+  ArchiveScreen.prototype.toMenu = function () {
+    this.zone = 'menu';
+    this.menuFocus = M.selectedIndex(this.menu);
+  };
+
+  ArchiveScreen.prototype.renderMenu = function () {
+    var box = $('ar-side');
+    var track = box.firstChild;
+    var menu = this.menu;
+    var active = this.isActive() && this.zone === 'menu';
+    track.innerHTML = '';
+    if (!menu) return;
+    var self = this;
+    menu.items.forEach(function (item, i) {
+      var e = el('div', 'ar-menu-item', item.title);
+      e.classList.toggle('ar-menu-back', item.kind === 'back');
+      e.classList.toggle('ar-menu-fixed', item.kind === 'search' || item.kind === 'continue' || item.kind === 'recordings');
+      e.classList.toggle('selected', item.id === menu.selected);
+      e.classList.toggle('focused', active && i === self.menuFocus);
+      e.style.top = i * MENU_STEP + 'px';
+      track.appendChild(e);
     });
-    this.rows = rows;
-    var i = rows.map(function (r) { return r.id; }).indexOf(focusedId);
-    this.row = i >= 0 ? i : Math.max(0, Math.min(this.row, rows.length - 1));
-    if (!rows.length && this.zone === 'rows') this.zone = 'search';
-    if (this.homeLines) this.homeLines.clear();
+    var visible = Math.max(1, Math.floor(box.clientHeight / MENU_STEP)); // the items that fit
+    var focus = this.zone === 'menu' ? this.menuFocus : M.selectedIndex(menu);
+    if (focus < this.menuTop) this.menuTop = focus;
+    if (focus > this.menuTop + visible - 1) this.menuTop = focus - visible + 1;
+    this.menuTop = Math.max(0, Math.min(this.menuTop, Math.max(0, menu.items.length - visible)));
+    track.style.transform = 'translateY(' + -this.menuTop * MENU_STEP + 'px)';
+  };
+
+  // --- the grid ---
+
+  /** The grid's key: what it shows (filter, sort, search text); another key = new cards from page 1. */
+  ArchiveScreen.prototype.gridKey = function () {
+    var r = M.request(this.menu);
+    if (r.kind === 'search') return 'search:' + (this.search.query === null ? '' : this.search.query);
+    if (r.kind === 'continue') return 'continue';
+    return ['category', r.slug, r.genre || '', r.sort].join(':');
+  };
+
+  /** The grid follows the menu's selection (and the search text): loaded anew when it shows something else. */
+  ArchiveScreen.prototype.syncGrid = function () {
+    if (!this.menu) return;
+    var key = this.gridKey();
+    if (this.grid.key === key) return;
+    if (this.grid.lines) this.grid.lines.clear();
+    this.grid = emptyGrid(key);
+    var r = M.request(this.menu);
+    if (r.kind === 'continue') this.grid.items = this.app.resumeStore.continueRow();
+    else if (r.kind === 'category') this.loadPage(1);
+    else if (this.search.query !== null) this.loadPage(1);
+  };
+
+  /** Page `page` of the grid's filter (a category, a sub-genre, our recordings or the search). */
+  ArchiveScreen.prototype.loadPage = function (page) {
     var self = this;
-    this.homeLines = new Cards.Lines($('ar-rows').firstChild, rows.length, ROW_STEP, ROWS_VISIBLE, function (r) {
-      return self.rowElement(r);
+    var g = this.grid;
+    var client = this.client();
+    if (!client || (g.loading && page > 1)) return;
+    var r = M.request(this.menu);
+    var token = ++g.token;
+    var query = this.search.query;
+    g.loading = true;
+    var call = r.kind === 'search' ? client.search(query, page) : client.category(r.slug, r.sort, r.genre, page);
+    call.then(function (answer) {
+      if (self.grid !== g || g.token !== token) return;
+      if (r.kind === 'category' && r.slug !== M.RECORDINGS && page === 1 && (!r.genre || answer.genres.length)) {
+        self.menu = M.withGenres(self.menu, r.slug, answer.genres); // the sub-menu's items
+      }
+      g.items = g.items.concat(answer.cards);
+      g.nextPage = answer.nextPage;
+      g.error = null;
+      // `error` with a 200: iVysílání did not answer, our recordings are still there (the text goes above the grid)
+      g.notice = answer.error;
+      g.attribution = answer.attribution;
+    }, function (e) {
+      if (self.grid !== g || g.token !== token) return;
+      g.error = e.userMessage || A.FAILED;
+    }).then(function () {
+      if (self.grid !== g || g.token !== token) return;
+      g.loading = false;
+      if (!g.items.length && self.zone === 'grid') self.zone = M.sorts(self.menu).length ? 'sorts' : 'menu';
+      if (self.app.tab === 'archive' && self.visible) self.render();
     });
   };
 
-  ArchiveScreen.prototype.col = function (row) {
-    var r = this.rows[row];
-    var c = r ? this.cols[r.id] || 0 : 0;
-    return r ? Math.min(c, r.items.length - 1) : 0;
+  /** The built cards again (thumbnails switched, an entry removed). */
+  ArchiveScreen.prototype.rebuildGrid = function () {
+    if (this.grid.lines) this.grid.lines.clear();
+    this.grid.lines = null;
   };
 
-  ArchiveScreen.prototype.rowElement = function (r) {
+  ArchiveScreen.prototype.isContinue = function () {
+    return this.grid.key === 'continue';
+  };
+
+  ArchiveScreen.prototype.model = function (item) {
+    return this.isContinue() ? Cards.fromResume(item) : Cards.fromCard(item);
+  };
+
+  /** The grid built around the focus only: lines of 3 cards. */
+  ArchiveScreen.prototype.renderGrid = function () {
     var self = this;
-    var row = this.rows[r];
-    var line = el('div', 'ar-row');
-    line.appendChild(el('div', 'ar-row-title', row.title));
-    var track = el('div', 'ar-strip');
-    line.appendChild(track);
-    var strip = new Cards.Strip(track, row.items.length, function (i) { return Cards.element(self.app, row.items[i]); });
-    strip.first = this.firsts[row.id] || 0;
-    line.strip = strip;
-    strip.sync(null);
-    return line;
-  };
-
-  /** Draws the current view (home or category) and its focus. */
-  ArchiveScreen.prototype.render = function () {
-    if (!this.app.dvbConfig) return;
-    $('ar-home').classList.toggle('hidden', this.view !== 'home');
-    $('ar-category').classList.toggle('hidden', this.view !== 'category');
-    if (this.view === 'home') this.renderHome();
-    else this.renderCategory();
-    this.renderTmdb();
-    this.applyFocus();
-  };
-
-  ArchiveScreen.prototype.renderHome = function () {
-    var results = this.search.query !== null;
-    $('ar-rows').classList.toggle('hidden', results);
-    $('ar-results').classList.toggle('hidden', !results);
-    if (results) {
-      this.setNotice($('ar-notice'), this.search.notice);
-      return this.renderGrid($('ar-results'), this.search, this.search.loading ? 'Hledám…' : A.NOTHING_FOUND);
-    }
-    var note = this.home.error || (this.home.loading && !this.rows.length ? 'Načítám archiv…' : '');
-    if (!note && !this.rows.length) note = 'Archiv je zatím prázdný';
-    this.setNotice($('ar-notice'), this.home.error ? '' : this.home.notice);
-    var track = $('ar-rows').firstChild;
-    var message = $('ar-rows').querySelector('.ar-note');
-    if (!message) {
-      message = el('div', 'ar-note');
-      $('ar-rows').appendChild(message);
-    }
-    message.textContent = note;
-    $('ar-rows').classList.toggle('empty', !this.rows.length);
-    track.classList.toggle('hidden', !this.rows.length);
-  };
-
-  /**
-   * A paged grid (search results, a category): `state` = {cards, nextPage, loading, error, focus}; built around
-   * the focus only.
-   */
-  ArchiveScreen.prototype.renderGrid = function (view, state, emptyText) {
-    var self = this;
+    var g = this.grid;
+    var view = $('ar-grid');
     var track = view.firstChild;
-    var rows = Math.ceil(state.cards.length / GRID_COLS);
-    if (!state.lines || state.lines.track !== track) {
+    var rows = Math.ceil(g.items.length / GRID_COLS);
+    if (!g.lines) {
       track.innerHTML = '';
-      state.lines = new Cards.Lines(track, rows, GRID_STEP, GRID_VISIBLE, function (r) {
+      g.lines = new Cards.Lines(track, rows, GRID_STEP_Y, GRID_VISIBLE, function (r) {
         var line = el('div', 'ar-grid-row');
         for (var c = 0; c < GRID_COLS; c++) {
           var i = r * GRID_COLS + c;
-          if (i >= state.cards.length) break;
-          var card = Cards.element(self.app, Cards.fromCard(state.cards[i]));
-          card.style.left = c * Cards.STEP_X + 'px';
+          if (i >= g.items.length) break;
+          var card = Cards.element(self.app, self.model(g.items[i]));
+          card.style.left = c * GRID_STEP_X + 'px';
           card.dataset.index = String(i);
           line.appendChild(card);
         }
         return line;
       });
-      state.builtFor = state.cards.length;
-    } else if (state.builtFor !== state.cards.length) {
-      // a new page: the last (partial) row is built again with its new cards
-      var lastRow = Math.floor((state.builtFor - 1) / GRID_COLS);
-      if (state.lines.built[lastRow]) {
-        track.removeChild(state.lines.built[lastRow]);
-        delete state.lines.built[lastRow];
+      g.builtFor = g.items.length;
+    } else if (g.builtFor !== g.items.length) {
+      // a new page: the last (partial) line is built again with its new cards
+      var lastRow = Math.floor((g.builtFor - 1) / GRID_COLS);
+      if (g.lines.built[lastRow]) {
+        track.removeChild(g.lines.built[lastRow]);
+        delete g.lines.built[lastRow];
       }
-      state.lines.setRows(rows);
-      state.builtFor = state.cards.length;
+      g.lines.setRows(rows);
+      g.builtFor = g.items.length;
     }
-    state.lines.sync(Math.floor(state.focus / GRID_COLS));
-    view.classList.toggle('empty', !state.cards.length);
+    g.lines.sync(this.zone === 'grid' ? Math.floor(g.focus / GRID_COLS) : null);
+    view.classList.toggle('empty', !g.items.length);
     var note = view.querySelector('.ar-note');
-    note.textContent = state.error || (!state.cards.length ? emptyText : state.loading ? 'Načítám další…' : '');
+    note.textContent = this.gridNote();
+  };
+
+  /** The line under (or instead of) the cards: an error, loading, the empty text. */
+  ArchiveScreen.prototype.gridNote = function () {
+    var g = this.grid;
+    if (g.error) return g.error;
+    if (!this.menu) return this.cats.error || 'Načítám…';
+    var searching = this.menu.grid.show === 'search';
+    if (searching && this.search.query === null) return '';
+    if (g.loading) return g.items.length ? 'Načítám další…' : 'Načítám…';
+    return g.items.length ? '' : M.emptyText(this.menu);
+  };
+
+  ArchiveScreen.prototype.renderSorts = function () {
+    var box = $('ar-sorts');
+    var sorts = this.menu ? M.sorts(this.menu) : [];
+    var menu = this.menu;
+    var active = this.isActive() && this.zone === 'sorts';
+    var focus = this.sortFocus;
+    box.innerHTML = '';
+    sorts.forEach(function (s, i) {
+      var chip = el('div', 'day', s.title);
+      chip.classList.toggle('selected', s.id === menu.sort);
+      chip.classList.toggle('focused', active && i === focus);
+      box.appendChild(chip);
+    });
+    box.classList.toggle('hidden', !sorts.length);
+  };
+
+  /** Draws the menu, the grid area and the focus. */
+  ArchiveScreen.prototype.render = function () {
+    if (!this.app.dvbConfig) return;
+    var searching = !!this.menu && this.menu.grid.show === 'search';
+    $('ar-search-box').classList.toggle('hidden', !searching);
+    this.setNotice($('ar-notice'), this.grid.notice || (this.menu && this.cats.error && !this.grid.error ? this.cats.error : ''));
+    this.renderSorts();
+    this.renderGrid();
+    this.applyFocus();
   };
 
   /** The gateway's text above the cards when iVysílání did not answer (our recordings are listed anyway). */
@@ -227,71 +391,47 @@
     element.classList.toggle('hidden', !text);
   };
 
-  /** The grid's state lost its cards (new search, other sub-genre or sort): built anew. */
-  function resetGrid(state) {
-    if (state.lines) state.lines.clear();
-    state.lines = null;
-    state.cards = [];
-    state.nextPage = null;
-    state.focus = 0;
-  }
-
-  /** The cards visible on screen now (the rows' visible columns, the grid's visible lines). */
+  /** The cards visible on screen now (the grid's visible lines). */
   ArchiveScreen.prototype.visibleCards = function () {
-    var cards = [];
-    var grid = this.view === 'category' ? this.category : this.search.query !== null ? this.search : null;
-    if (grid) {
-      var top = grid.lines ? grid.lines.top : 0;
-      return grid.cards.slice(top * GRID_COLS, (top + GRID_VISIBLE + 1) * GRID_COLS);
-    }
-    if (!this.homeLines) return cards;
-    for (var r = this.homeLines.top; r < Math.min(this.rows.length, this.homeLines.top + ROWS_VISIBLE + 1); r++) {
-      var row = this.rows[r];
-      if (row.continue) continue; // this TV's own entries: no TMDb data
-      var first = this.firsts[row.id] || 0;
-      cards = cards.concat(row.cards.slice(first, first + Cards.VISIBLE + 1).filter(Boolean));
-    }
-    return cards;
+    var g = this.grid;
+    if (this.isContinue()) return []; // this TV's own entries: no TMDb data
+    var top = g.lines ? g.lines.top : 0;
+    return g.items.slice(top * GRID_COLS, (top + GRID_VISIBLE + 1) * GRID_COLS);
   };
 
   /**
-   * The TMDB logo and notice at the bottom whenever a card on screen has TMDb data (`tmdb`); the sentence from the
-   * answer when it sent one, else TMDb's standard one.
+   * The TMDB logo and notice at the bottom whenever a card in the grid has TMDb data (`tmdb`); the sentence from
+   * the answer when it sent one, else TMDb's standard one.
    */
   ArchiveScreen.prototype.renderTmdb = function () {
-    var on = this.app.dvbConfig && !this.page.isOpen() && this.visibleCards().some(A.showsTmdb);
-    var answer = this.view === 'category' && this.category ? this.category
-      : this.search.query !== null ? this.search : this.home;
+    var on = !!this.app.dvbConfig && !this.page.isOpen() && this.visibleCards().some(A.showsTmdb);
     $('ar-tmdb').classList.toggle('hidden', !on);
-    $('ar-tmdb').lastChild.textContent = on ? answer.attribution || A.ATTRIBUTION : '';
+    $('ar-tmdb').lastChild.textContent = on ? this.grid.attribution || A.ATTRIBUTION : '';
+  };
+
+  ArchiveScreen.prototype.isActive = function () {
+    return this.app.inContent() && this.app.tab === 'archive' && !Menu.isOpen() && !this.page.isOpen();
   };
 
   ArchiveScreen.prototype.applyFocus = function () {
     if (this.page.isOpen()) return this.page.applyFocus();
-    var active = this.app.inContent() && this.app.tab === 'archive' && !Menu.isOpen();
-    var self = this;
-    $('ar-search').classList.toggle('focused', active && this.view === 'home' && this.zone === 'search');
-    if (this.view === 'home' && this.search.query === null && this.homeLines) {
-      this.homeLines.sync(this.zone === 'rows' ? this.row : null);
-      Object.keys(this.homeLines.built).forEach(function (k) {
-        var r = Number(k);
-        var line = self.homeLines.built[k];
-        var focused = active && self.zone === 'rows' && r === self.row;
-        line.strip.sync(focused ? self.col(r) : null);
-        if (focused) self.firsts[self.rows[r].id] = line.strip.first;
-        if (!focused) Object.keys(line.strip.built).forEach(function (i) { line.strip.built[i].classList.remove('focused'); });
-      });
-    }
-    var grid = this.view === 'category' ? this.category : this.search.query !== null ? this.search : null;
-    var gridZone = this.view === 'category' ? 'grid' : 'results';
-    if (grid && grid.lines) {
-      Object.keys(grid.lines.built).forEach(function (k) {
-        Array.prototype.forEach.call(grid.lines.built[k].childNodes, function (card) {
-          card.classList.toggle('focused', active && self.zone === gridZone && Number(card.dataset.index) === grid.focus);
+    if (!this.app.dvbConfig) return;
+    var active = this.isActive();
+    var g = this.grid;
+    var zone = this.zone;
+    this.renderMenu();
+    $('ar-search').classList.toggle('focused', active && zone === 'field');
+    Array.prototype.forEach.call($('ar-sorts').childNodes, function (chip, i) {
+      chip.classList.toggle('focused', active && zone === 'sorts' && i === this.sortFocus);
+    }, this);
+    if (g.lines) {
+      g.lines.sync(zone === 'grid' ? Math.floor(g.focus / GRID_COLS) : null);
+      Object.keys(g.lines.built).forEach(function (k) {
+        Array.prototype.forEach.call(g.lines.built[k].childNodes, function (card) {
+          card.classList.toggle('focused', active && zone === 'grid' && Number(card.dataset.index) === g.focus);
         });
       });
     }
-    if (this.view === 'category') this.focusChips(active);
     this.renderTmdb(); // what is on screen may have scrolled
   };
 
@@ -301,7 +441,7 @@
 
   // --- search ---
 
-  /** Typing: the results 0.5 s after the last change; under 2 characters the rows come back. */
+  /** Typing: the results 0.5 s after the last change, at least 2 characters. */
   ArchiveScreen.prototype.typed = function (text) {
     var self = this;
     var s = this.search;
@@ -312,139 +452,31 @@
 
   ArchiveScreen.prototype.runSearch = function () {
     var s = this.search;
+    clearTimeout(s.timer);
     var query = A.query(s.text);
     if (query === s.query) return;
-    resetGrid(s);
     s.query = query;
-    s.error = null;
-    s.notice = '';
-    if (query !== null) this.loadSearch(1);
-    this.render();
+    if (!this.menu || this.menu.grid.show !== 'search') return;
+    this.syncGrid();
+    if (this.app.tab === 'archive') this.render();
   };
 
-  ArchiveScreen.prototype.loadSearch = function (page) {
-    var self = this;
-    var s = this.search;
-    var client = this.client();
-    var query = s.query;
-    if (!client || s.loading) return;
-    s.loading = true;
-    client.search(query, page).then(function (r) {
-      if (s.query !== query) return;
-      s.cards = s.cards.concat(r.cards);
-      s.nextPage = r.nextPage;
-      s.error = null;
-      s.notice = r.error;
-      s.attribution = r.attribution;
-    }, function (e) {
-      if (s.query !== query) return;
-      s.error = e.userMessage || A.FAILED;
-    }).then(function () {
-      if (s.query === query) s.loading = false;
-      if (s.query === query && self.app.tab === 'archive' && self.view === 'home') self.render();
-    });
-  };
-
-  /** Clears the search (Return on the results): the rows again. */
+  /** Clears the search (Back in the field or the results): the field stays focused. */
   ArchiveScreen.prototype.clearSearch = function () {
     var s = this.search;
     clearTimeout(s.timer);
     $('ar-search').value = '';
     s.text = '';
-    resetGrid(s);
     s.query = null;
-    s.error = null;
-    s.loading = false;
-    this.zone = 'search';
+    this.zone = 'field';
+    this.syncGrid();
     this.render();
   };
 
-  // --- category ---
-
-  ArchiveScreen.prototype.openCategory = function (row) {
-    this.category = {
-      slug: row.slug, title: row.title, genres: [], genre: null, sort: 'popular', cards: [], nextPage: null,
-      loading: false, error: null, notice: '', focus: 0, chip: 0, sortChip: 0, attribution: '', lines: null, token: 0
-    };
-    this.view = 'category';
-    this.zone = 'grid';
-    this.loadCategory(1);
-    this.render();
-  };
-
-  ArchiveScreen.prototype.loadCategory = function (page) {
-    var self = this;
-    var c = this.category;
-    var client = this.client();
-    if (!client || (c.loading && page > 1)) return;
-    var token = ++c.token;
-    c.loading = true;
-    client.category(c.slug, c.sort, c.genre, page).then(function (r) {
-      if (self.category !== c || c.token !== token) return;
-      if (r.title) c.title = r.title;
-      if (page === 1) c.genres = r.genres;
-      c.cards = c.cards.concat(r.cards);
-      c.nextPage = r.nextPage;
-      c.error = null;
-      c.notice = r.error;
-      c.attribution = r.attribution;
-    }, function (e) {
-      if (self.category !== c || c.token !== token) return;
-      c.error = e.userMessage || A.FAILED;
-    }).then(function () {
-      if (self.category !== c || c.token !== token) return;
-      c.loading = false;
-      if (!c.cards.length && self.zone === 'grid') self.zone = 'sorts';
-      if (self.app.tab === 'archive' && self.view === 'category') self.render();
-    });
-  };
-
-  ArchiveScreen.prototype.renderCategory = function () {
-    var c = this.category;
-    $('ar-cat-title').textContent = c.title;
-    var genres = $('ar-genres');
-    genres.innerHTML = '';
-    [{ id: null, title: 'Vše' }].concat(c.genres).forEach(function (g) {
-      var chip = el('div', 'day', g.title);
-      chip.classList.toggle('selected', g.id === c.genre);
-      genres.appendChild(chip);
-    });
-    genres.classList.toggle('hidden', !c.genres.length);
-    var sorts = $('ar-sorts');
-    sorts.innerHTML = '';
-    A.SORTS.forEach(function (s) {
-      var chip = el('div', 'day', s.title);
-      chip.classList.toggle('selected', s.id === c.sort);
-      sorts.appendChild(chip);
-    });
-    this.setNotice($('ar-cat-notice'), c.notice);
-    this.renderGrid($('ar-cat-grid'), c, c.loading ? 'Načítám…' : 'V této kategorii nic není.');
-  };
-
-  ArchiveScreen.prototype.focusChips = function (active) {
-    var c = this.category;
-    var zone = this.zone;
-    Array.prototype.forEach.call($('ar-genres').childNodes, function (chip, i) {
-      chip.classList.toggle('focused', active && zone === 'genres' && i === c.chip);
-    });
-    Array.prototype.forEach.call($('ar-sorts').childNodes, function (chip, i) {
-      chip.classList.toggle('focused', active && zone === 'sorts' && i === c.sortChip);
-    });
-  };
-
-  /** A sub-genre or sort chip chosen: the grid starts again from page 1, the focus stays on the chip. */
-  ArchiveScreen.prototype.chooseChip = function () {
-    var c = this.category;
-    if (this.zone === 'genres') {
-      var g = c.chip === 0 ? null : c.genres[c.chip - 1];
-      c.genre = g ? g.id : null;
-    } else {
-      c.sort = A.SORTS[c.sortChip].id;
-    }
-    resetGrid(c);
-    c.error = null;
-    c.loading = false;
-    this.loadCategory(1);
+  /** Back in the search field or its results: the search is cleared first, then the menu. */
+  ArchiveScreen.prototype.searchBack = function () {
+    if (this.search.text || this.search.query !== null) return this.clearSearch();
+    this.toMenu();
     this.render();
   };
 
@@ -462,37 +494,145 @@
       this.applyFocus();
       return true;
     }
-    if (this.editing()) {
-      if (key === 'done' || key === 'cancel' || key === 'enter' || key === 'back' || key === 'up' || key === 'down') {
-        $('ar-search').blur();
-        this.runSearch();
-        if (key === 'down' || key === 'done' || key === 'enter') this.down();
-        this.applyFocus();
-        return true;
-      }
-      return 'input';
+    if (this.editing()) return this.onEditingKey(key);
+    if (!this.menu) return key !== 'up';
+    var handled = true;
+    if (this.zone === 'menu') handled = this.onMenuKey(key);
+    else if (this.zone === 'sorts') handled = this.onSortsKey(key);
+    else if (this.zone === 'field') handled = this.onFieldKey(key);
+    else handled = this.onGridKey(key);
+    if (handled === false) return false;
+    this.applyFocus();
+    return true;
+  };
+
+  ArchiveScreen.prototype.onEditingKey = function (key) {
+    if (key === 'back') {
+      $('ar-search').blur();
+      this.searchBack();
+      return true;
     }
-    if (this.view === 'category') return this.onCategoryKey(key);
+    if (key === 'done' || key === 'cancel' || key === 'enter' || key === 'up' || key === 'down') {
+      $('ar-search').blur();
+      this.runSearch();
+      this.zone = 'field';
+      if ((key === 'down' || key === 'done' || key === 'enter') && this.grid.items.length) this.zone = 'grid';
+      this.render();
+      return true;
+    }
+    return 'input';
+  };
+
+  ArchiveScreen.prototype.onMenuKey = function (key) {
     switch (key) {
       case 'up':
-        if (this.zone === 'search') return false;
-        this.up();
+        if (!this.moveMenu(-1)) return false;
         break;
       case 'down':
-        this.down();
+        this.moveMenu(1);
         break;
-      case 'left':
       case 'right':
-        this.sideways(key === 'left' ? -1 : 1);
+        this.commitFocus();
+        this.enterGrid();
         break;
       case 'enter':
-        this.enter();
+        this.menuOk();
         break;
       default:
         break;
     }
-    this.applyFocus();
     return true;
+  };
+
+  ArchiveScreen.prototype.onSortsKey = function (key) {
+    var sorts = M.sorts(this.menu);
+    switch (key) {
+      case 'up':
+        return false;
+      case 'down':
+        if (this.grid.items.length) this.zone = 'grid';
+        break;
+      case 'left':
+        if (this.sortFocus > 0) this.sortFocus--;
+        else this.toMenu();
+        break;
+      case 'right':
+        this.sortFocus = Math.min(sorts.length - 1, this.sortFocus + 1);
+        break;
+      case 'enter':
+        // the grid starts again from page 1, the focus stays on the chip
+        this.menu = M.withSort(this.menu, sorts[this.sortFocus].id);
+        this.syncGrid();
+        this.render();
+        break;
+      default:
+        break;
+    }
+    return true;
+  };
+
+  ArchiveScreen.prototype.onFieldKey = function (key) {
+    switch (key) {
+      case 'up':
+        return false;
+      case 'down':
+        if (this.grid.items.length) this.zone = 'grid';
+        break;
+      case 'left':
+        this.toMenu();
+        break;
+      case 'enter':
+        $('ar-search').focus(); // opens the TV's on-screen keyboard
+        break;
+      default:
+        break;
+    }
+    return true;
+  };
+
+  ArchiveScreen.prototype.onGridKey = function (key) {
+    var g = this.grid;
+    var col = g.focus % GRID_COLS;
+    switch (key) {
+      case 'up':
+        if (g.focus >= GRID_COLS) g.focus -= GRID_COLS;
+        else if (this.menu.grid.show === 'search') this.zone = 'field';
+        else if (M.sorts(this.menu).length) this.zone = 'sorts';
+        else return false;
+        break;
+      case 'down':
+        if (Math.floor(g.focus / GRID_COLS) < Math.ceil(g.items.length / GRID_COLS) - 1) {
+          g.focus = Math.min(g.items.length - 1, g.focus + GRID_COLS);
+        }
+        this.pageAhead();
+        break;
+      case 'left':
+        if (col > 0) g.focus--;
+        else this.toMenu();
+        break;
+      case 'right':
+        if (col < GRID_COLS - 1 && g.focus < g.items.length - 1) g.focus++;
+        this.pageAhead();
+        break;
+      case 'enter':
+        if (this.isContinue()) {
+          this.press.down();
+          return true;
+        }
+        if (g.items[g.focus]) this.page.open(g.items[g.focus]);
+        break;
+      default:
+        break;
+    }
+    this.renderGrid();
+    return true;
+  };
+
+  /** More pages as the focus nears the end ("nextPage"). */
+  ArchiveScreen.prototype.pageAhead = function () {
+    var g = this.grid;
+    var rows = Math.ceil(g.items.length / GRID_COLS);
+    if (g.nextPage && !g.loading && Math.floor(g.focus / GRID_COLS) >= rows - PAGE_AHEAD_ROWS) this.loadPage(g.nextPage);
   };
 
   /** Return: closes what is open, one step at a time; true = handled (else the tabs get the focus). */
@@ -506,18 +646,15 @@
       this.applyFocus();
       return true;
     }
-    if (this.view === 'category') {
-      this.view = 'home';
-      this.zone = 'rows';
-      this.category = null;
-      this.render();
+    if (!this.app.dvbConfig || !this.menu) return false;
+    if (this.zone === 'menu') return this.menuBack();
+    if (this.menu.grid.show === 'search') {
+      this.searchBack();
       return true;
     }
-    if (this.search.query !== null || this.search.text) {
-      this.clearSearch();
-      return true;
-    }
-    return false;
+    this.toMenu();
+    this.render();
+    return true;
   };
 
   ArchiveScreen.prototype.onKeyUp = function (key) {
@@ -526,77 +663,9 @@
     else this.press.up();
   };
 
-  ArchiveScreen.prototype.up = function () {
-    if (this.zone === 'rows') {
-      if (this.row > 0) this.row--;
-      else this.zone = 'search';
-    } else if (this.zone === 'results') {
-      if (this.search.focus >= GRID_COLS) this.search.focus -= GRID_COLS;
-      else this.zone = 'search';
-    }
-  };
-
-  ArchiveScreen.prototype.down = function () {
-    if (this.zone === 'search') {
-      if (this.search.query !== null) {
-        if (this.search.cards.length) this.zone = 'results';
-      } else if (this.rows.length) {
-        this.zone = 'rows';
-      }
-    } else if (this.zone === 'rows') {
-      if (this.row < this.rows.length - 1) this.row++;
-    } else if (this.zone === 'results') {
-      this.gridDown(this.search, this.loadSearch.bind(this));
-    }
-  };
-
-  /** Down in a grid: the next row (its last card when it is shorter); the next page when the end is near. */
-  ArchiveScreen.prototype.gridDown = function (state, loadPage) {
-    var rows = Math.ceil(state.cards.length / GRID_COLS);
-    var row = Math.floor(state.focus / GRID_COLS);
-    if (row < rows - 1) state.focus = Math.min(state.cards.length - 1, state.focus + GRID_COLS);
-    this.pageAhead(state, loadPage);
-  };
-
-  ArchiveScreen.prototype.pageAhead = function (state, loadPage) {
-    var rows = Math.ceil(state.cards.length / GRID_COLS);
-    if (state.nextPage && !state.loading && Math.floor(state.focus / GRID_COLS) >= rows - PAGE_AHEAD_ROWS) loadPage(state.nextPage);
-  };
-
-  ArchiveScreen.prototype.sideways = function (dir) {
-    if (this.zone === 'rows') {
-      var r = this.rows[this.row];
-      this.cols[r.id] = Math.max(0, Math.min(r.items.length - 1, this.col(this.row) + dir));
-    } else if (this.zone === 'results') {
-      var s = this.search;
-      var col = s.focus % GRID_COLS;
-      if ((dir < 0 && col > 0) || (dir > 0 && col < GRID_COLS - 1 && s.focus < s.cards.length - 1)) s.focus += dir;
-      this.pageAhead(s, this.loadSearch.bind(this));
-    }
-  };
-
-  ArchiveScreen.prototype.enter = function () {
-    if (this.zone === 'search') {
-      $('ar-search').focus(); // opens the TV's on-screen keyboard
-      return;
-    }
-    if (this.zone === 'results') {
-      var card = this.search.cards[this.search.focus];
-      if (card) this.page.open(card);
-      return;
-    }
-    var row = this.rows[this.row];
-    if (!row) return;
-    var item = row.cards[this.col(this.row)];
-    if (row.continue) return this.press.down();
-    if (item === null) return this.openCategory(row);
-    this.page.open(item);
-  };
-
   /** The focused "Pokračovat" card's entry, or null. */
   ArchiveScreen.prototype.continueItem = function () {
-    var row = this.rows[this.row];
-    return row && row.continue && this.zone === 'rows' ? row.cards[this.col(this.row)] : null;
+    return this.isContinue() && this.zone === 'grid' ? this.grid.items[this.grid.focus] || null : null;
   };
 
   ArchiveScreen.prototype.playContinue = function () {
@@ -611,69 +680,29 @@
     Menu.open(item.showTitle ? item.showTitle + ' · ' + item.title : item.title, [
       { label: 'Odebrat z řady', action: function () {
         self.app.resumeStore.remove(item.key);
-        self.buildRows();
-        self.render();
+        self.refreshContinue();
       } },
       { label: 'Zrušit', action: null }
     ]);
     this.applyFocus();
   };
 
-  ArchiveScreen.prototype.onCategoryKey = function (key) {
-    var c = this.category;
-    var chips = this.zone === 'genres' ? c.genres.length + 1 : A.SORTS.length;
-    switch (key) {
-      case 'up':
-        if (this.zone === 'grid') {
-          if (c.focus >= GRID_COLS) c.focus -= GRID_COLS;
-          else this.zone = 'sorts';
-        } else if (this.zone === 'sorts') {
-          if (c.genres.length) this.zone = 'genres';
-          else return false;
-        } else {
-          return false;
-        }
-        break;
-      case 'down':
-        if (this.zone === 'genres') this.zone = 'sorts';
-        else if (this.zone === 'sorts') {
-          if (c.cards.length) this.zone = 'grid';
-        } else this.gridDown(c, this.loadCategory.bind(this));
-        break;
-      case 'left':
-      case 'right': {
-        var dir = key === 'left' ? -1 : 1;
-        if (this.zone === 'genres') c.chip = Math.max(0, Math.min(chips - 1, c.chip + dir));
-        else if (this.zone === 'sorts') c.sortChip = Math.max(0, Math.min(chips - 1, c.sortChip + dir));
-        else {
-          var col = c.focus % GRID_COLS;
-          if ((dir < 0 && col > 0) || (dir > 0 && col < GRID_COLS - 1 && c.focus < c.cards.length - 1)) c.focus += dir;
-          this.pageAhead(c, this.loadCategory.bind(this));
-        }
-        break;
-      }
-      case 'enter':
-        if (this.zone === 'grid') {
-          if (c.cards[c.focus]) this.page.open(c.cards[c.focus]);
-        } else {
-          this.chooseChip();
-          return true;
-        }
-        break;
-      default:
-        break;
-    }
-    if (this.app.tab === 'archive') this.renderGrid($('ar-cat-grid'), c, c.loading ? 'Načítám…' : 'V této kategorii nic není.');
-    this.applyFocus();
-    return true;
+  /** "Pokračovat ve sledování" read again (an entry removed, a position saved), the focus kept where it can be. */
+  ArchiveScreen.prototype.refreshContinue = function () {
+    if (!this.isContinue()) return;
+    var g = this.grid;
+    g.items = this.app.resumeStore.continueRow();
+    g.focus = Math.max(0, Math.min(g.focus, g.items.length - 1));
+    if (!g.items.length && this.zone === 'grid') this.toMenu();
+    this.rebuildGrid();
+    this.render();
   };
 
-  /** The player closed: positions may have changed (the row and the show page's buttons). */
+  /** The player closed: positions may have changed (the "Pokračovat" grid and the show page's buttons). */
   ArchiveScreen.prototype.onPlayerClosed = function () {
     if (this.page.isOpen()) this.page.refresh();
-    if (this.app.tab !== 'archive' || !this.app.dvbConfig) return;
-    this.buildRows();
-    this.render();
+    if (this.app.tab !== 'archive' || !this.app.dvbConfig || !this.visible) return;
+    this.refreshContinue();
   };
 
   CT.ArchiveScreen = ArchiveScreen;

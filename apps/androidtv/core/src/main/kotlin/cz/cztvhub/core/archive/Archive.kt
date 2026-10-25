@@ -95,6 +95,5 @@ object ArchiveMessages {
     /** Owner, 2026-10-25 (spec/apps.md "Archiv"). */
     const val NO_GATEWAY = "Archiv potřebuje připojení k serveru. Nastavte ho v Nastavení → Server."
     const val GENERIC = "Archiv se nepodařilo načíst"
-    const val EMPTY = "Archiv je zatím prázdný"
     const val NO_RESULTS = "Nic nenalezeno"
 }

@@ -240,9 +240,7 @@ public enum ArchiveRules {
     public static let recordingsGroupTitle = "Nahráno z antény"
     public static let searchHint = "Hledat v archivu"
     public static let loadFailed = "Archiv se nepodařilo načíst"
-    public static let emptyText = "Archiv je zatím prázdný"
     public static let nothingFound = "Nic nenalezeno"
-    public static let allGenres = "Vše"
     public static let fromStart = "Přehrát od začátku"
 
     /// The gateway's display string ("Režie: … Hrají: …") exactly as sent.
@@ -389,6 +387,17 @@ public enum ArchiveParser {
         return ArchiveHome(rows: rows, attribution: attribution(root), error: text(root["error"]))
     }
 
+    /// `GET /dvb/archive/categories` (T23): the categories in the gateway's order; entries without an id or a title
+    /// and repeated ids are dropped.
+    public static func categories(status: Int, body: Data) throws -> [ArchiveCategory] {
+        let root = try object(status: status, body: body)
+        var seen = Set<String>()
+        return array(root["categories"]).compactMap { item -> ArchiveCategory? in
+            guard let id = text(item["id"]), let title = text(item["title"]), id != "recordings" else { return nil }
+            return ArchiveCategory(id: id, title: title)
+        }.filter { seen.insert($0.id).inserted }
+    }
+
     public static func page(status: Int, body: Data) throws -> ArchivePage {
         let root = try object(status: status, body: body)
         let genres: [ArchiveGenre] = array(root["genres"]).compactMap(genre)
@@ -527,6 +536,12 @@ extension DVBClient {
     public func archiveHome() async throws -> ArchiveHome {
         let response = try await get("/dvb/archive")
         return try ArchiveParser.home(status: response.status, body: response.body)
+    }
+
+    /// The menu's categories (T23).
+    public func archiveCategories() async throws -> [ArchiveCategory] {
+        let response = try await get("/dvb/archive/categories")
+        return try ArchiveParser.categories(status: response.status, body: response.body)
     }
 
     /// A page of a category (`recordings` = ours only); `genre` nil = all sub-genres.

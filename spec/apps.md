@@ -251,21 +251,54 @@ sněmovna streams keep playing live at once). **Back** returns to the guide with
 A fourth tab **Archiv** (Živě · TV průvodce · Archiv · Nastavení) on all three apps: iVysílání and our recordings in
 shared categories, from the gateway's `/dvb/archive` (`spec/dvb-gateway.md` "Archive"). Without a configured gateway
 the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Nastavení → Server." (owner, 2026-10-25).
-- **Home**: a search field on top (the TV's keyboard; results after 0.5 s without typing, at least 2 characters), then
-  rows of cards: **"Pokračovat ve sledování"** (below), "Naše nahrávky", then the 14 categories incl. ČT's "Archiv" (Filmy, Seriály, Dokumenty, Zpravodajství, Sport, Pro děti,
-  Zábava, Historie, Příroda, …) as the gateway orders them. A card: image (landscape), title, year · "film"/"seriál",
-  "★ 7,4" for a TMDb rating (≥ 20 votes; the rating line rules of `programme_page_cases.json`), a source icon (globe
-  = iVysílání, antenna = our recording, both icons for `both`). The TMDB logo + attribution sentence small at the
-  bottom of the tab whenever a card shows TMDb data. The end of a row (or ›) opens the whole category: sub-genre
-  chips and the sort (Nejsledovanější · Naposledy vysílané · A–Z) on top, a grid below, more pages as the focus nears the end.
+- **Layout (T23, owner 2026-10-25, "Jen menu + mřížka" as iVysílání on the TV)**: a **menu on the left** and a
+  **grid of cards on the right**, no rows. The grid always shows what the selected menu item filters ("v mřížce vždy
+  bude obsah vybraného filtru").
+  - Main menu, in this order: "Hledat", "Pokračovat ve sledování", "Naše nahrávky", then the 14 categories as the
+    gateway orders them (`GET /dvb/archive/categories`, ČT's "Archiv" last). Tab opens with the focus in the menu on
+    "Pokračovat ve sledování" when this TV has an entry for the row (below), else on the first category ("Filmy").
+  - Moving the focus in the menu changes the grid after 0.4 s without moving (no request per item passed); OK does
+    the same at once and, on a category, **opens its sub-menu**: the menu then shows the category's title with a
+    back arrow ("‹ Filmy") as the first item, then "Všechny" (the whole category, focused and selected), then its
+    sub-genres in ČT's order (from the category answer's `genres`, e.g. Krimi, Komedie, Zahraniční, České,
+    Pohádky…). OK on "‹ Filmy" or Back/Menu/Return in the sub-menu returns to the main menu with the focus on that
+    category (the grid shows the whole category again). Back in the main menu leaves the tab as elsewhere.
+  - Right from the menu moves into the grid, Left from the grid's first column back to the menu (to the selected
+    item). Back/Menu/Return in the grid returns to the menu. The grid: 3 columns (cards as below: landscape image,
+    title, year · "film"/"seriál", "★ 7,4", source icon), more pages as the focus nears the end ("nextPage").
+  - Above the grid of a category or sub-genre the sort chips "Nejsledovanější · Naposledy vysílané · A–Z"
+    (`sort=popular|newest|az`, default Nejsledovanější; the choice is kept while the sub-menu is open, reset for
+    another category). "Naše nahrávky" has the chips "Nejnovější · A–Z" (`newest|az`). "Pokračovat ve sledování"
+    has none.
+  - "Hledat": the grid area shows the search field on top (the TV's keyboard, hint "Hledat v archivu"; results after
+    0.5 s without typing, at least 2 characters) and the results below; OK on "Hledat" puts the focus into the field.
+    Back in the field or the results first clears the search, then returns to the menu.
+  - Empty grid texts: "Pokračovat ve sledování" "Zatím nemáte nic rozkoukaného"; "Naše nahrávky" "Zatím žádné
+    nahrávky"; a category or sub-genre "Nic nenalezeno"; while loading the T13 loading state; a failed load
+    "Archiv se nepodařilo načíst". The gateway's `error` ("iVysílání teď neodpovídá") is shown above the grid when
+    present (our recordings still listed).
+  - The TMDB logo + attribution sentence small at the bottom of the tab whenever a card in the grid shows TMDb data.
+  - Details (decided 2026-10-25 from the first implementation): Right before the 0.4 s makes the focused item the
+    selection first (the grid and "Left back to the selected item" then agree); the focus resting on "‹ Filmy"
+    selects nothing (only OK goes back). OK on a category before its answer arrived opens the sub-menu with
+    "‹ X" / Všechny only and adds the sub-genres when the answer comes. "Naše nahrávky" starts sorted Nejnovější
+    (`sort=newest`). Back in the search field or results: the first press clears the search, the next returns to
+    the menu. The menu state is reset on every opening of the tab; returning from the show page or the player
+    keeps menu, sort and grid position. When `/dvb/archive/categories` fails: only Hledat / Pokračovat ve sledování
+    / Naše nahrávky, opening on Pokračovat (with an entry) or Naše nahrávky, "Archiv se nepodařilo načíst" above the
+    grid, retried on the next opening. "Menu" in Back/Menu/Return is the Apple TV remote's back button; Samsung
+    has no Menu key (Return, Esc/Backspace in a browser, is Back); Android's Menu key on a continue card offers
+    "Odebrat z řady".
+  - Golden: `archive_cases.json` "menu" (items, initial selection, what OK and Back do), in all three apps.
 - **Show page**: the programme page of T15 extended for shows: image, title, facts (source · year · kind · countries
   · episode count), TMDb rating, description, creators; for a film the buttons as T15 (`Přehrát` / `Pokračovat od …`
   / `Zpět`); for a series season chips and the episode list (`1/26 Od začátku · 53 min · ČT1 9. 1.`), each episode
   `Přehrát` or `Pokračovat od …` (resume keys as today: `ct:<idec>`, `dvb:<recording id>`); not playable → dimmed with
   ČT's text when played. The extra group "Nahráno z antény" lists our recorded episodes of the show.
 - **Playing**: iVysílání episodes through the existing archive path (`idec` → VOD on the TV; DRM-only → ČT's text);
-  our recordings through the Anténa timeline player (T05). Back returns to the page, then to the row.
-- **"Pokračovat ve sledování"** (owner, 2026-10-25, v1): the row lists this TV's "Pokračovat" entries
+  our recordings through the Anténa timeline player (T05). Back returns to the page, then to the grid (T23).
+- **"Pokračovat ve sledování"** (owner, 2026-10-25, v1; a menu item with its grid since T23, "the row" below = that
+  grid): the row lists this TV's "Pokračovat" entries
   (`spec/apps.md` "Pokračovat") newest first, at most 20, from both sources and from the guide alike. To show them
   every resume entry saved from T13 on also keeps, on the device only, `title` (programme or episode), `showTitle`,
   `image` (the card image URL or gateway path), `source` (`ct` / `dvb`) and `savedAt`; entries without `title` (saved
@@ -273,8 +306,8 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
   from the saved position (as "Pokračovat od …"); long OK / menu offers "Odebrat z řady" (deletes the entry). Nothing
   of it leaves the TV; profiles do not carry it (T08).
 - **Shared details (T13, from the first implementation)**:
-  - Each row ends with a "Vše ›" tile that opens the whole category. Return/Back on search results first clears
-    the search. Source label in the facts: "iVysílání" / "Z antény" / "iVysílání a z antény". An episode date gets
+  - Return/Back on search results first clears the search (T13 rows with a "Vše ›" tile and the "Vše" chip are
+    replaced by the T23 menu). Source label in the facts: "iVysílání" / "Z antény" / "iVysílání a z antény". An episode date gets
     the year when it is not this year (`9. 1. 2005`).
   - An episode with a "Pokračovat" offer: OK plays from the position; long OK / menu offers "Přehrát od začátku"
     (this exact label). A series page has no Zpět button (Back/Menu/Return); a film page ends with `Zpět` as T15.
@@ -286,8 +319,7 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
   - The TMDB attribution: the answer's `attribution` when present (the gateway sends it whenever cards carry TMDb
     data), else TMDb's standard sentence. Card images only as an `https` ČT URL, `/dvb/details/image/w342/…` or
     `/dvb/recording/<id>/thumb.jpg` (the latter follows the TV's thumbnails switch); anything else dropped.
-  - Texts (all three apps): search hint "Hledat v archivu"; "Archiv se nepodařilo načíst"; "Archiv je zatím
-    prázdný"; "Nic nenalezeno"; the chip for all sub-genres "Vše"; episode counts with the three plural
+  - Texts (all three apps): search hint "Hledat v archivu"; "Archiv se nepodařilo načíst"; "Nic nenalezeno"; the sub-menu item for the whole category "Všechny" (T23); episode counts with the three plural
     forms "1 díl / 2–4 díly / 5 dílů" (golden in each app's tests). Number keys (channel numbers) are off on Archiv,
     so the search field gets digits.
   - Film buttons follow T15: `Pokračovat od …` first when there is an offer, then `Přehrát` (the film's first

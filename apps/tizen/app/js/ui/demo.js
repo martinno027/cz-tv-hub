@@ -13,10 +13,11 @@
  * `?demo&defaults=none` = no default (version 0). Change CT.Demo.defaults from the console and open Nastavení.
  * Programme page: /dvb/details answers from memory, a synthetic match (rating, original title, a generated poster)
  * for every Anténa "Film: …" programme and "no match" for everything else (CT programmes included).
- * Archiv: /dvb/archive… answers from spec/fixtures/dvb/dvb_archive_{home,category,search,show_series,show_movie}.json
- * when they are there, else from generated shows in memory (`?demo&archive=memory` always uses those,
- * `?demo&archive=ctdown` plays iVysílání not answering: the gateway's text, only our recordings): rows,
- * categories with 3 pages, search by title, a film and a series with seasons, pages and our recorded episodes (one
+ * Archiv: /dvb/archive… answers from spec/fixtures/dvb/dvb_archive_{categories,category,search,show_series,show_movie}.json
+ * when they are there (the category sample for Filmy only), else from generated shows in memory
+ * (`?demo&archive=memory` always uses those, `?demo&archive=ctdown` plays iVysílání not answering: the gateway's
+ * text, only our recordings; `?demo&archive=empty` = every grid empty): the menu's categories, categories with
+ * sub-genres and 3 pages, search by title, a film and a series with seasons, pages and our recorded episodes (one
  * of them is the sample timeline, so it opens the Anténa player).
  */
 (function (root) {
@@ -236,6 +237,8 @@
   // `?demo&archive=ctdown`: iVysílání "does not answer" (200 with the gateway's text, only our recordings; ČT pages 502)
   var CT_DOWN = /[?&]archive=ctdown\b/.test(root.location.search);
   var CT_DOWN_TEXT = 'iVysílání teď neodpovídá';
+  // `?demo&archive=empty`: every category, our recordings and the search answer without cards (the empty texts)
+  var ARCHIVE_EMPTY = /[?&]archive=empty\b/.test(root.location.search);
   var SAMPLE_RECORDING = 'bnova1-1792832400-1792834200'; // the sample timeline's programme
   var CATEGORIES = [['3947-filmy', 'Filmy'], ['3976-serialy', 'Seriály'], ['4003-dokumenty', 'Dokumenty'],
     ['4124-zpravodajstvi', 'Zpravodajství'], ['4118-pro-deti', 'Pro děti'], ['4068-zabava', 'Zábava'],
@@ -284,8 +287,16 @@
     var salt = CATEGORIES.indexOf(c) + 1 + (genre ? Number(genre) : 0) + (sort === 'newest' ? 5 : sort === 'az' ? 9 : 0);
     var cards = demoCards(salt, (page - 1) * 24, 24);
     if (sort === 'az') cards.sort(function (a, b) { return a.title.localeCompare(b.title, 'cs'); });
-    return { title: c[1], genres: slug === 'recordings' ? [] : [{ id: '1', title: 'Komedie' }, { id: '2', title: 'Drama' },
-      { id: '3', title: 'Krimi' }, { id: '4', title: 'Pohádky' }], cards: cards, nextPage: page < 3 ? page + 1 : null };
+    if (slug === 'recordings') {
+      cards = cards.map(function (card, i) {
+        return Object.assign({}, card, { id: 'rec:nahravka' + i, source: 'rec', image: '/dvb/recording/' + SAMPLE_RECORDING + '/thumb.jpg', rating: null, tmdb: false });
+      });
+    }
+    // as ČT's sub-genres (spec/apps.md "Archiv": Krimi, Komedie, Zahraniční, České, Pohádky…); Zpravodajství none
+    var genres = slug === 'recordings' || slug === '4124-zpravodajstvi' ? [] : [{ id: '1', title: 'Krimi' },
+      { id: '2', title: 'Komedie' }, { id: '3', title: 'Zahraniční' }, { id: '4', title: 'České' }, { id: '5', title: 'Pohádky' },
+      { id: '6', title: 'Drama' }];
+    return { title: c[1], genres: genres, cards: cards, nextPage: page < 3 ? page + 1 : null };
   }
 
   function demoSearch(q, page) {
@@ -360,11 +371,23 @@
     };
     var page = Number(param('page') || 1);
     if (/^\/dvb\/archive(\?|$)/.test(path)) return fixtureOr('dvb/dvb_archive_home.json', demoHome);
+    if (/^\/dvb\/archive\/categories(\?|$)/.test(path)) {
+      var generatedCategories = function () {
+        return { categories: CATEGORIES.map(function (c) { return { id: c[0], title: c[1] }; }) };
+      };
+      if (ARCHIVE_MEMORY) return answer(200, generatedCategories());
+      return load('dvb/dvb_archive_categories.json').then(function (r) { return r; }, function () {
+        return answer(200, generatedCategories());
+      });
+    }
     var cat = /^\/dvb\/archive\/category\/([^?]+)/.exec(path);
+    if (ARCHIVE_EMPTY && (cat || /^\/dvb\/archive\/search\?/.test(path))) {
+      return answer(200, { title: '', genres: cat ? [{ id: '1', title: 'Krimi' }] : [], cards: [], nextPage: null });
+    }
     if (cat) {
       var slug = decodeURIComponent(cat[1]);
       var generated = function () { return demoCategory(slug, param('genre'), param('sort'), page); };
-      return CT_DOWN || (page === 1 && !param('genre') && param('sort') === 'popular')
+      return CT_DOWN || (slug === '3947-filmy' && page === 1 && !param('genre') && param('sort') === 'popular')
         ? fixtureOr('dvb/dvb_archive_category.json', generated) : answer(200, generated());
     }
     if (/^\/dvb\/archive\/search\?/.test(path)) {

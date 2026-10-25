@@ -1,6 +1,6 @@
 /*
  * Archiv cards and lazy lists (spec/apps.md "Archiv"): a card = landscape image, title, "2012 · film", "★ 7,4" and
- * the source icons. Rows, grids and episode lists build only the items around the focus (absolutely placed by
+ * the source icons. The grid and the episode lists build only the lines around the focus (absolutely placed by
  * index, so the space of the others stays exact); images are asked for only for built cards, through the app's
  * ImageLoader into blob URLs (memory only).
  */
@@ -8,15 +8,7 @@
   'use strict';
   var CT = root.CT = root.CT || {};
 
-  var Cards = {
-    WIDTH: 288,
-    STEP_X: 312,
-    IMAGE_H: 162,
-    /** Cards fully visible across the screen (1792 px). */
-    VISIBLE: 5,
-    /** Built on each side beyond the visible ones. */
-    SPARE: 2
-  };
+  var Cards = {};
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -63,14 +55,9 @@
     });
   };
 
-  /** The card element of a model ({title, meta, rating, sources, image, progress} or {more: title}). */
+  /** The card element of a model {title, meta, rating, sources, image, progress}. */
   Cards.element = function (app, model) {
     var card = el('div', 'ar-card');
-    if (model.more) {
-      card.classList.add('ar-more');
-      card.appendChild(el('div', 'ar-more-text', model.more));
-      return card;
-    }
     var image = el('div', 'ar-image');
     var icons = el('div', 'ar-placeholder');
     model.sources.forEach(function (s) { icons.appendChild(CT.sourceIcon(s)); });
@@ -91,46 +78,6 @@
     card.appendChild(meta);
     Cards.loadImage(app, image, model.image);
     return card;
-  };
-
-  /**
-   * A horizontal row built lazily: `count` items, `make(i)` → element. `sync(focus)` scrolls so the focused item
-   * is visible and builds the visible ones ± SPARE; the others are dropped.
-   */
-  function Strip(track, count, make) {
-    this.track = track;
-    this.count = count;
-    this.make = make;
-    this.first = 0; // first fully visible index
-    this.built = {}; // index → element
-  }
-
-  Strip.prototype.sync = function (focus) {
-    if (focus !== null) {
-      if (focus < this.first) this.first = focus;
-      if (focus > this.first + Cards.VISIBLE - 1) this.first = focus - Cards.VISIBLE + 1;
-    }
-    var from = Math.max(0, this.first - Cards.SPARE);
-    var to = Math.min(this.count - 1, this.first + Cards.VISIBLE - 1 + Cards.SPARE);
-    var self = this;
-    Object.keys(this.built).forEach(function (k) {
-      var i = Number(k);
-      if (i < from || i > to) {
-        self.track.removeChild(self.built[k]);
-        delete self.built[k];
-      }
-    });
-    for (var i = from; i <= to; i++) {
-      if (this.built[i]) continue;
-      var e = this.make(i);
-      e.style.left = i * Cards.STEP_X + 'px';
-      this.built[i] = e;
-      this.track.appendChild(e);
-    }
-    this.track.style.transform = 'translateX(' + -this.first * Cards.STEP_X + 'px)';
-    Object.keys(this.built).forEach(function (k) {
-      self.built[k].classList.toggle('focused', Number(k) === focus);
-    });
   };
 
   /**
@@ -272,7 +219,6 @@
 
   Cards.LongPress = LongPress;
   Cards.Menu = Menu;
-  Cards.Strip = Strip;
   Cards.Lines = Lines;
   CT.ArchiveCards = Cards;
 })(window);

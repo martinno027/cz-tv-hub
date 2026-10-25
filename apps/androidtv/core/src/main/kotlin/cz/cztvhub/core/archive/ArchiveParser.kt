@@ -23,7 +23,8 @@ object ArchiveParser {
     private val IDEC = Regex("^[A-Za-z0-9_-]{1,40}$")
     private val RECORDING = Regex("^[A-Za-z0-9_-]{1,64}$")
     private val CHANNEL_ID = Regex("^CH_[0-9A-Za-z]{1,10}$")
-    private val THUMBNAIL = Regex("^/dvb/recording/[A-Za-z0-9_-]{1,64}/thumb\\.jpg$")
+    private val SLUG = Regex("^[a-z0-9-]{1,60}$")
+    private val THUMBNAIL =Regex("^/dvb/recording/[A-Za-z0-9_-]{1,64}/thumb\\.jpg$")
 
     fun parseHome(status: Int, body: String): ArchiveHome {
         val root = ok(status, body)
@@ -36,6 +37,22 @@ object ArchiveParser {
         }
         return ArchiveHome(rows, root.str("error"), root.str("attribution"))
     }
+
+    /**
+     * `GET /dvb/archive/categories` (T23): the menu's categories in the gateway's order. An item without a slug safe
+     * in a path or without a title is dropped, as are duplicates and `recordings` (the menu has its own item).
+     */
+    fun parseCategories(status: Int, body: String): List<ArchiveCategory> {
+        val root = ok(status, body)
+        return root.array("categories").mapNotNull { item ->
+            val o = item as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id")?.takeIf { SLUG.matches(it) && it != "recordings" } ?: return@mapNotNull null
+            ArchiveCategory(id, o.str("title")?.trim()?.ifEmpty { null } ?: return@mapNotNull null)
+        }.distinctBy { it.id }
+    }
+
+    /** A category slug the app may put into `/dvb/archive/category/<slug>`. */
+    fun isSlug(value: String): Boolean = SLUG.matches(value)
 
     /** A category page or a search page (search has no `title` and `genres`). */
     fun parsePage(status: Int, body: String): ArchivePage {

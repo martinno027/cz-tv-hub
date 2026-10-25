@@ -7,13 +7,18 @@ import cz.cztvhub.core.ContinueItem
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.archive.ArchiveCard
+import cz.cztvhub.core.archive.ArchiveCategory
 import cz.cztvhub.core.archive.ArchiveGenre
-import cz.cztvhub.core.archive.ArchiveHome
+import cz.cztvhub.core.archive.ArchiveMenu
 import cz.cztvhub.core.archive.ArchiveMessages
 import cz.cztvhub.core.archive.ArchiveParser
 import cz.cztvhub.core.archive.ArchiveRules
 import cz.cztvhub.core.archive.ArchiveShow
 import cz.cztvhub.core.archive.ArchiveSort
+import cz.cztvhub.core.archive.GridContent
+import cz.cztvhub.core.archive.MenuItem
+import cz.cztvhub.core.archive.MenuState
+import cz.cztvhub.core.archive.MenuStep
 import cz.cztvhub.core.dvb.DvbClient
 import cz.cztvhub.tv.tvApp
 import kotlinx.coroutines.Dispatchers
@@ -27,10 +32,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** A paged grid (a category or the search results); [error] = the last page failed. */
+/** A paged grid (Naše nahrávky, a category or the search results); [error] = the last page failed. */
 data class ArchiveGrid(
     val title: String = "",
-    val genres: List<ArchiveGenre> = emptyList(),
     val cards: List<ArchiveCard> = emptyList(),
     val nextPage: Int? = 1,
     val loading: Boolean = false,
@@ -38,15 +42,6 @@ data class ArchiveGrid(
     /** iVysílání did not answer (`200` with an `error`): said above what is listed (our recordings). */
     val notice: String? = null,
     val attribution: String? = null,
-)
-
-/** An open category: its slug, the chosen sort and sub-genre, and the grid. */
-data class CategoryState(
-    val slug: String,
-    val title: String,
-    val sort: ArchiveSort = ArchiveSort.POPULAR,
-    val genre: String? = null,
-    val grid: ArchiveGrid = ArchiveGrid(title = title),
 )
 
 /** An open show page; [season] the season chip shown, its episodes replace the show's first group. */
@@ -59,7 +54,8 @@ data class ShowState(
 )
 
 /**
- * The Archiv tab (spec/apps.md "Archiv (T13)"): everything from the gateway's `/dvb/archive…`, nothing without one.
+ * The Archiv tab (spec/apps.md "Archiv", T23 layout): a menu on the left ([menu], the core's [ArchiveMenu]) and a grid
+ * of what its selected item filters on the right; everything from the gateway's `/dvb/archive…`, nothing without one.
  * Requests run one at a time per screen; a newer one replaces an older one of the same screen.
  */
 class ArchiveViewModel(application: Application) : AndroidViewModel(application) {
@@ -69,8 +65,13 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     private val _configured = MutableStateFlow(app.dvbSettings.config.value != null)
     val configured: StateFlow<Boolean> = _configured.asStateFlow()
 
-    private val _home = MutableStateFlow<Load<ArchiveHome>>(Load.Loading)
-    val home: StateFlow<Load<ArchiveHome>> = _home.asStateFlow()
+    /** The menu; null until the categories answered (or failed) after the tab opened. */
+    private val _menu = MutableStateFlow<MenuState?>(null)
+    val menu: StateFlow<MenuState?> = _menu.asStateFlow()
+
+    /** The grid of "Naše nahrávky" or a category / sub-genre, as [menu] says. */
+    private val _grid = MutableStateFlow(ArchiveGrid())
+    val grid: StateFlow<ArchiveGrid> = _grid.asStateFlow()
 
     /** "Pokračovat ve sledování", read from this TV's resume entries. */
     private val _continueRow = MutableStateFlow<List<ContinueItem>>(emptyList())
@@ -79,26 +80,35 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
-    /** Search results for [query]; null while the query is shorter than 2 characters (the home shows). */
+    /** Search results for [query]; null while the query is shorter than 2 characters. */
     private val _search = MutableStateFlow<ArchiveGrid?>(null)
     val search: StateFlow<ArchiveGrid?> = _search.asStateFlow()
-
-    private val _category = MutableStateFlow<CategoryState?>(null)
-    val category: StateFlow<CategoryState?> = _category.asStateFlow()
 
     private val _show = MutableStateFlow<ShowState?>(null)
     val show: StateFlow<ShowState?> = _show.asStateFlow()
 
-    private var homeJob: Job? = null
+    /** `/dvb/archive/categories` failed: the menu has only its own items, the tab says so above the grid. */
+    private val _categoriesFailed = MutableStateFlow(false)
+    val categoriesFailed: StateFlow<Boolean> = _categoriesFailed.asStateFlow()
+
+    /** The gateway's category list, once it answered; asked again on the next opening after a failure. */
+    private var categories: List<ArchiveCategory>? = null
+
+    /** Sub-genres by category slug, as the first answer of that category listed them (ČT's order). */
+    private val genresBySlug = HashMap<String, List<ArchiveGenre>>()
+
+    private var categoriesJob: Job? = null
+    private var gridJob: Job? = null
     private var searchJob: Job? = null
-    private var categoryJob: Job? = null
     private var showJob: Job? = null
 
     init {
         viewModelScope.launch {
             app.gateway.drop(1).collect {
                 _configured.value = app.dvbSettings.config.value != null
-                loadHome()
+                categories = null
+                genresBySlug.clear()
+                entered()
             }
         }
         viewModelScope.launch {
@@ -108,11 +118,37 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
 
     private fun client(): DvbClient? = app.dvb()?.client
 
-    /** The tab is shown (also back from the player): the home once, the continue row every time. */
-    fun opened() {
+    /** The tab was entered: the menu opens afresh (on "Pokračovat ve sledování" when it has an entry). */
+    fun entered() {
         refreshContinueRow()
-        if (_home.value !is Load.Ready && homeJob?.isActive != true) loadHome()
+        searchJob?.cancel()
+        _query.value = ""
+        _search.value = null
+        _menu.value = null
+        val known = categories
+        if (known != null) {
+            apply(ArchiveMenu.open(known, _continueRow.value.size))
+            return
+        }
+        categoriesJob?.cancel()
+        val client = client() ?: return
+        categoriesJob = viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) {
+                try {
+                    client.archiveCategories()
+                } catch (_: CtException) {
+                    null
+                }
+            }
+            categories = list
+            _categoriesFailed.value = list == null
+            // Without the list the menu still offers Hledat, Pokračovat and Naše nahrávky (which says if it fails).
+            apply(ArchiveMenu.open(list.orEmpty(), _continueRow.value.size))
+        }
     }
+
+    /** Back from the player: the continue grid and the page's "Pokračovat od …" from what the player saved. */
+    fun resumed() = refreshContinueRow()
 
     fun refreshContinueRow() {
         _continueRow.value = app.resume.continueRow()
@@ -124,23 +160,102 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
         refreshContinueRow()
     }
 
-    fun loadHome() {
-        homeJob?.cancel()
-        val client = client() ?: run {
-            _home.value = if (_configured.value) Load.Loading else Load.Failed(ArchiveMessages.NO_GATEWAY)
-            return
+    /** The focus rested on a menu item for [ArchiveMenu.SETTLE_MS] (or Right left it); true = the grid changed. */
+    fun settle(item: MenuItem): Boolean {
+        val menu = _menu.value ?: return false
+        val next = ArchiveMenu.settle(menu, item)
+        if (next.grid == menu.grid && next.selected == menu.selected) return false
+        apply(next)
+        return true
+    }
+
+    /** OK on a menu item; true = the focus goes into the search field. */
+    fun ok(item: MenuItem): Boolean {
+        val step = ArchiveMenu.ok(_menu.value ?: return false, item) as? MenuStep.Show ?: return false
+        apply(step.state)
+        return step.focusSearchField
+    }
+
+    /** Back in the menu; false = not handled here (the main menu: the tab is left as elsewhere). */
+    fun back(): Boolean {
+        val step = ArchiveMenu.back(_menu.value ?: return false) as? MenuStep.Show ?: return false
+        apply(step.state)
+        return true
+    }
+
+    fun setSort(sort: ArchiveSort) {
+        _menu.value?.let { apply(ArchiveMenu.withSort(it, sort)) }
+    }
+
+    /** The failed grid's "Zkusit znovu": the category list too when it had failed. */
+    fun retry() {
+        if (categories.isNullOrEmpty()) {
+            categories = null
+            entered()
+        } else {
+            loadGrid(reset = true)
         }
-        if (_home.value !is Load.Ready) _home.value = Load.Loading
-        homeJob = viewModelScope.launch {
+    }
+
+    /** The focus neared the grid's end: the next page, if any. */
+    fun moreGrid() {
+        val grid = _grid.value
+        if (grid.nextPage == null || grid.loading) return
+        loadGrid(reset = false)
+    }
+
+    private fun apply(next: MenuState) {
+        val old = _menu.value
+        val withGenres = next.category?.let { c -> genresBySlug[c.id]?.let { ArchiveMenu.withGenres(next, c.id, it) } } ?: next
+        _menu.value = withGenres
+        if (old == null || old.grid != withGenres.grid || old.sort != withGenres.sort) loadGrid(reset = true)
+    }
+
+    /** The slug, sort and sub-genre the grid asks the gateway for; null for "Pokračovat" and the search. */
+    private fun gridQuery(menu: MenuState): Triple<String, ArchiveSort, String?>? = when (val g = menu.grid) {
+        GridContent.Recordings -> Triple("recordings", menu.sort, null)
+        is GridContent.Category -> Triple(g.slug, menu.sort, g.genre)
+        GridContent.Continue, GridContent.Search -> null
+    }
+
+    private fun loadGrid(reset: Boolean) {
+        val menu = _menu.value ?: return
+        gridJob?.cancel()
+        val query = gridQuery(menu) ?: return
+        val client = client() ?: return
+        val grid = if (reset) ArchiveGrid() else _grid.value
+        val page = grid.nextPage ?: return
+        _grid.value = grid.copy(loading = true, error = null)
+        gridJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    Load.Ready(client.archiveHome())
+                    Result.success(client.archiveCategory(query.first, query.second, query.third, page))
                 } catch (e: CtException) {
-                    Load.Failed(e.userMessage)
+                    Result.failure(e)
                 }
             }
-            // Keep the rows shown if a later refresh fails.
-            if (result is Load.Ready || _home.value !is Load.Ready) _home.value = result
+            val now = _menu.value ?: return@launch
+            if (gridQuery(now) != query) return@launch
+            result.getOrNull()?.let { answer ->
+                if (query.first != "recordings" && answer.genres.isNotEmpty() && query.first !in genresBySlug) {
+                    genresBySlug[query.first] = answer.genres
+                    _menu.value = ArchiveMenu.withGenres(now, query.first, answer.genres)
+                }
+            }
+            val current = _grid.value
+            _grid.value = result.fold(
+                onSuccess = {
+                    current.copy(
+                        title = it.title,
+                        cards = (current.cards + it.cards).distinctBy(ArchiveCard::id),
+                        nextPage = it.nextPage,
+                        loading = false,
+                        notice = it.error,
+                        attribution = it.attribution ?: current.attribution,
+                    )
+                },
+                onFailure = { current.copy(loading = false, error = (it as CtException).userMessage) },
+            )
         }
     }
 
@@ -188,73 +303,6 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
             },
             onFailure = { grid.copy(loading = false, error = (it as CtException).userMessage) },
         )
-    }
-
-    fun openCategory(slug: String, title: String) {
-        _category.value = CategoryState(slug, title)
-        loadCategoryPage(reset = true)
-    }
-
-    fun closeCategory() {
-        categoryJob?.cancel()
-        _category.value = null
-    }
-
-    fun setSort(sort: ArchiveSort) {
-        val state = _category.value ?: return
-        if (state.sort == sort) return
-        _category.value = state.copy(sort = sort)
-        loadCategoryPage(reset = true)
-    }
-
-    /** A sub-genre chip; null = all. */
-    fun setGenre(genre: String?) {
-        val state = _category.value ?: return
-        if (state.genre == genre) return
-        _category.value = state.copy(genre = genre)
-        loadCategoryPage(reset = true)
-    }
-
-    /** The focus neared the grid's end: the next page, if any. */
-    fun moreCategory() {
-        val state = _category.value ?: return
-        if (state.grid.nextPage == null || state.grid.loading) return
-        loadCategoryPage(reset = false)
-    }
-
-    private fun loadCategoryPage(reset: Boolean) {
-        val state = _category.value ?: return
-        val client = client() ?: return
-        categoryJob?.cancel()
-        val grid = if (reset) ArchiveGrid(title = state.title, genres = state.grid.genres) else state.grid
-        val page = grid.nextPage ?: return
-        _category.value = state.copy(grid = grid.copy(loading = true, error = null))
-        categoryJob = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    Result.success(client.archiveCategory(state.slug, state.sort, state.genre, page))
-                } catch (e: CtException) {
-                    Result.failure(e)
-                }
-            }
-            val now = _category.value ?: return@launch
-            if (now.slug != state.slug || now.sort != state.sort || now.genre != state.genre) return@launch
-            _category.value = now.copy(grid = result.fold(
-                onSuccess = {
-                    now.grid.copy(
-                        title = it.title.ifBlank { now.title },
-                        // The chips stay as the unfiltered category listed them.
-                        genres = now.grid.genres.ifEmpty { it.genres },
-                        cards = (now.grid.cards + it.cards).distinctBy(ArchiveCard::id),
-                        nextPage = it.nextPage,
-                        loading = false,
-                        notice = it.error,
-                        attribution = it.attribution ?: now.grid.attribution,
-                    )
-                },
-                onFailure = { now.grid.copy(loading = false, error = (it as CtException).userMessage) },
-            ))
-        }
     }
 
     fun openShow(card: ArchiveCard) {

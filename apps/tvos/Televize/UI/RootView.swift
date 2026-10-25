@@ -8,6 +8,8 @@ struct RootView: View {
     @State private var tab: Tab = .live
     /// Every open of the guide (its tab chosen, the app back in front on it) shows now again (spec/apps.md).
     @State private var guideOpens = 0
+    /// Every open of Archiv starts its menu afresh (spec/apps.md "Archiv"); the show page and the player keep it.
+    @State private var archiveOpens = 0
     @Environment(\.scenePhase) private var scenePhase
 
     private struct VisibleKey: Equatable {
@@ -23,7 +25,7 @@ struct RootView: View {
             GuideView(opens: guideOpens)
                 .tabItem { Text("TV průvodce") }
                 .tag(Tab.guide)
-            ArchiveView()
+            ArchiveView(opens: archiveOpens)
                 .tabItem { Text("Archiv") }
                 .tag(Tab.archive)
             SettingsView()
@@ -32,6 +34,7 @@ struct RootView: View {
         }
         .onChange(of: tab) { _, tab in
             if tab == .guide { guideOpens += 1 }
+            if tab == .archive { archiveOpens += 1 }
         }
         .onChange(of: scenePhase) { _, phase in
             // back in front on the guide is an open; the player closing is not (the guide stays where it was)

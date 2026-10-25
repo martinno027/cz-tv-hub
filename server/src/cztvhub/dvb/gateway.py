@@ -76,6 +76,7 @@ CT_DAYS_BACK, CT_DAYS_AHEAD = 7, 2  # the apps' guide range (spec/apps.md "TV pr
 POSTER_RETRY_AFTER = 5
 ARCHIVE_PATH = "/dvb/archive"
 ARCHIVE_SEARCH = "/dvb/archive/search"
+ARCHIVE_CATEGORIES = "/dvb/archive/categories"
 ARCHIVE_CATEGORY_RE = re.compile(r"^/dvb/archive/category/(recordings|\d{4}-[a-z-]{1,40})$")
 ARCHIVE_SHOW_RE = re.compile(r"^/dvb/archive/show/([^/]{1,400})$")
 CT_SHOW_ID_RE = re.compile(r"^ct:([A-Za-z0-9]{1,32})$")
@@ -710,10 +711,13 @@ class DvbGateway:
 
     # -- archive (archive_catalog.py) ------------------------------------------------------
     def archive_route(self, path: str, query: Mapping[str, str]) -> Response:
-        """``/dvb/archive``, ``…/category/<slug>``, ``…/search``, ``…/show/<id>`` (spec "Archive")."""
+        """``/dvb/archive``, ``…/categories``, ``…/category/<slug>``, ``…/search``, ``…/show/<id>`` (spec
+        "Archive")."""
         try:
             if path == ARCHIVE_PATH:
                 return json_response(200, self.catalog.home())
+            if path == ARCHIVE_CATEGORIES:
+                return json_response(200, self.catalog.categories())
             if path == ARCHIVE_SEARCH:
                 return json_response(200, self.catalog.search(_search_text(query.get("q")),
                                                               _page(query.get("page"), catalog.MAX_PAGES)))
