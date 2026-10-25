@@ -317,8 +317,12 @@ final class ProfileSyncControllerTests: XCTestCase {
         return (controller, { applied }, { messages })
     }
 
-    private func settle() async {
-        try? await Task.sleep(for: .milliseconds(150))
+    /// Waits for the debounced push instead of a fixed sleep (150 ms was too short on a loaded CI runner).
+    private func settle(until done: () -> Bool) async {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !done(), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     func testSignInChangeDebouncedPushAndSignOut() async throws {
@@ -333,7 +337,7 @@ final class ProfileSyncControllerTests: XCTestCase {
         controller.settingsChanged(channelPrefs: ChannelPrefs(hidden: ["ct:CH_5", "ct:CH_6"]), thumbnails: false)
         controller.settingsChanged(channelPrefs: ChannelPrefs(hidden: ["ct:CH_6"]), thumbnails: false)
         XCTAssertTrue(controller.state.pending)
-        await settle()
+        await settle { !controller.state.pending }
         XCTAssertEqual(api.calls.filter { $0 == "put" }.count, 1, "two quick changes are one push")
         XCTAssertEqual(api.settings.channelPrefs.hidden, ["ct:CH_6"])
         XCTAssertFalse(controller.state.pending)
@@ -380,7 +384,7 @@ final class ProfileSyncControllerTests: XCTestCase {
         try await controller.signIn(name: "Jana", password: "1234")
         api.failSaves = true
         controller.settingsChanged(channelPrefs: ChannelPrefs(), thumbnails: true)
-        await settle()
+        await settle { controller.pushFailed }
         XCTAssertTrue(controller.state.pending)
         XCTAssertTrue(controller.pushFailed)
         api.settings = ProfileDocument(channelPrefs: ChannelPrefs(hidden: ["remote"]), thumbnails: true)  // another TV
