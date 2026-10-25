@@ -66,6 +66,7 @@
   var App = {
     now: Date.now(),
     minute: -1, // last minute tick() handled
+    tickTimer: null,
     tab: 'live',
     zone: 'tabs', // 'tabs' | 'content'
     dvbConfig: null,
@@ -133,6 +134,7 @@
           return;
         }
         self.player.resume();
+        self.tick(); // timers sleep in the background: the clock is right again at once
         // Back from the background (e.g. the next morning): the guide opens at now again.
         if (self.tab === 'guide' && !self.player.isOpen()) {
           self.now = Date.now();
@@ -146,7 +148,6 @@
       this.showTab('live');
       this.refresh();
       setInterval(function () { self.refresh(); }, REFRESH_MS);
-      setInterval(function () { self.tick(); }, 1000);
       setInterval(function () { self.pspTick(); }, PSP_TICK_MS);
       this.tick();
       this.pspTick();
@@ -251,10 +252,16 @@
       $('stage').style.transform = root.tizen || Math.abs(scale - 1) < 0.01 ? '' : 'scale(' + scale + ')';
     },
 
-    /** Every second: the clock; every minute also `now`, so "Dnes" follows midnight in the guide. */
+    /**
+     * On every minute boundary (spec/apps.md "Clock (T22)"): the header clock and `now`, so "Dnes" follows midnight
+     * in the guide. Rescheduled from the wall clock each time, so it stays on the boundary.
+     */
     tick: function () {
+      var self = this;
       var now = Date.now();
-      $('clock').textContent = CT.Days.time(now);
+      clearTimeout(this.tickTimer);
+      this.tickTimer = setTimeout(function () { self.tick(); }, CT.Days.untilNextMinute(now));
+      $('clock').textContent = CT.Days.clock(now);
       var minute = Math.floor(now / 60000);
       if (minute === this.minute) return;
       this.minute = minute;

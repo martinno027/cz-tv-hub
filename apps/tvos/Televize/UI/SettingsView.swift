@@ -90,6 +90,8 @@ private struct SettingsPage: View {
         .padding(.top, 60)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(white: 0.08).ignoresSafeArea())
+        // full screen, so over the tab bar's clock: the same clock at the same place
+        .clockTopRight()
         .onExitCommand { dismiss() }
     }
 }

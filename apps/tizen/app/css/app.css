@@ -78,8 +78,9 @@ html, body {
   color: #000;
 }
 
+/* Clock (spec/apps.md "Clock (T22)"): like an inactive tab label, also on a Nastavení section */
 #clock {
-  font-size: 34px;
+  font-size: 30px;
   color: var(--muted);
 }
 
@@ -585,7 +586,13 @@ main {
 }
 
 #stage.section-open #top {
-  display: none;
+  position: relative;
+  z-index: 5;
+}
+
+#stage.section-open #brand,
+#stage.section-open #tabs {
+  visibility: hidden;
 }
 
 #stage.section-open main {

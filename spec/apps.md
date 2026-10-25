@@ -556,6 +556,15 @@ Catalogue (`spec/fixtures/psp_cases.json` "streams", the same in every app; no o
 - Golden cases `psp_cases.json`: "streams" (catalogue), "live" (status/body → on or not), "arrange" (default order
   with three sources and `sourcesOff` containing `psp`). Tests never contact psp.cz or its CDN.
 
+## Clock (T22)
+Živě, TV průvodce, Archiv and Nastavení (the choice and its full-screen sections) show the **current time top right**, in the
+row of the tab bar (on a screen without one, at the same place): Prague time `H:MM`, 24 h, no leading zero on the
+hour (`9:05`, `14:30`, `0:07`), whatever the device's time zone. It changes **on the minute** (next update scheduled
+at the next minute boundary, not every 60 s from when the screen opened). Same size and colour as the inactive tab
+labels, not focusable, never covering the tab bar or the "Otevřít v iVysílání" button. Not in the player and not on the
+full-screen programme page. Golden cases:
+`spec/fixtures/clock_cases.json` (UTC instant → text, DST included), tested in all three apps.
+
 ## Channel numbers and zapping
 Every channel shown on this TV has a **number**: its 1-based position in `visible` of "Kanály" (hidden channels
 and the channels of a source that is off get no number; the others close up). Reordering or hiding renumbers.

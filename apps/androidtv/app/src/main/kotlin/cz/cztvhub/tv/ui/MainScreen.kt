@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -17,6 +18,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -25,16 +27,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Tab
 import androidx.tv.material3.TabRow
 import androidx.tv.material3.Text
 import cz.cztvhub.core.ChannelNumbers
-import cz.cztvhub.core.Days
+import cz.cztvhub.core.Clock
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.tv.DigitEntry
 import cz.cztvhub.tv.R
@@ -42,6 +49,7 @@ import cz.cztvhub.tv.ZapChannel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Instant
 
 @Composable
 fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: PlayWithCard) {
@@ -68,8 +76,21 @@ fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
             .background(Palette.background)
             .padding(horizontal = 40.dp, vertical = 20.dp),
     ) {
-        if (tab != SETTINGS_TAB || settingsSection == null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TabRow(selectedTabIndex = tab) {
+        // The tab row, or an open section's title in its place; the clock stays top right on both (spec/apps.md
+        // "Clock"), at the height the tab row had.
+        val section = settingsSection.takeIf { tab == SETTINGS_TAB }
+        val density = LocalDensity.current
+        var tabRowHeight by remember { mutableIntStateOf(0) }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = with(density) { tabRowHeight.toDp() })
+                .onSizeChanged { if (section == null) tabRowHeight = it.height },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (section != null) {
+                Text(stringResource(section.title), style = MaterialTheme.typography.headlineMedium)
+            } else TabRow(selectedTabIndex = tab) {
                 tabs.forEachIndexed { index, title ->
                     val open = {
                         // Every open of the guide shows now (spec/apps.md), whatever day it showed before.
@@ -86,7 +107,7 @@ fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
                 }
             }
             Spacer(Modifier.weight(1f))
-            Clock(viewModel)
+            TopClock()
         }
         Spacer(Modifier.height(12.dp))
         when (tab) {
@@ -185,11 +206,23 @@ private fun rememberNumberKeys(viewModel: MainViewModel, onPlay: (PlayRequest) -
     }
 }
 
-/** Own composable so the 30 s tick recomposes only the clock text. */
+/**
+ * Prague `H:MM`, changing on the minute: each update is scheduled at the next minute boundary, and only while the
+ * app is visible (an update on return). Own composable so the tick recomposes only this text.
+ */
 @Composable
-private fun Clock(viewModel: MainViewModel) {
-    val now by viewModel.now.collectAsStateWithLifecycle()
-    Text(Days.time(now), style = MaterialTheme.typography.titleLarge, color = Palette.textDim)
+private fun TopClock() {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val now by produceState(Instant.now(), lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                value = Instant.now()
+                delay(Clock.untilNextMinute(value))
+            }
+        }
+    }
+    // Same size and colour as the inactive tab labels (tv-material's default: content colour at 40 %).
+    Text(Clock.text(now), style = MaterialTheme.typography.titleMedium, color = Palette.text.copy(alpha = 0.4f))
 }
 
 @Composable
