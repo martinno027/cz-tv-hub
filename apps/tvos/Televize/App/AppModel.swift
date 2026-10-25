@@ -276,6 +276,12 @@ final class AppModel {
         let tailnet = tailnet
         let watched = { (inner: HTTPTransport) -> HTTPTransport in
             guard bridged else { return inner }
+            var inner = inner
+            #if DEBUG
+            if UserDefaults.standard.object(forKey: "tailnetFakeRunningAfter") != nil {
+                inner = DebugStartingBridgeTransport(inner: inner) { tailnet.debugBridgeDown }
+            }
+            #endif
             return BridgeWatchTransport(inner) { Task { @MainActor in await tailnet.checkBridge() } }
         }
         // Odebrat bránu while signed in signs out locally first (spec/apps.md "Profil").

@@ -232,4 +232,94 @@ final class TailnetRecoveryTests: XCTestCase {
         let later = await recovery.run(steps(checks: [true]))
         XCTAssertEqual(later, .healthy)
     }
+
+    // MARK: Start (T21)
+
+    func testEveryChangeToRunningReloadsOnce() {
+        recovery.nodeStarted()
+        XCTAssertFalse(recovery.stateRead("Starting"))
+        XCTAssertFalse(recovery.stateRead("NoState"))
+        XCTAssertTrue(recovery.stateRead("Running"), "cold start: the node reached Running")
+        XCTAssertFalse(recovery.stateRead("Running"), "once per change")
+        XCTAssertFalse(recovery.stateRead("Starting"))
+        XCTAssertTrue(recovery.stateRead("Running"), "a later reconnect")
+        recovery.nodeStarted()
+        XCTAssertTrue(recovery.stateRead("Running"), "a new start counts as a change, even when the first read is Running")
+    }
+
+    func testTheReadThatComesWithAStartDoesNotReload() {
+        recovery.nodeStarted()
+        XCTAssertFalse(recovery.stateRead("Running", reload: false))
+        XCTAssertFalse(recovery.stateRead("Running"))
+    }
+
+    func testPollsEverySecondAfterAStartUntilRunningThenEveryThirty() {
+        recovery.nodeStarted()
+        XCTAssertEqual(recovery.pollInterval(settingsOpen: false), 1)
+        XCTAssertEqual(recovery.pollInterval(settingsOpen: true), 1)
+        clock.now += TailnetRecovery.startPollWindow - 1
+        XCTAssertEqual(recovery.pollInterval(settingsOpen: false), 1)
+        clock.now += 1
+        XCTAssertEqual(recovery.pollInterval(settingsOpen: false), TailnetRules.backgroundPollInterval)
+        XCTAssertEqual(recovery.pollInterval(settingsOpen: true), TailnetRules.settingsPollInterval)
+        recovery.stateRead("Running")
+        XCTAssertNil(recovery.pollInterval(settingsOpen: false))
+        XCTAssertEqual(recovery.pollInterval(settingsOpen: true), TailnetRules.settingsPollInterval)
+    }
+
+    func testRunningSoonAfterAStartStopsTheFastPolling() {
+        recovery.nodeStarted()
+        clock.now += 3
+        recovery.stateRead("Running")
+        XCTAssertNil(recovery.pollInterval(settingsOpen: false))
+    }
+
+    func testCheckWhoseRestartReachesRunningReloadsOnlyOnce() async {
+        var steps = steps(checks: [false, true], runningAfter: 4)
+        let isRunning = steps.isRunning
+        // The app reads the status through `stateRead`; its change to Running reloads.
+        steps.isRunning = { [self] in
+            let running = await isRunning()
+            if recovery.stateRead(running ? "Running" : "Starting") { log.append("reload on Running") }
+            return running
+        }
+        let outcome = await recovery.run(steps)
+        XCTAssertEqual(outcome, .recovered)
+        XCTAssertEqual(log.filter { $0.hasPrefix("reload") }, ["reload on Running"])
+    }
+
+    func testRestartAfterRunningCountsAsAChange() async {
+        recovery.nodeStarted()
+        recovery.stateRead("Running")
+        clock.now += TailnetRecovery.quietAfterStart
+        var steps = steps(checks: [false, true], runningAfter: 0)
+        let isRunning = steps.isRunning
+        steps.isRunning = { [self] in
+            let running = await isRunning()
+            if recovery.stateRead(running ? "Running" : "Starting") { log.append("reload on Running") }
+            return running
+        }
+        _ = await recovery.run(steps)
+        XCTAssertEqual(log.filter { $0.hasPrefix("reload") }, ["reload on Running"],
+                       "the restarted node's first Running is a change, the check does not reload again")
+    }
+
+    func testRunningOnlyAfterTheCheckGaveUpReloadsAgain() async {
+        let outcome = await recovery.run(steps(checks: [false, false], runningAfter: nil))
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(log.last, "reload")
+        // the 30 s polling sees Running later: that change reloads once more
+        XCTAssertTrue(recovery.stateRead("Running"))
+    }
+
+    func testConnectingWhileTheNodeIsNotRunning() {
+        let starting = TailnetInfo(state: "Starting")
+        let running = TailnetInfo(state: "Running", selfName: "televize-appletv")
+        XCTAssertTrue(TailnetRules.connecting(enabled: true, info: starting, checking: false))
+        XCTAssertTrue(TailnetRules.connecting(enabled: true, info: TailnetInfo(state: "NoState"), checking: false))
+        XCTAssertFalse(TailnetRules.connecting(enabled: true, info: running, checking: false))
+        XCTAssertTrue(TailnetRules.connecting(enabled: true, info: running, checking: true))
+        XCTAssertFalse(TailnetRules.connecting(enabled: false, info: starting, checking: false))
+        XCTAssertFalse(TailnetRules.connecting(enabled: true, info: nil, checking: false), "no node: no bridge in use")
+    }
 }

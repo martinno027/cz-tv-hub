@@ -452,8 +452,8 @@ struct GuideView: View {
                     .buttonStyle(DayChipStyle(isSelected: option == highlighted))
                     .focused($focusedChip, equals: option)
             }
-            // Tailscale is being checked: the Anténa rows come back once it answers (spec/apps.md T18).
-            if model.tailnet.checking, model.antenna != nil, model.channelPrefs.prefs.isOn(.dvb) {
+            // Tailscale is being checked or not connected yet: the Anténa rows come back once it answers (spec/apps.md T18, T21).
+            if model.tailnet.connecting, model.antenna != nil, model.channelPrefs.prefs.isOn(.dvb) {
                 Spacer(minLength: 24)
                 Text(TailnetRules.connectingLine).font(.callout).foregroundStyle(.secondary)
             }

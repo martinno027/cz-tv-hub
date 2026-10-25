@@ -20,8 +20,9 @@ struct LiveView: View {
     var body: some View {
         let prefs = model.channelPrefs
         let channels = prefs.channels(antenna: antennaChannels).visible
-        // Tailscale is being checked: "Připojuji se k Tailscale…" instead of the gateway's error (spec/apps.md T18).
-        let connecting = model.tailnet.checking && model.antenna != nil && prefs.prefs.isOn(.dvb)
+        // Tailscale is being checked or not connected yet: "Připojuji se k Tailscale…" instead of the gateway's error
+        // (spec/apps.md T18, T21).
+        let connecting = model.tailnet.connecting && model.antenna != nil && prefs.prefs.isOn(.dvb)
         // "All hidden" only once the Anténa channels are known (or Anténa is off / not configured).
         let antennaPending = model.antenna != nil && prefs.prefs.isOn(.dvb) && antennaChannels.isEmpty
             && (antennaError == nil || connecting)
