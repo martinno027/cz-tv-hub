@@ -6,7 +6,9 @@ Pure decisions, no I/O, so the rules are unit-tested:
    the channel that currently holds the most hours goes, so every recorded channel keeps about the same last
    N hours. A channel's newest block (the one being written) is never touched.
 3. If the reserve still cannot be reached, recording pauses (the gateway's hard stop; TVHeadend's own free-space
-   setting does not cover these files).
+   setting does not cover these files). While paused the target is the reserve + ``RESUME_MARGIN``, the level at
+   which recording resumes: deleting only to the reserve could leave the free space between the two for good, so
+   that nothing would be deleted and nothing recorded.
 """
 from __future__ import annotations
 
@@ -36,7 +38,9 @@ class Plan:
     reasons: dict[str, str]  # channel/block → "age" | "space"
 
 
-def plan(blocks: dict[str, list[BlockInfo]], now: float, max_days: int, free: int, total: int) -> Plan:
+def plan(blocks: dict[str, list[BlockInfo]], now: float, max_days: int, free: int, total: int,
+         extra: int = 0) -> Plan:
+    """``extra``: bytes to free beyond the reserve (``RESUME_MARGIN`` while recording is paused)."""
     days = clamp_days(max_days)
     cutoff = now - days * DAY
     delete: list[BlockInfo] = []
@@ -54,7 +58,7 @@ def plan(blocks: dict[str, list[BlockInfo]], now: float, max_days: int, free: in
             else:
                 keep.append(block)
         left[channel] = keep
-    need = reserve_bytes(total) - (free + gained)
+    need = reserve_bytes(total) + extra - (free + gained)
     while need > 0:
         # the channel with the most hours that still has a block besides the one being written
         candidates = [(sum(b.seconds for b in items), channel) for channel, items in left.items() if len(items) > 1]

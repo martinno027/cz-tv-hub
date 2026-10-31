@@ -10,6 +10,7 @@ from cztvhub.dvb.buffer import BlockInfo, BufferStore, block_name, block_start
 from cztvhub.dvb.recorder import audio_label, build_command, parse_rolling, parse_streams, segment_number
 
 CH = "9f8e7d6c5b4a39281706f5e4d3c2b1a0"
+OTHER = "aaaabbbbccccddddeeeeffff00001111"
 T0 = 1792300800  # 2026-10-18 05:20 UTC, a block boundary
 GB = 1000 ** 3
 
@@ -92,6 +93,108 @@ def blk(channel, i, hours=1 / 6, size=GB, base=T0):
     return BlockInfo(channel, block_name(start), start, start + 600, hours * 3600, size)
 
 
+class LateDiskTest(unittest.TestCase):
+    """The recordings disk mounted after the gateway started (our Pi, 2026-10-29: the service 2.4 s before the
+    USB disk): the index is read again, so age and space deletions see the old blocks too (T24)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / "buffer"
+        self.work = Path(self.tmp.name) / "work"
+        self.work.mkdir()
+        self.dev = [1]  # "the SD card"
+
+    def store(self):
+        return BufferStore(self.root, device=lambda path: self.dev[0])
+
+    def fill_disk(self, blocks=3, channels=(CH,)):
+        """What was recorded before the restart, as the late disk brings it."""
+        writer = BufferStore(self.root)
+        for channel in channels:
+            for n in range(blocks * 4):  # 4 segments of 150 s per 10-minute block
+                add(writer, self.work, channel, "1792300800-ab12", n, T0 + n * 150, 150)
+        for channel in channels:
+            for run in ("1792300000-dead", "1792300800-ab12"):
+                (self.root / channel / "incoming" / run).mkdir(parents=True)
+
+    def test_index_read_again_when_the_disk_appears(self):
+        store = self.store()  # started before the disk: nothing there
+        self.fill_disk()
+        self.assertIsNone(store.reload_if_moved(lambda ch: []))  # same filesystem: not read again
+        self.assertEqual(store.channels(), [])
+        self.dev[0] = 2  # the disk is mounted
+        self.assertEqual(store.reload_if_moved(lambda ch: ["1792300800-ab12"]), 3)
+        self.assertEqual([b.name for b in store.blocks(CH)], ["20261018T0520", "20261018T0530", "20261018T0540"])
+        self.assertIsNone(store.reload_if_moved(lambda ch: []))  # once
+        # the running recorder's working dir stays, a dead run's goes
+        self.assertEqual(sorted(p.name for p in (self.root / CH / "incoming").iterdir()), ["1792300800-ab12"])
+        # numbering continues after what was on the disk
+        self.assertEqual(add(store, self.work, CH, "1792300800-ab12", 12, T0 + 1800).g, 12)
+
+    def archive(self, store, free, total=100 * GB):
+        from cztvhub.dvb.archive import Archive
+        from cztvhub.dvb.recorder import RecorderManager
+        from cztvhub.dvb.thumbs import Settings, Thumbnails
+        settings = Settings(Path(self.tmp.name) / "state")
+        settings.update(recordChannels=[CH, OTHER])
+
+        class Rec:
+            def __init__(self, ch):
+                self.ch, self.run, self.state = ch, None, "x"
+
+            def start(self):
+                pass
+
+            def stop(self, wait=0):
+                pass
+
+        logs = []
+        manager = RecorderManager(store, lambda ch: None, factory=Rec, log=logs.append)
+        archive = Archive(store, manager, settings, Thumbnails(None, settings), 3, log=logs.append,
+                          offered=lambda: {CH, OTHER}, allow_system_disk=True, now=lambda: T0 + 1800)
+        store.disk = lambda: (free[0], total)
+        return archive, manager, logs
+
+    def test_late_disk_full_deletes_the_oldest_and_keeps_recording(self):
+        store = self.store()
+        free = [50 * GB]
+        archive, manager, logs = self.archive(store, free)
+        archive.enforce()
+        self.fill_disk(blocks=3, channels=(CH, OTHER))
+        self.dev[0] = 2
+        free[0] = space.reserve_bytes(100 * GB) - 1  # one byte below the reserve: one block
+        plan = archive.enforce()
+        self.assertTrue(any("read again" in line for line in logs), logs)
+        # the oldest block of a channel goes (the old recording is known again), the newest stay, no pause
+        self.assertEqual([b.name for b in plan.delete], ["20261018T0520"])
+        self.assertEqual(plan.shortfall, 0)
+        self.assertFalse(manager.paused)
+        names = {c: [b.name for b in store.blocks(c)] for c in (CH, OTHER)}
+        self.assertIn("20261018T0540", names[CH])
+        self.assertIn("20261018T0540", names[OTHER])
+        self.assertEqual(len(names[CH]) + len(names[OTHER]), 5)
+
+    def test_paused_frees_up_to_where_recording_resumes(self):
+        store = self.store()
+        self.fill_disk(blocks=4, channels=(CH,))
+        store = self.store()  # disk present from the start this time
+        # above the reserve, one byte below where recording resumes
+        free = [space.reserve_bytes(100 * GB) + space.RESUME_MARGIN - 1]
+        archive, manager, logs = self.archive(store, free)
+        manager.pause(True)
+
+        def delete_block(channel, block, real=store.delete_block):
+            free[0] += GB  # what a real block frees on the disk
+            return real(channel, block)
+
+        store.delete_block = delete_block
+        plan = archive.enforce()
+        self.assertEqual([b.name for b in plan.delete], ["20261018T0520"])  # stuck before T24: nothing deleted
+        self.assertFalse(manager.paused)  # and recording resumed
+        self.assertIn("dvb: recording resumed", logs)
+
+
 class SpaceTest(unittest.TestCase):
     def test_age_always_wins(self):
         now = T0 + 5 * 86400
@@ -127,6 +230,14 @@ class SpaceTest(unittest.TestCase):
         self.assertGreater(plan.shortfall, 0)  # → recording pauses
         self.assertEqual(space.reserve_bytes(20 * GB), 5 * GB)  # at least 5 GB
         self.assertEqual(space.reserve_bytes(128 * GB), int(12.8 * GB))
+
+    def test_paused_target_includes_the_resume_margin(self):
+        blocks = {CH: [blk(CH, i) for i in range(4)]}
+        free = 100 * GB + space.RESUME_MARGIN // 2  # reserve of 1000 GB = 100 GB
+        self.assertEqual(space.plan(blocks, T0 + 2400, 3, free=free, total=1000 * GB).delete, [])
+        paused = space.plan(blocks, T0 + 2400, 3, free=free, total=1000 * GB, extra=space.RESUME_MARGIN)
+        self.assertEqual([b.name for b in paused.delete], [blocks[CH][0].name])
+        self.assertEqual(paused.shortfall, 0)
 
     def test_hours_per_channel_estimate(self):
         blocks = {CH: [blk(CH, i, size=GB // 6) for i in range(6)]}  # 1 GB/h

@@ -120,6 +120,8 @@ sudo install -d -o cztvhub -g cztvhub /srv/tv/buffer
 
 V `/etc/cztvhub/cztvhub.conf` v sekci `[dvb]` nastavte `buffer_dir = /srv/tv/buffer` a restartujte službu
 (`sudo systemctl restart cztvhub`). Služba smí zapisovat pod `/srv/tv` (je to v `cztvhub.service`).
+Díky `nofail` Raspberry naběhne i bez disku. Služba při startu počká, až se disk připojí. Když se připojí později,
+brána si ho sama najde a načte, co na něm je (dřív o starých nahrávkách nevěděla a nahrávání se zastavilo).
 
 Pokud chcete dočasné soubory pro přehrávání na velkém disku, změňte `hls_dir` v konfiguraci a tutéž cestu
 doplňte do `ReadWritePaths=` v `/etc/systemd/system/cztvhub.service`.
