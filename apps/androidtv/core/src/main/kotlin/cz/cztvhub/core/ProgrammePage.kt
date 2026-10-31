@@ -30,9 +30,9 @@ object ProgrammePage {
             PageState.ENDED -> playable || source == PageSource.CT
         }
         val list = ArrayList<PageButton>()
+        if (state == PageState.AIRING) list += PageButton.LIVE  // first and focused (T26)
         if (canStart && resume) list += PageButton.RESUME
         if (canStart) list += PageButton.START_OVER
-        if (state == PageState.AIRING) list += PageButton.LIVE
         if (source == PageSource.CT && state != PageState.FUTURE) list += PageButton.OPEN_OFFICIAL_APP
         return list
     }

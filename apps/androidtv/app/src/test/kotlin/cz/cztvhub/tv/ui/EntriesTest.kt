@@ -36,7 +36,7 @@ class EntriesTest {
 
     @Test fun airingCtWithOfferResumesFirst() {
         val page = ct("2026-10-17T17:30:00Z", "2026-10-17T19:00:00Z").page(now, offers)!!
-        assertEquals(listOf(PageButton.RESUME, PageButton.START_OVER, PageButton.LIVE, PageButton.OPEN_OFFICIAL_APP), page.buttons())
+        assertEquals(listOf(PageButton.LIVE, PageButton.RESUME, PageButton.START_OVER, PageButton.OPEN_OFFICIAL_APP), page.buttons())
         assertEquals("23:10", page.resumeLabel)
         val resume = page.request(PageButton.RESUME) as PlayRequest.Startover
         assertEquals(1390.0, resume.resumeSeconds!!, 0.0)
@@ -49,7 +49,7 @@ class EntriesTest {
 
     @Test fun airingCtWithoutOffer() {
         val page = ct("2026-10-17T17:30:00Z", "2026-10-17T19:00:00Z").page(now)!!
-        assertEquals(listOf(PageButton.START_OVER, PageButton.LIVE, PageButton.OPEN_OFFICIAL_APP), page.buttons())
+        assertEquals(listOf(PageButton.LIVE, PageButton.START_OVER, PageButton.OPEN_OFFICIAL_APP), page.buttons())
         assertNull(page.resumeLabel)
     }
 
@@ -90,7 +90,7 @@ class EntriesTest {
 
     @Test fun growingRecordingWithOfferHasAllThreeOptions() {
         val page = dvb("2026-10-17T17:30:00Z", "2026-10-17T19:00:00Z", RecordingState.RECORDING).page(now, offers)!!
-        assertEquals(listOf(PageButton.RESUME, PageButton.START_OVER, PageButton.LIVE), page.buttons())
+        assertEquals(listOf(PageButton.LIVE, PageButton.RESUME, PageButton.START_OVER), page.buttons())
         assertTrue(page.request(PageButton.LIVE) is PlayRequest.DvbLive)
         assertEquals(1390.0, (page.request(PageButton.RESUME) as PlayRequest.DvbRecorded).resumeSeconds!!, 0.0)
         assertEquals(true, (page.request(PageButton.START_OVER) as PlayRequest.DvbRecorded).fromStart)
