@@ -2,10 +2,15 @@
 Description=cz-tv-hub (Ceska televize playlist/redirect service, DVB-T2 gateway)
 After=network-online.target tvheadend.service
 Wants=network-online.target
+# The recordings disk (/srv/tv, fstab "nofail") is mounted before the start when it is there (only After=, no
+# Requires=: a missing disk must not stop the CT streams); the gateway also reads the index again if it comes later.
+After=srv-tv.mount
 
 [Service]
 User=cztvhub
 Environment=PYTHONPATH=/opt/cztvhub/src
+# Log lines reach the journal at once (block-buffered stdout held them back: one line in two days, 2026-10-31)
+Environment=PYTHONUNBUFFERED=1
 # DVB stays off unless enabled in the config; without [dvb] enabled = true this is the CT-only server.
 ExecStart=/usr/bin/python3 -m cztvhub serve --config /etc/cztvhub/cztvhub.conf
 Restart=always

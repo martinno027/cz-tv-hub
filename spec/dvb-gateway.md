@@ -143,7 +143,12 @@ Approved by the user on 2026-10-23 (CLAUDE.md hard rules, `docs/legal-notes.md`;
   clamped) are deleted whatever the free space; (2) **reserve**: while less than max(10 % of the disk, 5 GB) is free,
   the oldest block of the channel holding the most hours is deleted (a channel's newest block never), so all recorded
   channels keep about the same last N hours; (3) if the reserve still cannot be reached, **recording pauses** (resumes
-  once reserve + 1 GB is free). TVHeadend's own free-space setting does not cover these files. Switching "Nahrávat"
+  once reserve + 1 GB is free; while paused the deletions aim at reserve + 1 GB, so the free space cannot stay
+  between the two with nothing deleted and nothing recorded, T24). The index of blocks is read from the disk at the
+  start and **read again when `buffer_dir` turns out to be on another filesystem** (a recordings disk mounted after
+  the service started, `nofail` in fstab: seen 2026-10-29, the old blocks were unknown, so only new ones were
+  deleted and recording paused for good; T24); the systemd unit is ordered `After=srv-tv.mount` (no `Requires=`: a
+  missing disk does not stop the CT streams). TVHeadend's own free-space setting does not cover these files. Switching "Nahrávat"
   off or hiding a channel deletes its recording at once; recordings of channels no longer selected or offered are
   deleted on the next pass (never while TVHeadend is unreachable).
 - **Programmes**: in `/dvb/epg` an event of a recorded channel gets `recording: {"id": "b<channel>-<start>-<end>",

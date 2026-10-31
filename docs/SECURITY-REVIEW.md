@@ -43,6 +43,9 @@ of "done".
 
 - No download or export of video: only HLS for playback, sessions deleted when viewing stops; recordings only through
   the views the spec names. *Wrong:* a route that returns a whole recording or file listing.
+- Recordings are never kept longer than the retention allows: the age limit applies to every block on the disk,
+  also after the recordings disk was mounted later than the service started (the index is read again, T24).
+  *Wrong:* blocks the gateway does not know about (a late mount, files left behind) that no rule ever deletes.
 - Derived data stays as approved: thumbnails one still ≤ 480 px, memory only; ad breaks only timestamps and masks.
   *Wrong:* a cache on disk, a series of frames, a client-chosen seek for thumbnails.
 - Only the cleaned title reaches TMDb (year and kind decide the match locally); `/dvb/details` takes a programme id,

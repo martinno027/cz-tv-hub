@@ -626,13 +626,18 @@ class Archive:
     def enforce(self) -> space.Plan:
         """Age limit, free-space reserve (fair share), hard stop; and recordings of channels no longer
         selected or offered are deleted."""
+        found = self.store.reload_if_moved(self.recorders.active_runs)
+        if found is not None:
+            self.log(f"dvb: recording: {self.store.root} is on another filesystem now (the recordings disk "
+                     f"mounted after the start?), {found} block(s) read again")
         wanted = self._wanted()
         for channel in self.store.channels() if wanted is not None else []:
             if channel not in wanted:
                 self.forget_channel(channel)
         blocks = {c: self.store.blocks(c) for c in self.store.channels()}
         free, total = self.store.disk()
-        plan = space.plan(blocks, self.now(), self.max_days(), free, total)
+        extra = space.RESUME_MARGIN if self.recorders.paused else 0  # paused: free up to where recording resumes
+        plan = space.plan(blocks, self.now(), self.max_days(), free, total, extra)
         for block in plan.delete:
             self.store.delete_block(block.channel, block.name)
         if plan.delete:

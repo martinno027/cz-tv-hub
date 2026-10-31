@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 BLOCK_SECONDS = 600
 CHANNEL_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -85,17 +85,40 @@ class _Channel:
         self.longest = max((s.duration for s in self.segments), default=0.0)
 
 
+def _device(path: Path) -> int | None:
+    try:
+        return os.stat(path).st_dev
+    except OSError:
+        return None
+
+
 class BufferStore:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, device: Callable[[Path], int | None] = _device):
         self.root = Path(root)
         self._lock = threading.Lock()
-        self._channels: dict[str, _Channel] = {}
-        self._load()
+        self._device = device
+        self._channels = self._scan(lambda channel: set())
+        # the filesystem the index was read from: a recordings disk mounted after the start (fstab ``nofail``,
+        # the service up 2.4 s before the USB disk on our Pi, 2026-10-29) is found and read again
+        self._dev = self._device(self.root)
 
     # -- loading ---------------------------------------------------------------------------
-    def _load(self) -> None:
+    def reload_if_moved(self, active: Callable[[str], Iterable[str]]) -> int | None:
+        """Read the index again when ``buffer_dir`` is on another filesystem than at the last read (a disk
+        mounted late); ``active`` gives each channel's running runs, whose working dirs are kept. The number of
+        blocks found, or None when nothing changed."""
+        dev = self._device(self.root)
+        if dev is None or dev == self._dev:
+            return None
+        with self._lock:  # add() holds it for the whole segment, so nothing is half-indexed
+            self._channels = self._scan(active)
+            self._dev = dev
+            return sum(len(chan.sizes) for chan in self._channels.values())
+
+    def _scan(self, active: Callable[[str], Iterable[str]]) -> dict[str, _Channel]:
+        channels: dict[str, _Channel] = {}
         if not self.root.is_dir():
-            return
+            return channels
         for cdir in self.root.iterdir():
             if not (cdir.is_dir() and CHANNEL_RE.match(cdir.name)):
                 continue
@@ -124,9 +147,14 @@ class BufferStore:
             chan.segments.sort(key=lambda s: s.g)
             chan.reindex()
             chan.next_g = chan.segments[-1].g + 1 if chan.segments else 0
-            self._channels[cdir.name] = chan
+            channels[cdir.name] = chan
             # ffmpeg working dirs of a previous run are useless after a restart
-            shutil.rmtree(cdir / "incoming", ignore_errors=True)
+            keep = set(active(cdir.name))
+            incoming = cdir / "incoming"
+            for wdir in incoming.iterdir() if incoming.is_dir() else []:
+                if wdir.name not in keep:
+                    shutil.rmtree(wdir, ignore_errors=True)
+        return channels
 
     # -- paths -----------------------------------------------------------------------------
     def channel_dir(self, channel: str) -> Path:
@@ -175,16 +203,17 @@ class BufferStore:
         block = block_name(start)
         bdir = self.channel_dir(channel) / "blocks" / block
         bdir.mkdir(parents=True, exist_ok=True)
+        # one lock for the move, the index line and the memory, so reload_if_moved never sees half of it
         with self._lock:
             chan = self._channels.setdefault(channel, _Channel())
             seg = Segment(channel, run, n, chan.next_g, start, duration, block)
             chan.next_g += 1
-        target = bdir / seg.file
-        os.replace(source, target)
-        size = target.stat().st_size
-        with open(bdir / INDEX, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"r": run, "n": n, "g": seg.g, "t": round(start, 3), "d": round(duration, 3)}) + "\n")
-        with self._lock:
+            target = bdir / seg.file
+            os.replace(source, target)
+            size = target.stat().st_size
+            with open(bdir / INDEX, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"r": run, "n": n, "g": seg.g, "t": round(start, 3),
+                                    "d": round(duration, 3)}) + "\n")
             if chan.segments and start < chan.segments[-1].start:
                 chan.ordered = False
             chan.longest = max(chan.longest, duration)
