@@ -231,15 +231,17 @@ sněmovna streams keep playing live at once). **Back** returns to the guide with
   line as in the guide ("Právě běží", "Pořad nebyl nahrán", "Ještě nezačalo" …). With TMDb data the attribution line
   and the TMDB logo at the bottom, small.
 - **Buttons** (`spec/fixtures/programme_page_cases.json`, the same decision as the old choice, now a list):
-  airing → [`Pokračovat od …`] `Od začátku` `Živě` (`Od začátku` only when the airing programme is playable from
-  the start: CT buffer, or an Anténa recording in state `recording`); ended and playable → [`Pokračovat od …`]
+  airing → `Živě` [`Pokračovat od …`] `Od začátku` (**`Živě` first and focused, owner 2026-10-31, T26**;
+  `Od začátku` only when the airing programme is playable from the start: CT buffer, or an Anténa recording in
+  state `recording`); ended and playable → [`Pokračovat od …`]
   `Od začátku`; an ended ČT programme always offers `Od začátku` (playing shows ČT's own text when it cannot be
   played: licence, DRM — the decision rules); future → none; an Anténa programme not recorded → none, the state line
   says why; `Pokračovat` only together with a playable start; ČT programmes that have started also get **`Otevřít v
   iVysílání`** (Samsung: not offered, as before); every page ends with **`Zpět`**. Focus starts on the first button.
   Facts: duration = broadcast end − start; genre = the guide's, else the first two TMDb genres; year from TMDb only;
   the original title only when it differs from the shown and the TMDb Czech title. The page stays under the player
-  and is recomputed (buttons, a new `Pokračovat` focused) when the player closes.
+  and is recomputed when the player closes, the focus on the first button again (`Živě` while airing, else a new
+  `Pokračovat`).
 - **Details** are fetched from `GET /dvb/details` (`spec/dvb-gateway.md`) when the page opens (CT programmes too,
   with `source=ct`), only with a configured gateway; the page shows at once and the TMDb lines fill in; `404` or no
   gateway = the page without them. Posters through the gateway (`/dvb/details/image/…`, with the key), memory cache
@@ -344,9 +346,9 @@ the device (no account, no sync, no analytics); only positions are stored, never
   `progress < length − 120 s`. When `progress ≥ length − 120 s` the programme counts as watched and the entry is
   removed. Below 60 s nothing is stored and an existing position stays (pressing "Od začátku" by mistake does
   not lose it); a programme shorter than 3 min is never offered. At most 200 entries, entries older than 30 days are dropped.
-- **Selecting a programme with an offer** shows a choice with **"Pokračovat od 23:10"** focused first:
-  airing → `Pokračovat od …` / `Od začátku` / `Živě`; ended (CT archive, buffer or Anténa recording) →
-  `Pokračovat od …` / `Od začátku`. Without an offer the behaviour is unchanged. Label format `m:ss` below an hour,
+- **Selecting a programme with an offer** shows **"Pokračovat od 23:10"**, focused first on an ended programme:
+  airing → `Živě` / `Pokračovat od …` / `Od začátku` (`Živě` first and focused, T26; the list is the programme
+  page's); ended (CT archive, buffer or Anténa recording) → `Pokračovat od …` / `Od začátku`. Without an offer the behaviour is unchanged. Label format `m:ss` below an hour,
   else `h:mm:ss`.
 - **Playing a resume**: the decision rules decide the source as usual (by time); then CT timeshift seeks by wall clock
   to `start + progress` (fallback offset `max(0, (start + progress) − (now − W))`), CT archive and TVHeadend DVR
