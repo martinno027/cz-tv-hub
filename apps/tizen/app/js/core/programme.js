@@ -58,16 +58,16 @@
     },
 
     /**
-     * Button ids in order (golden cases `buttons`): resume, startOver, live, openOfficialApp. `c` = {source,
+     * Button ids in order (golden cases `buttons`): live (airing, T26), resume, startOver, openOfficialApp. `c` = {source,
      * state, startable, playable, resume}; `officialApp` = whether the platform offers "Otevřít v iVysílání"
      * (Samsung does not). "Pokračovat" only together with a playable start. The page adds Zpět after these.
      */
     buttons: function (c, officialApp) {
       var ids = [];
       if (c.state === 'airing') {
+        ids.push('live'); // first and focused (T26)
         if (c.resume && c.startable) ids.push('resume');
         if (c.startable) ids.push('startOver');
-        ids.push('live');
       } else if (c.state === 'ended' && (c.playable || c.source === 'ct')) {
         // an ended CT programme is always offered: playing it shows CT's own text (licence, DRM) when it cannot play
         if (c.resume) ids.push('resume');
