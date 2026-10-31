@@ -29,11 +29,11 @@ public enum ProgrammePage {
         case .future:
             return []
         case .airing:
+            buttons.append(.live)  // first and focused (T26)
             if startable {
                 if resume { buttons.append(.resume) }
                 buttons.append(.startOver)
             }
-            buttons.append(.live)
         case .ended:
             if playable || source == .ct {
                 if resume { buttons.append(.resume) }
