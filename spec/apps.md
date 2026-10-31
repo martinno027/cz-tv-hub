@@ -409,6 +409,12 @@ not shown on this TV.
   discovery in the local network; "O aplikaci" at its end). The remote's **Back** (Siri Remote Menu/‹, Android
   Back, Samsung Return) returns to the choice, with focus on the item just left; Back on the choice leaves Nastavení
   as before.
+- **Showing a key (T25, owner 2026-10-31)**: the gateway key field (all three apps) and the Tailscale auth key field
+  (Apple TV, Android TV) are masked by default, with a button **"Zobrazit"** to the right of the field (Right from
+  the field reaches it) that shows the typed characters; then it reads **"Skrýt"** and masks them again. The
+  keyboard stays the password kind (no suggestions, nothing learnt) either way. One switch per field, not
+  stored: masked again whenever the Server section is opened. Showing changes nothing else (the text, the cursor,
+  "Uložit a ověřit" and "Přihlásit" work the same). Profile passwords stay masked (not part of T25).
 - **Settings UI (Kanály)**: first the source switches `[☑ Internetová TV (ČT)]`, `[☑ Anténa]` (only with a gateway)
   and `[☑ Poslanecká sněmovna]`, then one list "Pořadí kanálů" of rows `[icon ☑ ČT1] [▲] [▼]` (left/right moves between the three
   controls; select on the name toggles "zobrazovat", hidden rows dimmed, ▲ on the first / ▼ on the last row

@@ -511,6 +511,21 @@ main {
   border-color: var(--focus);
 }
 
+/* the gateway key with "Zobrazit"/"Skrýt" to its right (T25) */
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 24px;
+}
+
+.field-row .field input {
+  width: 820px;
+}
+
+.field-row .button {
+  margin: 22px 0;
+}
+
 .buttons {
   display: flex;
   margin-top: 12px;

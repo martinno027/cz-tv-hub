@@ -62,7 +62,10 @@ internal fun TailnetSettings() {
         Text(loginUrl, style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
     }
     if (state.info?.state != RUNNING) {
-        Field(stringResource(R.string.tailnet_key), authKey, stringResource(R.string.tailnet_key_hint), secret = true) { authKey = it }
+        Field(
+            stringResource(R.string.tailnet_key), authKey, stringResource(R.string.tailnet_key_hint), secret = true,
+            revealable = true,
+        ) { authKey = it }
         Button(enabled = authKey.isNotBlank(), onClick = {
             tailnet.loginWithKey(authKey)
             authKey = ""

@@ -85,6 +85,8 @@
     <string name="settings_address">Adresa brány</string>
     <string name="settings_address_hint">např. 192.168.1.20 nebo pi.tailnet.ts.net</string>
     <string name="settings_key">Klíč</string>
+    <string name="settings_key_show">Zobrazit</string>
+    <string name="settings_key_hide">Skrýt</string>
     <string name="settings_save">Uložit a ověřit</string>
     <string name="settings_remove">Odebrat anténu</string>
     <string name="settings_discovered">Nalezeno v domácí síti:</string>

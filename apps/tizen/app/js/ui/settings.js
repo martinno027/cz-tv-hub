@@ -26,8 +26,9 @@
 
   function SettingsScreen(app) {
     this.app = app;
-    // 0 address, 1 key, 2 save, 3 clear, 4 "Náhledy anténních pořadů" (only when the gateway offers them)
-    this.items = ['set-address', 'set-key', 'set-save', 'set-clear', 'set-thumbs'].map($);
+    // 0 address, 1 key, 2 save, 3 clear, 4 "Náhledy anténních pořadů" (only when the gateway offers them),
+    // 5 "Zobrazit"/"Skrýt" to the right of the key (T25)
+    this.items = ['set-address', 'set-key', 'set-save', 'set-clear', 'set-thumbs', 'set-key-reveal'].map($);
     this.focus = 0;
     this.section = 'channels'; // the choice item focused, or the section open: 'channels' | 'profile' | 'server'
     this.zone = 'choice'; // 'choice' | 'channels' | 'profile' | 'form' (the Server fields and buttons)
@@ -57,6 +58,7 @@
     var s = CT.SettingsStore.load();
     $('set-address').value = s ? s.address : '';
     $('set-key').value = s ? s.key : '';
+    this.revealKey(false);
     this.closeSection();
     this.showStatus();
     this.renderChannels();
@@ -99,8 +101,15 @@
     } else {
       this.zone = 'form';
       this.focus = 0;
+      this.revealKey(false); // masked again whenever the section opens (spec/apps.md "Showing a key")
     }
     this.applyFocus();
+  };
+
+  /** Shows (true) or masks (false) the gateway key; the button says what it will do next. */
+  SettingsScreen.prototype.revealKey = function (shown) {
+    $('set-key').type = shown ? 'text' : 'password';
+    $('set-key-reveal').textContent = shown ? 'Skrýt' : 'Zobrazit';
   };
 
   /** Back to the choice, focus on the item of the section just left. */
@@ -350,7 +359,7 @@
           if (forward) this.pfFocus = Math.min(this.pfFocus + 1, last);
           if (key === 'up') this.pfFocus = Math.max(0, this.pfFocus - 1);
         } else {
-          if (forward) this.focus = Math.min(this.focus + 1, this.items.length - 1);
+          if (forward) this.focus = Math.min(this.focus + 1, 2);
           if (key === 'up') this.focus = Math.max(0, this.focus - 1);
         }
         this.applyFocus();
@@ -364,10 +373,13 @@
     switch (key) {
       case 'up':
         if (this.focus === 4) this.focus = 2;
+        else if (this.focus === 5) this.focus = 0;
         else if (this.focus > 0) this.focus = this.focus === 3 ? 1 : this.focus - 1;
         break;
       case 'down':
-        if (this.focus >= 2) {
+        if (this.focus === 5) {
+          this.focus = 2;
+        } else if (this.focus >= 2) {
           if (this.app.dvbThumbs === true) this.focus = 4;
         } else {
           this.focus += 1;
@@ -375,9 +387,11 @@
         break;
       case 'left':
         if (this.focus === 3) this.focus = 2;
+        else if (this.focus === 5) this.focus = 1;
         break;
       case 'right':
         if (this.focus === 2) this.focus = 3;
+        else if (this.focus === 1) this.focus = 5;
         break;
       case 'enter':
         if (this.focus < 2) {
@@ -386,6 +400,7 @@
         }
         if (this.focus === 2) this.save();
         else if (this.focus === 3) this.clear();
+        else if (this.focus === 5) this.revealKey($('set-key').type === 'password');
         else this.toggleThumbs();
         break;
       default:
