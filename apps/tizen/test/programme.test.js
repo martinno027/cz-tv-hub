@@ -73,10 +73,10 @@ test('actions: the old choice as a list, with requests', () => {
   const P = CT.Programme;
   const ids = (list) => list.map((b) => b.id);
   const airing = P.actions(ctEntry(-10, 50, false), NOW, memoryStore());
-  assert.deepStrictEqual(ids(airing), ['startOver', 'live']);
-  assert.strictEqual(airing[0].label, 'Od začátku');
-  assert.strictEqual(airing[0].request.kind, 'startover');
-  assert.strictEqual(airing[1].request.kind, 'live');
+  assert.deepStrictEqual(ids(airing), ['live', 'startOver']); // Živě first (T26)
+  assert.strictEqual(airing[1].label, 'Od začátku');
+  assert.strictEqual(airing[1].request.kind, 'startover');
+  assert.strictEqual(airing[0].request.kind, 'live');
 
   const resumed = P.actions(ctEntry(-60, -30, false), NOW, memoryStore({
     'ct:226 452 10001/0001': { progress: 600, length: 1800, savedAt: NOW }
@@ -93,7 +93,7 @@ test('actions: the old choice as a list, with requests', () => {
   assert.strictEqual(unavailable[0].request.isPlayableNow, false);
   assert.deepStrictEqual(ids(P.actions(ctEntry(10, 60, true), NOW, memoryStore())), []);
   assert.deepStrictEqual(ids(P.actions(dvbEntry(-10, 50, null), NOW, memoryStore())), ['live']);
-  assert.deepStrictEqual(ids(P.actions(dvbEntry(-10, 50, 'recording'), NOW, memoryStore())), ['startOver', 'live']);
+  assert.deepStrictEqual(ids(P.actions(dvbEntry(-10, 50, 'recording'), NOW, memoryStore())), ['live', 'startOver']);
   assert.deepStrictEqual(ids(P.actions(dvbEntry(-60, -10, 'completed'), NOW, memoryStore())), ['startOver']);
   assert.deepStrictEqual(ids(P.actions(dvbEntry(-60, -10, null), NOW, memoryStore())), []);
   // a remembered position of a failed recording that is airing: no resume without a start-over source

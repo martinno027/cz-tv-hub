@@ -1,5 +1,5 @@
 {
- "_doc": "Programme page (spec/apps.md 'Programme page (T15)'). buttons: in order, from source (ct | dvb), state (future | airing | ended), startable (airing: can play from the start - CT timeshift buffer or an Anténa recording in state 'recording'), playable (ended: an Anténa recording 'completed'; a CT programme is always offered - playing it shows CT's own text when it cannot be played, as the decision rules do), resume (a 'Pokračovat' offer exists). Button ids: resume, startOver, live, openOfficialApp (CT, started; Samsung leaves it out). rating: the line for a TMDb rating (value, votes); null below 20 votes; one decimal (half up), decimal comma, thousands separated by a space. plural: the Czech word for n votes (CLDR cs: 1 one, 2-4 few, else other). Every page also has a 'Zpět' button after these (not listed here). resume only when the programme can be played from the start (airing) or is playable (ended).",
+ "_doc": "Programme page (spec/apps.md 'Programme page (T15)'). buttons: in order, from source (ct | dvb), state (future | airing | ended), startable (airing: can play from the start - CT timeshift buffer or an Anténa recording in state 'recording'), playable (ended: an Anténa recording 'completed'; a CT programme is always offered - playing it shows CT's own text when it cannot be played, as the decision rules do), resume (a 'Pokračovat' offer exists). Button ids: resume, startOver, live, openOfficialApp (CT, started; Samsung leaves it out). rating: the line for a TMDb rating (value, votes); null below 20 votes; one decimal (half up), decimal comma, thousands separated by a space. plural: the Czech word for n votes (CLDR cs: 1 one, 2-4 few, else other). Every page also has a 'Zpět' button after these (not listed here). resume only when the programme can be played from the start (airing) or is playable (ended). T26 (owner 2026-10-31): an airing programme lists live first, and the page focuses it.",
  "buttons": [
   {
    "name": "CT airing with buffer",
@@ -8,8 +8,8 @@
    "startable": true,
    "resume": false,
    "buttons": [
-    "startOver",
     "live",
+    "startOver",
     "openOfficialApp"
    ]
   },
@@ -20,9 +20,9 @@
    "startable": true,
    "resume": true,
    "buttons": [
+    "live",
     "resume",
     "startOver",
-    "live",
     "openOfficialApp"
    ]
   },
@@ -33,8 +33,8 @@
    "startable": true,
    "resume": false,
    "buttons": [
-    "startOver",
-    "live"
+    "live",
+    "startOver"
    ]
   },
   {
