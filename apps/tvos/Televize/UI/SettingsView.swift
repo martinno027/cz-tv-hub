@@ -122,7 +122,7 @@ struct ServerSettingsSection: View {
                     .textContentType(.URL)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
-                SecureField("Klíč brány", text: $key)
+                RevealableKeyField(title: "Klíč brány", text: $key)
 
                 TailnetSettings(address: address)
 
@@ -303,7 +303,7 @@ private struct TailnetSettings: View {
                 }
                 if showsKeyLogin {
                     HStack(spacing: 32) {
-                        SecureField("Klíč Tailscale (tskey-auth-…)", text: $authKey)
+                        RevealableKeyField(title: "Klíč Tailscale (tskey-auth-…)", text: $authKey)
                         Button("Přihlásit") {
                             // Used once for this start, never stored (the node's state replaces it).
                             let key = authKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -343,5 +343,27 @@ private struct QRCodeView: View {
         }
         .frame(width: side, height: side)
         .accessibilityLabel("QR kód pro přihlášení do Tailscale")
+    }
+}
+
+/// A masked key with "Zobrazit" / "Skrýt" to its right (spec/apps.md "Showing a key", T25): the typed characters
+/// can be checked; masked again whenever the Server section is opened (the state is not stored).
+struct RevealableKeyField: View {
+    let title: String
+    @Binding var text: String
+    @State private var shown = false
+
+    var body: some View {
+        HStack(spacing: 32) {
+            if shown {
+                TextField(title, text: $text)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+            } else {
+                SecureField(title, text: $text)
+            }
+            Button(shown ? "Skrýt" : "Zobrazit") { shown.toggle() }
+                .accessibilityIdentifier("settings.revealKey")
+        }
     }
 }
