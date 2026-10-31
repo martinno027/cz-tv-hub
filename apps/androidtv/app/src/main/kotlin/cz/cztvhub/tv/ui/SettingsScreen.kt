@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -188,7 +189,7 @@ private fun ServerSettings(viewModel: MainViewModel) {
         configured?.let { Text(stringResource(R.string.settings_configured, it.baseUrl), color = Palette.accent) }
 
         Field(stringResource(R.string.settings_address), address, stringResource(R.string.settings_address_hint)) { address = it }
-        Field(stringResource(R.string.settings_key), key, "", secret = true) { key = it }
+        Field(stringResource(R.string.settings_key), key, "", secret = true, revealable = true) { key = it }
         TailnetSettings()
 
         Text(
@@ -262,15 +263,19 @@ internal fun Field(
     hint: String,
     secret: Boolean = false,
     keyboardType: KeyboardType = KeyboardType.Uri,
+    // A "Zobrazit"/"Skrýt" button to the right of a secret field (T25); masked again when the screen is opened.
+    revealable: Boolean = false,
     onChange: (String) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var shown by remember { mutableStateOf(false) }
     // Read-only until OK is pressed, so walking past a field with the D-pad never pops up the keyboard.
     var editing by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, style = MaterialTheme.typography.titleSmall)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         BasicTextField(
             value = value,
             onValueChange = onChange,
@@ -283,9 +288,10 @@ internal fun Field(
                 imeAction = ImeAction.Next,
             ),
             keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+            visualTransformation = if (secret && !shown) PasswordVisualTransformation() else VisualTransformation.None,
             modifier = Modifier
                 .widthIn(max = 720.dp)
+                .weight(1f, fill = false)
                 .fillMaxWidth()
                 .onFocusChanged {
                     focused = it.isFocused
@@ -317,5 +323,11 @@ internal fun Field(
                 inner()
             },
         )
+        if (secret && revealable) {
+            Button(onClick = { shown = !shown }) {
+                Text(stringResource(if (shown) R.string.settings_key_hide else R.string.settings_key_show))
+            }
+        }
+        }
     }
 }
