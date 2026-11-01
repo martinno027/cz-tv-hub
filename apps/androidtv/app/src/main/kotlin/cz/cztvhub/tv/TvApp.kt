@@ -7,6 +7,7 @@ import android.os.Bundle
 import cz.cztvhub.core.BridgeWatch
 import cz.cztvhub.core.CtApi
 import cz.cztvhub.core.LiveResolver
+import cz.cztvhub.core.MuteSession
 import cz.cztvhub.core.Planner
 import cz.cztvhub.core.PspMonitor
 import cz.cztvhub.core.ResumeStore
@@ -68,6 +69,9 @@ class TvApp : Application() {
      * is on screen (spec/apps.md); the player just reads it.
      */
     val psp by lazy { PspMonitor() }
+
+    /** Mute (T34): one state for every player until the app closes; in memory only, never stored. */
+    val mute = MuteSession()
 
     /** "Pokračovat": remembered positions, on this device only. */
     val resume by lazy { ResumeStore(ResumePrefs(this)) }
