@@ -22,10 +22,18 @@ fun interface DvbTransport {
     fun get(url: String, headers: Map<String, String>): HttpResponse
 }
 
-/** Client for the household gateway's `/dvb/…` JSON API. Blocking; call it off the main thread. */
-class DvbClient(val config: DvbConfig, private val transport: DvbTransport = UrlConnectionDvbTransport()) {
+/**
+ * Client for the household gateway's `/dvb/…` JSON API. Blocking; call it off the main thread. [client] is the
+ * [ClientHeader] value, sent on [status] only (T37).
+ */
+class DvbClient(
+    val config: DvbConfig,
+    private val client: String? = null,
+    private val transport: DvbTransport = UrlConnectionDvbTransport(),
+) {
 
-    fun status(): DvbStatus = call("/dvb/status") { s, b -> DvbParser.parseStatus(s, b) }
+    /** `GET /dvb/status`, the only request here with [ClientHeader] (the gateway logs it as a connection, T37). */
+    fun status(): DvbStatus = call("/dvb/status", ClientHeader.of(client)) { s, b -> DvbParser.parseStatus(s, b) }
 
     fun channels(): List<DvbChannel> = call("/dvb/channels") { s, b -> DvbParser.parseChannels(s, b) }
 
@@ -126,9 +134,9 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
 
     private fun encode(text: String): String = URLEncoder.encode(text, Charsets.UTF_8).replace("+", "%20")
 
-    private fun <T> call(path: String, parse: (Int, String) -> T): T {
+    private fun <T> call(path: String, extra: Map<String, String> = emptyMap(), parse: (Int, String) -> T): T {
         val response = try {
-            transport.get(config.url(path), config.authHeaders + ("Accept" to "application/json"))
+            transport.get(config.url(path), config.authHeaders + ("Accept" to "application/json") + extra)
         } catch (e: IOException) {
             throw CtException("gateway $path failed: $e", DvbMessages.UNREACHABLE)
         }

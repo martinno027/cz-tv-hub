@@ -97,4 +97,12 @@ private fun SignedOutForms(viewModel: MainViewModel, busy: Boolean, setBusy: (Bo
         }
     }) { Text(stringResource(if (creating) R.string.profile_create_button else R.string.profile_sign_in_button)) }
     error?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+    // T37: the gateway logs sign-ins and connections (spec/apps.md "Sign-in note").
+    SignInNote()
+}
+
+/** The small line telling what the gateway's sign-in log keeps (T37), under the profile forms and the gateway status. */
+@Composable
+internal fun SignInNote() {
+    Text(stringResource(R.string.signin_log_note), style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
 }

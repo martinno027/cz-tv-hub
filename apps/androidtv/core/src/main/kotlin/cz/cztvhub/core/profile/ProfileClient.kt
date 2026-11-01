@@ -2,6 +2,7 @@ package cz.cztvhub.core.profile
 
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.HttpResponse
+import cz.cztvhub.core.dvb.ClientHeader
 import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.dvb.GATEWAY_TIMEOUT_MS
 import cz.cztvhub.core.dvb.DvbMessages
@@ -39,9 +40,13 @@ class ProfileException(
 
 /**
  * Client for the gateway's profiles (spec/dvb-gateway.md "Profiles"). Blocking; call it off the main thread.
- * Passwords are only sent, never kept or logged.
+ * Passwords are only sent, never kept or logged. Every call carries [client] as [ClientHeader] (T37).
  */
-class ProfileClient(val config: DvbConfig, private val transport: ProfileTransport = UrlConnectionProfileTransport()) {
+class ProfileClient(
+    val config: DvbConfig,
+    private val transport: ProfileTransport = UrlConnectionProfileTransport(),
+    private val client: String? = null,
+) {
 
     fun create(name: String, password: String, settings: SettingsDocument): ProfileSession = session(
         call("POST", "/dvb/profiles", null, body("name" to JsonPrimitive(name), "password" to JsonPrimitive(password), "settings" to settings.toJson())),
@@ -84,7 +89,8 @@ class ProfileClient(val config: DvbConfig, private val transport: ProfileTranspo
     private fun call(method: String, path: String, token: String?, body: String?, expectJson: Boolean = true): JsonObject {
         val headers = config.authHeaders + ("Accept" to "application/json") +
             (if (body != null) mapOf("Content-Type" to "application/json") else emptyMap()) +
-            (if (token != null) mapOf(TOKEN_HEADER to token) else emptyMap())
+            (if (token != null) mapOf(TOKEN_HEADER to token) else emptyMap()) +
+            ClientHeader.of(client)
         val response = try {
             transport.send(method, config.url(path), headers, body)
         } catch (e: IOException) {

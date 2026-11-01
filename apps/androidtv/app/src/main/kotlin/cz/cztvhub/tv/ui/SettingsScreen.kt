@@ -219,7 +219,7 @@ private fun ServerSettings(viewModel: MainViewModel) {
                     val reached = app.route(config) ?: config
                     message = withContext(Dispatchers.IO) {
                         try {
-                            val client = DvbClient(reached)
+                            val client = DvbClient(reached, client = app.clientHeader)
                             okTemplate.format(client.channels().size, client.status().retentionDays)
                         } catch (e: CtException) {
                             e.userMessage
@@ -239,6 +239,8 @@ private fun ServerSettings(viewModel: MainViewModel) {
             }
         }
         message?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+        // T37: under the gateway status, the connection is logged (spec/apps.md "Sign-in note").
+        SignInNote()
 
         // "Náhledy anténních pořadů": only offered when the gateway allows thumbnails (its /admin switch).
         val dvb by viewModel.dvb.collectAsState()
