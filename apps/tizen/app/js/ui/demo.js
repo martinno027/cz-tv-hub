@@ -18,7 +18,11 @@
  * (`?demo&archive=memory` always uses those, `?demo&archive=ctdown` plays iVysílání not answering: the gateway's
  * text, only our recordings; `?demo&archive=empty` = every grid empty): the menu's categories, categories with
  * sub-genres and 3 pages, search by title, a film and a series with seasons, pages and our recorded episodes (one
- * of them is the sample timeline, so it opens the Anténa player).
+ * of them is the sample timeline, so it opens the Anténa player). Year and month (T32): every third generated
+ * iVysílání series (also "Kuchyně u sousedů" and "Příběh řeky" of the home sample) has more than 100 episodes in
+ * its 1st and 2nd season, so it comes a month at a time (2005–2026, a daily episode, 15 a page; the 3rd season
+ * has none); dvb_archive_show_periods.json answers for its own card when the sample is there (the card first in the
+ * Seriály grid).
  */
 (function (root) {
   'use strict';
@@ -317,7 +321,41 @@
     return episodes;
   }
 
-  function demoShow(id, season, page) {
+  /**
+   * The generated periods of a long show (T32): {years, year, months, month} for ?year=&month= (a year alone = its
+   * newest month, none = the newest year), null when the year or month is not listed (the gateway's 400).
+   */
+  function demoPeriods(year, month, sample) {
+    var all = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+    // the shared sample's own years (its newest year's months as it lists them, the others whole), else 2005–2026
+    var monthsOf = sample ? function (y) { return y === sample.year ? sample.months : all; } : function (y) {
+      return y === 2026 ? all.slice(2) : y === 2005 ? all.slice(0, 4) : all;
+    };
+    var years = sample ? sample.years : [];
+    for (var y0 = 2026; !sample && y0 >= 2005; y0--) years.push(y0); // 22 year chips: more than the row shows
+    var y = year === null ? years[0] : Number(year);
+    if (years.indexOf(y) < 0) return null;
+    var months = monthsOf(y);
+    var m = month === null ? months[0] : Number(month);
+    return months.indexOf(m) < 0 ? null : { years: years, year: y, months: months, month: m };
+  }
+
+  /** A daily episode of that month (Prague evening), newest first, `per` (15) a page. */
+  function demoMonthEpisodes(season, periods, page, per) {
+    per = per || 15;
+    var days = new Date(Date.UTC(periods.year, periods.month, 0)).getUTCDate();
+    var episodes = [];
+    for (var d = days; d >= 1; d--) {
+      var aired = Date.UTC(periods.year, periods.month - 1, d, 18, 0);
+      var label = d + '. ' + periods.month + '. ' + periods.year;
+      episodes.push({ source: 'ct', idec: 'demo-' + season + '-' + periods.year + '-' + periods.month + '-' + d,
+        title: 'Vydání z ' + label, description: 'Smyšlený díl z ukázky.', durationSeconds: 1500,
+        aired: new Date(aired).toISOString(), channel: d % 4 === 0 ? 'ČT2' : 'ČT1', playable: d % 9 !== 0 });
+    }
+    return { episodes: episodes.slice((page - 1) * per, page * per), nextPage: episodes.length > page * per ? page + 1 : null };
+  }
+
+  function demoShow(id, season, page, year, month) {
     var n = Number((/-(\d+)$/.exec(id) || [0, 0])[1]);
     var salt = Number((/demo(\d+)-/.exec(id) || [0, 0])[1]);
     var card = /^rec:nahravka/.test(id) ? Object.assign(demoCard(n, 3), { id: id, source: 'rec', kind: 'series' }) : demoCard(n, salt);
@@ -339,7 +377,12 @@
     }
     var s = season ? Number(String(season).replace(/\D/g, '').slice(-1)) || 1 : 1;
     var p = page || 1;
-    if (card.source !== 'rec') {
+    var periods = card.source !== 'rec' && n % 3 === 0 && s !== 3 ? demoPeriods(year, month) : null;
+    if (periods) {
+      var listed = demoMonthEpisodes(s, periods, p);
+      groups.push({ title: s + '. řada', season: season || String(s), nextPage: listed.nextPage, periods: periods,
+        episodes: listed.episodes });
+    } else if (card.source !== 'rec') {
       groups.push({ title: s + '. řada', season: season || String(s), nextPage: p === 1 ? 2 : null, episodes: demoEpisodes(s, p, p === 1 ? 15 : 11) });
     }
     if (card.source !== 'ct' && p === 1) groups.push(recorded);
@@ -387,6 +430,14 @@
     if (cat) {
       var slug = decodeURIComponent(cat[1]);
       var generated = function () { return demoCategory(slug, param('genre'), param('sort'), page); };
+      if (slug === '3976-serialy' && page === 1 && !param('genre') && !CT_DOWN && !ARCHIVE_MEMORY) {
+        // the shared periods sample's show (T32) first in Seriály, so its page opens from the grid
+        return load('dvb/dvb_archive_show_periods.json').then(function (sample) {
+          var body = generated();
+          body.cards.unshift(JSON.parse(sample.body).card);
+          return answer(200, body);
+        }, function () { return answer(200, generated()); });
+      }
       return CT_DOWN || (slug === '3947-filmy' && page === 1 && !param('genre') && param('sort') === 'popular')
         ? fixtureOr('dvb/dvb_archive_category.json', generated) : answer(200, generated());
     }
@@ -398,7 +449,10 @@
     var show = /^\/dvb\/archive\/show\/([^?]+)/.exec(path);
     if (show) {
       var id = decodeURIComponent(show[1]);
-      var made = function () { return demoShow(id, param('season'), page); };
+      var made = function () { return demoShow(id, param('season'), page, param('year'), param('month')); };
+      if ((param('year') !== null || param('month') !== null) && !demoPeriods(param('year'), param('month'))) {
+        return answer(400, { error: 'Neplatné období' });
+      }
       if (CT_DOWN && /^ct:/.test(id)) {
         // in both sources: our recorded episodes and the text; iVysílání only: 502 with the text
         var mixed = made();
@@ -408,8 +462,30 @@
         mixed.error = CT_DOWN_TEXT;
         return answer(200, mixed);
       }
-      if (param('season') || page > 1 || !/^ct:/.test(id) || /^ct:demo/.test(id)) return answer(200, made());
-      return load('dvb/dvb_archive_show_series.json').then(function (r) {
+      if ((param('year') || page > 1) && /^ct:/.test(id) && !/^ct:demo/.test(id)) {
+        // another month or page of the shared periods sample's show: generated in the sample's own shape
+        return load('dvb/dvb_archive_show_periods.json').then(function (r) {
+          var body = JSON.parse(r.body);
+          var group = body.card && body.card.id === id ? body.groups.filter(function (g) { return g.periods; })[0] : null;
+          if (!group) return answer(200, made());
+          var periods = demoPeriods(param('year'), param('month'), group.periods);
+          if (!periods) return answer(400, { error: 'Neplatné období' });
+          var listed = demoMonthEpisodes(0, periods, page, group.episodes.length);
+          group.periods = periods;
+          group.episodes = listed.episodes;
+          group.nextPage = listed.nextPage;
+          return answer(200, body);
+        }, function () { return answer(200, made()); });
+      }
+      if (param('season') || param('year') || page > 1 || !/^ct:/.test(id) || /^ct:demo/.test(id)) return answer(200, made());
+      var series = function () {
+        return load('dvb/dvb_archive_show_series.json');
+      };
+      // the shared periods sample answers for its own card (T32), when it is there
+      return load('dvb/dvb_archive_show_periods.json').then(function (r) {
+        var body = JSON.parse(r.body);
+        return body.card && body.card.id === id ? r : series();
+      }, series).then(function (r) {
         var body = JSON.parse(r.body);
         if (body.card && body.card.id === id) return r;
         return load('dvb/dvb_archive_show_movie.json').then(function (m) {

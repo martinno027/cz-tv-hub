@@ -100,6 +100,20 @@ test('one click acts in the Archiv: a menu item, a card; a click on nothing know
   assert.deepEqual(sends, ['enter', 'enter']);
 });
 
+test('one click acts on the show page year and month chips (T32): that chip focused, then OK', () => {
+  const { app, sends, ok } = fakeApp();
+  const page = app.screens.archive.page;
+  const years = box();
+  const yearChips = [0, 1, 2].map(() => node(['#sh-years .day'], years));
+  const months = box();
+  const monthChips = [0, 1, 2, 3].map(() => node(['#sh-months .day'], months));
+  F.act(app, yearChips[2], false, ok);
+  assert.deepEqual([page.zone, page.yearFocus], ['years', 2]);
+  F.act(app, monthChips[3], false, ok);
+  assert.deepEqual([page.zone, page.monthFocus], ['months', 3]);
+  assert.deepEqual(sends, ['enter', 'enter']);
+});
+
 test('right click / long press: long OK only where the screen has one', () => {
   const { app, sends, ok } = fakeApp();
   const card = node(['.ar-card'], null, { dataset: { index: '2' } });

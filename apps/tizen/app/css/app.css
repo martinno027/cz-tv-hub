@@ -1244,6 +1244,11 @@ main {
   overflow: hidden;
 }
 
+/* with the year and month chips (T32) one episode line fewer, so the page still ends above the TMDb notice */
+#show.periods #sh-episodes {
+  height: 304px;
+}
+
 .sh-ep, .sh-group {
   position: absolute;
   left: 0;
