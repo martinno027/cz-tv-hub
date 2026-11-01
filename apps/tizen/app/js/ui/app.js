@@ -129,19 +129,7 @@
         if (key && self.player.isOpen()) self.player.onKeyUp(key);
         else if (key && self.tab === 'archive') self.screens.archive.onKeyUp(key);
       });
-      document.addEventListener('visibilitychange', function () {
-        if (document.hidden) {
-          self.player.suspend();
-          return;
-        }
-        self.player.resume();
-        self.tick(); // timers sleep in the background: the clock is right again at once
-        // Back from the background (e.g. the next morning): the guide opens at now again.
-        if (self.tab === 'guide' && !self.player.isOpen()) {
-          self.now = Date.now();
-          self.screens.guide.show();
-        }
-      });
+      this.watchVisibility(document);
       this.fitStage();
       root.addEventListener('resize', function () { self.fitStage(); });
 
@@ -153,6 +141,31 @@
       this.tick();
       this.pspTick();
       if (CT.Demo.enabled) CT.Demo.afterStart(this);
+    },
+
+    /**
+     * The page went to the background (`hidden`) or came back. Samsung releases the player and resolves afresh on
+     * return; where the platform plays on in the background (the web, T41) the player is left alone. Either way the
+     * clock and the guide catch up on return.
+     */
+    watchVisibility: function (doc) {
+      var self = this;
+      doc.addEventListener('visibilitychange', function () { self.onVisibility(doc.hidden); });
+    },
+
+    onVisibility: function (hidden) {
+      var keepPlaying = CT.Platform.backgroundPlayback;
+      if (hidden) {
+        if (!keepPlaying) this.player.suspend();
+        return;
+      }
+      if (!keepPlaying) this.player.resume();
+      this.tick(); // timers sleep in the background: the clock is right again at once
+      // Back from the background (e.g. the next morning): the guide opens at now again.
+      if (this.tab === 'guide' && !this.player.isOpen()) {
+        this.now = Date.now();
+        this.screens.guide.show();
+      }
     },
 
     /**

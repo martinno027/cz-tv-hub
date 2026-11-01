@@ -42,6 +42,11 @@
     fitStage: null,
     /** function (config | null) after the gateway setting changed (also at start). */
     onGatewayConfig: null,
+    /**
+     * Whether the player goes on while the page is hidden (spec/web.md "Background (T41)"). Samsung: no, the app
+     * releases AVPlay in the background and resolves afresh when it comes back; the web: yes, nothing re-resolves.
+     */
+    backgroundPlayback: false,
     /** Appended to the version line in Nastavení. */
     versionSuffix: ''
   };
