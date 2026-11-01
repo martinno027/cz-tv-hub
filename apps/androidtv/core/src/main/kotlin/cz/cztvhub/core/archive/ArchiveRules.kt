@@ -104,25 +104,48 @@ object ArchiveRules {
         ).joinToString(" · ")
     }
 
-    /** A group of iVysílání episodes (it has a season, or ČT episodes), not "Nahráno z antény". */
+    /** A group of iVysílání episodes (it has a season, periods or ČT episodes), not "Nahráno z antény". */
     fun isCtGroup(group: EpisodeGroup): Boolean =
-        group.season != null || group.episodes.any { it.source == EpisodeSource.CT }
+        group.season != null || group.periods != null || group.episodes.any { it.source == EpisodeSource.CT }
 
     /**
-     * [show] with a season page ([page] = the answer of `?season=&page=`, its iVysílání group first): page 1
-     * replaces the show's iVysílání group, a later page ([append]) adds its episodes; "Nahráno z antény" stays.
+     * [show] with a page of its iVysílání episodes ([page] = the answer of `?season=&year=&month=&page=`, its
+     * iVysílání group first; [season] null for a show without seasons): page 1 replaces the show's iVysílání group,
+     * a later page ([append]) adds its episodes; "Nahráno z antény" stays. The group takes the answer's periods.
      */
-    fun withSeasonPage(show: ArchiveShow, page: ArchiveShow, season: String, append: Boolean): ArchiveShow {
-        val fetched = page.groups.firstOrNull { it.season == season } ?: page.groups.firstOrNull(::isCtGroup)
+    fun withSeasonPage(show: ArchiveShow, page: ArchiveShow, season: String?, append: Boolean): ArchiveShow {
+        val fetched = season?.let { s -> page.groups.firstOrNull { it.season == s } } ?: page.groups.firstOrNull(::isCtGroup)
         val groups = show.groups.toMutableList()
         val index = groups.indexOfFirst(::isCtGroup)
         val current = groups.getOrNull(index)
         val episodes = fetched?.episodes.orEmpty()
         val merged = if (append && current != null) current.episodes + episodes else episodes
-        val group = EpisodeGroup(fetched?.title ?: current?.title.orEmpty(), merged, season, fetched?.nextPage)
+        val periods = fetched?.periods ?: current?.periods.takeIf { append }
+        val group = EpisodeGroup(fetched?.title ?: current?.title.orEmpty(), merged, season, fetched?.nextPage, periods)
         if (index >= 0) groups[index] = group else groups.add(0, group)
         return show.copy(groups = groups)
     }
+
+    // -- year and month (T32, spec/apps.md "Archiv" show page; golden: archive_cases.json "periods") ---------------
+
+    private val MONTHS = listOf(
+        "leden", "únor", "březen", "duben", "květen", "červen",
+        "červenec", "srpen", "září", "říjen", "listopad", "prosinec",
+    )
+
+    /** The Czech name of month 1–12 (nominative, lower case), null for anything else. */
+    fun monthName(month: Int): String? = MONTHS.getOrNull(month - 1)
+
+    /** The year chips, newest first, the selected year marked; none without periods. */
+    fun yearChips(periods: ArchivePeriods?): List<PeriodChip> =
+        periods?.years.orEmpty().map { PeriodChip(it.toString(), it, it == periods?.year) }
+
+    /** The month chips of the selected year, newest first, the selected month marked; none without periods. */
+    fun monthChips(periods: ArchivePeriods?): List<PeriodChip> =
+        periods?.months.orEmpty().mapNotNull { m -> monthName(m)?.let { PeriodChip(it, m, m == periods?.month) } }
+
+    /** A year chosen alone shows its newest month of [months] (the months the gateway lists for that year). */
+    fun selectYear(months: List<Int>): Int? = months.maxOrNull()
 
     /** The resume key of an episode (`ct:<idec>`, `dvb:<recording id>`), as the guide uses it. */
     fun resumeKey(episode: ArchiveEpisode): String = when (episode.source) {

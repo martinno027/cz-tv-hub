@@ -56,6 +56,16 @@
       page.zone = 'seasons';
       page.seasonFocus = indexIn(el);
     } },
+    { match: '#sh-years .day', focus: function (app, el) {
+      var page = app.screens.archive.page;
+      page.zone = 'years';
+      page.yearFocus = indexIn(el);
+    } },
+    { match: '#sh-months .day', focus: function (app, el) {
+      var page = app.screens.archive.page;
+      page.zone = 'months';
+      page.monthFocus = indexIn(el);
+    } },
     { match: '.sh-ep', focus: function (app, el) {
       var page = app.screens.archive.page;
       var at = page.episodes.indexOf(Number(el.dataset.line));

@@ -299,6 +299,16 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
   / `Zpět`); for a series season chips and the episode list (`1/26 Od začátku · 53 min · ČT1 9. 1.`), each episode
   `Přehrát` or `Pokračovat od …` (resume keys as today: `ct:<idec>`, `dvb:<recording id>`); not playable → dimmed with
   ČT's text when played. The extra group "Nahráno z antény" lists our recorded episodes of the show.
+  **Year and month (T32)**: when the ČT group has `periods`, a row of **year chips** ("2026", "2025", …, newest
+  first) and below it a row of **month chips** of that year ("listopad", "říjen", …, newest first) sit above the
+  episode list (under the season chips when there are seasons); the episodes are that month's, newest first. Selecting
+  a year shows its newest month; the selection stays while the page is open. All apps and the web
+  (`archive_cases.json` "periods"). Details (decided 2026-11-01): selecting a year sends `?year=` and the gateway
+  picks the month (the app's `selectYear` is only the fallback when the answer names none or one not in its list);
+  while a year loads its month chips are hidden; a failed load restores the previous season/year/month; switching
+  the season resets to its newest month; a show without seasons starts with the focus on the selected year; a ČT
+  list **without seasons pages too** (`nextPage` → `?page=n` with the same year/month); `periods` that do not make
+  sense (a year or month not in its own list, not numbers) = no chips, the episodes are shown as they come.
 - **Playing**: iVysílání episodes through the existing archive path (`idec` → VOD on the TV; DRM-only → ČT's text);
   our recordings through the Anténa timeline player (T05). Back returns to the page, then to the grid (T23).
 - **"Pokračovat ve sledování"** (owner, 2026-10-25, v1; a menu item with its grid since T23, "the row" below = that

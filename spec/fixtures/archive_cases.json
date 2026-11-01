@@ -1,5 +1,5 @@
 {
- "_doc": "Archive (spec/dvb-gateway.md 'Archive', spec/apps.md 'Archiv'). categories: ČT category slugs for one of our recorded shows, from its stored TMDb match (kind + genre ids) or, without one, its DVB genre and title. normalise: the key that makes an iVysílání show and our recordings one card. merge: card source and order. continueRow: which resume entries the row shows, in order (max 20). subgenres (T23): whether one of our recordings, already in the category, is also listed in a ČT sub-genre: by the sub-genre title (normalised as 'normalise') → any of the TMDb genre ids, or the TMDb kind for 'Filmy'/'Seriály'; any other title, or no TMDb match: not listed. menu (T23): the Archiv menu as a state machine: items of the main menu and of a category's sub-menu, the initial selection, and what OK / Back do (state after each step; 'grid' = what the grid shows, 'leave' = Back leaves the tab, 'focus' = where the focus goes).",
+ "_doc": "Archive (spec/dvb-gateway.md 'Archive', spec/apps.md 'Archiv'). categories: ČT category slugs for one of our recorded shows, from its stored TMDb match (kind + genre ids) or, without one, its DVB genre and title. normalise: the key that makes an iVysílání show and our recordings one card. merge: card source and order. continueRow: which resume entries the row shows, in order (max 20). subgenres (T23): whether one of our recordings, already in the category, is also listed in a ČT sub-genre: by the sub-genre title (normalised as 'normalise') → any of the TMDb genre ids, or the TMDb kind for 'Filmy'/'Seriály'; any other title, or no TMDb match: not listed. menu (T23): the Archiv menu as a state machine: items of the main menu and of a category's sub-menu, the initial selection, and what OK / Back do (state after each step; 'grid' = what the grid shows, 'leave' = Back leaves the tab, 'focus' = where the focus goes). periods (T32): the year/month chips of a ČT episode list with more than 100 episodes: monthName (1-12 → Czech nominative, lower case), chips (the gateway's periods → the labels in order and which is selected), selectYear (a year alone → its newest month, from the months the gateway lists for that year).",
  "categories": [
   {
    "name": "movie comedy",
@@ -1067,5 +1067,163 @@
     }
    ]
   }
- ]
+ ],
+ "periods": {
+  "monthName": [
+   {
+    "month": 1,
+    "name": "leden"
+   },
+   {
+    "month": 2,
+    "name": "únor"
+   },
+   {
+    "month": 3,
+    "name": "březen"
+   },
+   {
+    "month": 4,
+    "name": "duben"
+   },
+   {
+    "month": 5,
+    "name": "květen"
+   },
+   {
+    "month": 6,
+    "name": "červen"
+   },
+   {
+    "month": 7,
+    "name": "červenec"
+   },
+   {
+    "month": 8,
+    "name": "srpen"
+   },
+   {
+    "month": 9,
+    "name": "září"
+   },
+   {
+    "month": 10,
+    "name": "říjen"
+   },
+   {
+    "month": 11,
+    "name": "listopad"
+   },
+   {
+    "month": 12,
+    "name": "prosinec"
+   }
+  ],
+  "chips": [
+   {
+    "name": "newest year and month selected",
+    "periods": {
+     "years": [
+      2026,
+      2025,
+      2024
+     ],
+     "year": 2026,
+     "months": [
+      11,
+      10,
+      9
+     ],
+     "month": 11
+    },
+    "years": [
+     {
+      "label": "2026",
+      "selected": true
+     },
+     {
+      "label": "2025",
+      "selected": false
+     },
+     {
+      "label": "2024",
+      "selected": false
+     }
+    ],
+    "months": [
+     {
+      "label": "listopad",
+      "selected": true
+     },
+     {
+      "label": "říjen",
+      "selected": false
+     },
+     {
+      "label": "září",
+      "selected": false
+     }
+    ]
+   },
+   {
+    "name": "an older pick",
+    "periods": {
+     "years": [
+      2026,
+      2005
+     ],
+     "year": 2005,
+     "months": [
+      12,
+      1
+     ],
+     "month": 1
+    },
+    "years": [
+     {
+      "label": "2026",
+      "selected": false
+     },
+     {
+      "label": "2005",
+      "selected": true
+     }
+    ],
+    "months": [
+     {
+      "label": "prosinec",
+      "selected": false
+     },
+     {
+      "label": "leden",
+      "selected": true
+     }
+    ]
+   },
+   {
+    "name": "no periods (100 episodes or fewer): no chips",
+    "periods": null,
+    "years": [],
+    "months": []
+   }
+  ],
+  "selectYear": [
+   {
+    "name": "a year alone selects its newest month",
+    "months": [
+     12,
+     6,
+     1
+    ],
+    "month": 12
+   },
+   {
+    "name": "a year with one month",
+    "months": [
+     3
+    ],
+    "month": 3
+   }
+  ]
+ }
 }

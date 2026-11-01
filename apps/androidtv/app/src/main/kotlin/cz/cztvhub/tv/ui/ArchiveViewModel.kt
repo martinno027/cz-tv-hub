@@ -11,6 +11,7 @@ import cz.cztvhub.core.archive.ArchiveCategory
 import cz.cztvhub.core.archive.ArchiveGenre
 import cz.cztvhub.core.archive.ArchiveMenu
 import cz.cztvhub.core.archive.ArchiveMessages
+import cz.cztvhub.core.archive.ArchivePeriods
 import cz.cztvhub.core.archive.ArchiveParser
 import cz.cztvhub.core.archive.ArchiveRules
 import cz.cztvhub.core.archive.ArchiveShow
@@ -44,14 +45,28 @@ data class ArchiveGrid(
     val attribution: String? = null,
 )
 
-/** An open show page; [season] the season chip shown, its episodes replace the show's first group. */
+/**
+ * An open show page; [season] the season chip shown, its episodes replace the show's first group. [year]/[month] the
+ * period chips chosen (T32; [month] null while a year chosen alone loads), kept while the page is open.
+ */
 data class ShowState(
     val card: ArchiveCard,
     val show: Load<ArchiveShow> = Load.Loading,
     val season: String? = null,
     val seasonLoading: Boolean = false,
     val seasonNextPage: Int? = null,
-)
+    val year: Int? = null,
+    val month: Int? = null,
+) {
+    /** The periods of the iVysílání group shown, with the selection made meanwhile; null = no chips. */
+    val periods: ArchivePeriods?
+        get() {
+            val shown = (show as? Load.Ready)?.value?.groups?.firstOrNull(ArchiveRules::isCtGroup)?.periods ?: return null
+            if (year == null || year == shown.year) return shown
+            // Another year is loading: its months are not known yet.
+            return shown.copy(year = year, months = emptyList())
+        }
+}
 
 /**
  * The Archiv tab (spec/apps.md "Archiv", T23 layout): a menu on the left ([menu], the core's [ArchiveMenu]) and a grid
@@ -325,6 +340,8 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
                     show = result,
                     season = group?.season ?: show?.seasons?.firstOrNull()?.id,
                     seasonNextPage = group?.nextPage,
+                    year = group?.periods?.year,
+                    month = group?.periods?.month,
                 )
             }
         }
@@ -335,33 +352,66 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
         _show.value = null
     }
 
-    /** A season chip: that season's episodes, page 1; [more] = the next page of the season shown. */
-    fun loadSeason(season: String, more: Boolean = false) {
+    /** A season chip: that season's episodes, page 1, in the season's default period (its newest month, T32). */
+    fun loadSeason(season: String) {
         val state = _show.value ?: return
+        if (state.season == season) return
+        loadEpisodes(state, season, year = null, month = null, more = false)
+    }
+
+    /** A year chip (T32): its newest month (the gateway picks it), page 1. */
+    fun loadYear(year: Int) {
+        val state = _show.value ?: return
+        if (state.year == year) return
+        loadEpisodes(state, state.season, year, month = null, more = false)
+    }
+
+    /** A month chip of the year shown (T32), page 1. */
+    fun loadMonth(month: Int) {
+        val state = _show.value ?: return
+        val year = state.year ?: return
+        if (state.month == month) return
+        loadEpisodes(state, state.season, year, month, more = false)
+    }
+
+    /** The next page of the iVysílání episodes shown (season and period as they are). */
+    fun loadMore() {
+        val state = _show.value ?: return
+        if (state.seasonLoading || state.seasonNextPage == null) return
+        loadEpisodes(state, state.season, state.year, state.month, more = true)
+    }
+
+    private fun loadEpisodes(state: ShowState, season: String?, year: Int?, month: Int?, more: Boolean) {
         if (state.show !is Load.Ready) return
-        if (more && (state.seasonLoading || state.seasonNextPage == null)) return
-        if (!more && state.season == season) return
         val page = if (more) state.seasonNextPage ?: return else 1
         val client = client() ?: return
         showJob?.cancel()
-        _show.value = state.copy(season = season, seasonLoading = true)
+        _show.value = state.copy(season = season, year = year, month = month, seasonLoading = true)
         showJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    client.archiveShow(state.card.id, season, page)
+                    client.archiveShow(state.card.id, season, page, year, month)
                 } catch (_: CtException) {
                     null
                 }
             }
             _show.update { current ->
-                if (current?.card?.id != state.card.id || current.season != season) return@update current
+                val same = current?.card?.id == state.card.id && current.season == season &&
+                    current.year == year && current.month == month
+                if (!same) return@update current
                 val shown = (current.show as? Load.Ready)?.value
-                if (result == null || shown == null) return@update current.copy(seasonLoading = false)
+                // A failed load keeps what is listed and its chips (the chip can be chosen again).
+                if (result == null || shown == null) {
+                    return@update current.copy(seasonLoading = false, season = state.season, year = state.year, month = state.month)
+                }
                 val merged = ArchiveRules.withSeasonPage(shown, result, season, append = more)
+                val group = merged.groups.firstOrNull(ArchiveRules::isCtGroup)
                 current.copy(
                     show = Load.Ready(merged),
                     seasonLoading = false,
-                    seasonNextPage = merged.groups.firstOrNull { it.season == season }?.nextPage,
+                    seasonNextPage = group?.nextPage,
+                    year = group?.periods?.year,
+                    month = group?.periods?.month,
                 )
             }
         }

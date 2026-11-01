@@ -210,11 +210,14 @@ body.web #show {
 
 body.web #sh-head,
 body.web #sh-notice,
-body.web #sh-seasons {
+body.web #sh-seasons,
+body.web #sh-years,
+body.web #sh-months {
   flex: none;
 }
 
-body.web #sh-episodes {
+body.web #sh-episodes,
+body.web #show.periods #sh-episodes {
   flex: 1 1 auto;
   height: auto;
   min-height: 228px;

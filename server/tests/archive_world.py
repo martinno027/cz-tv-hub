@@ -7,6 +7,7 @@ import re
 import tempfile
 import urllib.error
 import urllib.parse
+from datetime import date, timedelta
 from pathlib import Path
 
 from cztvhub import api
@@ -44,6 +45,7 @@ def show(sid, title, kind, count, genres, year=None, duration=None, **extra):
 
 
 SERIES_ID, MOVIE_ID, KITCHEN_ID, RIVER_ID = "10000000001", "10000000002", "10000000003", "10000000004"
+NEWS_ID = "10000000005"  # T32: a daily show with more than 100 episodes (year and month chips)
 CT_SHOWS = {
     SERIES_ID: show(SERIES_ID, "Zahradní seriál", "series", 52, [("3976", "Seriál"), ("3986", "Komedie")],
                     description=None, shortDescription="Smyšlený seriál o jedné zahradě.",
@@ -56,6 +58,10 @@ CT_SHOWS = {
                    countriesOfOrigin=[{"title": "Česko"}, {"title": "Slovensko"}], seasons=[]),
     KITCHEN_ID: show(KITCHEN_ID, "Kuchyně u sousedů", "series", 12, [("3976", "Seriál")]),
     RIVER_ID: show(RIVER_ID, "Příběh řeky", "series", 6, [("4003", "Dokument"), ("4106", "Příroda")]),
+    NEWS_ID: show(NEWS_ID, "Večerní zpravodaj", "series", 711, [("4124", "Zpravodajství")],
+                  description="Smyšlené večerní zprávy.",
+                  # as ČT's Události (2026-11-01): one "season" that is a group of other versions, not a season
+                  seasons=[{"id": "group:00000000000000000000bb01", "title": "Znakový jazyk a skryté titulky"}]),
 }
 ROWS = {"3947": [MOVIE_ID], "3976": [SERIES_ID, KITCHEN_ID], "4003": [RIVER_ID], "4106": [RIVER_ID],
         "3986": [SERIES_ID]}
@@ -79,6 +85,10 @@ EPISODES = {
         episode(f"2085221615{n:05d}", f"{n}/26 Druhá řada {n}", f"2026-05-{n:02d}T18:10:00.000Z")
         for n in range(1, 27)],
     (MOVIE_ID, None): [episode("22638149399", "Noční vlak", "2026-10-05T20:25:00.000Z", "ČT2", 5880, None)],
+    # every evening from 20 November 2024 to 31 October 2026 (711 episodes), oldest first
+    (NEWS_ID, None): [episode(f"3000000{n:04d}", f"Večerní zpravodaj {(date(2024, 11, 20) + timedelta(n)):%d. %m. %Y}",
+                              f"{(date(2024, 11, 20) + timedelta(n)).isoformat()}T17:30:00.000Z", "ČT24", 1500)
+                      for n in range(711)],
 }
 
 
@@ -100,6 +110,13 @@ class FakeCt:
         query, variables = body["query"], body["variables"]
         number = lambda name, default=0: int((re.search(name + r": (\d+)", query) or [0, default])[1])  # noqa: E731
         limit, offset = number("limit", 20), number("offset")
+        if limit > 100:  # ČT, 2026-11-01: limit 100 works, 200 does not
+            return {"data": None, "errors": [{"message": "Validation error",
+                                              "extensions": {"code": "GRAPHQL_VALIDATION_FAILED"}}]}
+        if offset + limit > 10000:  # ČT, 2026-11-01: offset 9909 limit 100 is an error (a 10 000 search window)
+            return {"data": None, "errors": [{"message": "Omlouváme se, došlo k chybě na naší straně.",
+                                              "path": ["programme", "episodes"],
+                                              "extensions": {"isExpected": True}}]}
         if "showFindByGenre" in query:
             ids = ROWS.get(variables["id"], [])
             if "orderBy: alphabet" in query:
@@ -304,6 +321,7 @@ SHARED_FILES = {
     "show_movie": ("dvb_archive_show_movie.json", "/dvb/archive/show/ct:" + MOVIE_ID, {}),
     "show_season_page": ("dvb_archive_show_season_page.json", "/dvb/archive/show/ct:" + SERIES_ID,
                          {"season": "season:00000000000000000000aa02", "page": "2"}),
+    "show_periods": ("dvb_archive_show_periods.json", "/dvb/archive/show/ct:" + NEWS_ID, {}),
     # last: ČT down (nothing of it cached), a show the archive listed and we recorded
     "show_ctdown": ("dvb_archive_show_ctdown.json", "/dvb/archive/show/ct:" + SERIES_ID, {}),
 }

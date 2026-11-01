@@ -83,6 +83,7 @@ object ArchiveParser {
                 o.array("episodes").mapNotNull { (it as? JsonObject)?.let(::episode) },
                 o.str("season"),
                 nextPage(o),
+                (o["periods"] as? JsonObject)?.let(::periods),
             )
         }
         return ArchiveShow(
@@ -169,6 +170,25 @@ object ArchiveParser {
             playable = o.bool("playable"),
             channelId = o.str("channelId")?.takeIf(CHANNEL_ID::matches),
         )
+    }
+
+    /**
+     * `periods` (T32): years and months as whole numbers (years 1800–3000, months 1–12), duplicates dropped, newest
+     * first. A selected year the list does not hold, or no year or month at all, means no periods (the episodes still
+     * show); a missing or unlisted month is the year's newest ([ArchiveRules.selectYear]).
+     */
+    private fun periods(o: JsonObject): ArchivePeriods? {
+        val years = o.ints("years").filter { it in 1800..3000 }.distinct().sortedDescending()
+        val months = o.ints("months").filter { it in 1..12 }.distinct().sortedDescending()
+        val year = o.int("year")?.takeIf { it in years } ?: return null
+        val month = o.int("month")?.takeIf { it in months } ?: ArchiveRules.selectYear(months) ?: return null
+        return ArchivePeriods(years, year, months, month)
+    }
+
+    private fun JsonObject.ints(key: String): List<Int> = (this[key] as? JsonArray).orEmpty().mapNotNull {
+        val v = it as? JsonPrimitive ?: return@mapNotNull null
+        if (v.isString) return@mapNotNull null
+        v.content.toDoubleOrNull()?.takeIf { d -> d == Math.floor(d) && Math.abs(d) <= Int.MAX_VALUE }?.toInt()
     }
 
     private fun nextPage(o: JsonObject): Int? = o.int("nextPage")?.takeIf { it > 0 }

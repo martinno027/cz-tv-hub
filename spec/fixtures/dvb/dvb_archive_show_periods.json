@@ -1,0 +1,268 @@
+{
+ "status": 200,
+ "body": {
+  "card": {
+   "id": "ct:10000000005",
+   "source": "ct",
+   "title": "Večerní zpravodaj",
+   "kind": "series",
+   "image": "https://img.example.invalid/archive/card/10000000005.jpg",
+   "rating": null,
+   "genres": [],
+   "episodeCount": 711,
+   "tmdb": false
+  },
+  "description": "Smyšlené večerní zprávy.",
+  "seasons": [],
+  "groups": [
+   {
+    "title": "Díly",
+    "season": null,
+    "periods": {
+     "years": [
+      2026,
+      2025,
+      2024
+     ],
+     "year": 2026,
+     "months": [
+      10,
+      9,
+      8,
+      7,
+      6,
+      5,
+      4,
+      3,
+      2,
+      1
+     ],
+     "month": 10
+    },
+    "episodes": [
+     {
+      "source": "ct",
+      "idec": "30000000710",
+      "title": "Večerní zpravodaj 31. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-31T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000709",
+      "title": "Večerní zpravodaj 30. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-30T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000708",
+      "title": "Večerní zpravodaj 29. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-29T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000707",
+      "title": "Večerní zpravodaj 28. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-28T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000706",
+      "title": "Večerní zpravodaj 27. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-27T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000705",
+      "title": "Večerní zpravodaj 26. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-26T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000704",
+      "title": "Večerní zpravodaj 25. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-25T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000703",
+      "title": "Večerní zpravodaj 24. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-24T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000702",
+      "title": "Večerní zpravodaj 23. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-23T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000701",
+      "title": "Večerní zpravodaj 22. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-22T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000700",
+      "title": "Večerní zpravodaj 21. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-21T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000699",
+      "title": "Večerní zpravodaj 20. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-20T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000698",
+      "title": "Večerní zpravodaj 19. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-19T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000697",
+      "title": "Večerní zpravodaj 18. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-18T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000696",
+      "title": "Večerní zpravodaj 17. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-17T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000695",
+      "title": "Večerní zpravodaj 16. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-16T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000694",
+      "title": "Večerní zpravodaj 15. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-15T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000693",
+      "title": "Večerní zpravodaj 14. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-14T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000692",
+      "title": "Večerní zpravodaj 13. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-13T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     },
+     {
+      "source": "ct",
+      "idec": "30000000691",
+      "title": "Večerní zpravodaj 12. 10. 2026",
+      "description": "Smyšlený popis dílu.",
+      "durationSeconds": 1500,
+      "aired": "2026-10-12T17:30:00Z",
+      "channel": "ČT24",
+      "channelId": "CH_24",
+      "playable": true
+     }
+    ],
+    "nextPage": 2
+   }
+  ]
+ }
+}

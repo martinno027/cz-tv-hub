@@ -85,6 +85,8 @@ REC_SHOW_ID_RE = re.compile(r"^rec:([a-z0-9]{1,600})$")  # archive_catalog.card_
 SUBGENRE_RE = re.compile(r"^[0-9]{1,8}$")
 SEARCH_MAX = 100
 PAGE_RE = re.compile(r"^[1-9][0-9]{0,2}$")
+YEAR_RE = re.compile(r"^[12][0-9]{3}$")
+MONTH_RE = re.compile(r"^(?:[1-9]|1[0-2])$")
 CT_WEB_PREFIX = "/dvb/ct/"
 JSON = "application/json; charset=utf-8"
 M3U8 = "application/vnd.apple.mpegurl"
@@ -770,8 +772,16 @@ class DvbGateway:
         if season is not None and (card_id.startswith("rec:") or not catalog.SEASON_RE.match(season)):
             raise HttpError(400, "Neplatná řada")
         page = _page(query.get("page"), catalog.MAX_EPISODE_PAGES)
+        year, month = query.get("year") or None, query.get("month") or None
+        if year is not None and (card_id.startswith("rec:") or not YEAR_RE.match(year)):
+            raise HttpError(400, "Neplatný rok")
+        if month is not None and (year is None or not MONTH_RE.match(month)):
+            raise HttpError(400, "Měsíc musí být 1 až 12 a s rokem")
         try:
-            return json_response(200, self.catalog.show(card_id, season, page))
+            return json_response(200, self.catalog.show(card_id, season, page, int(year) if year else None,
+                                                        int(month) if month else None))
+        except catalog.BadPeriod:
+            raise HttpError(400, "Pořad nemá díly z tohoto roku nebo měsíce")
         except catalog.BadInput:
             raise HttpError(400, "Neznámá řada pořadu")
 

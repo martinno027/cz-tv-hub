@@ -177,7 +177,7 @@ test('attribution: in the answers that carry TMDb cards, never invented', () => 
     home: (r) => A.parseHome(r.status, r.body), category: (r) => A.parseCategory(r.status, r.body),
     search: (r) => A.parseSearch(r.status, r.body), show_movie: (r) => A.parseShow(r.status, r.body),
     show_series: (r) => A.parseShow(r.status, r.body), show_season_page: (r) => A.parseShow(r.status, r.body),
-    show_ctdown: (r) => A.parseShow(r.status, r.body)
+    show_ctdown: (r) => A.parseShow(r.status, r.body), show_periods: (r) => A.parseShow(r.status, r.body)
   };
   const seen = {};
   for (const name of Object.keys(parsed)) {
@@ -191,7 +191,7 @@ test('attribution: in the answers that carry TMDb cards, never invented', () => 
 });
 
 test('episodes of the shared samples: ČT ones with their channelId, ours never', () => {
-  for (const name of ['show_series', 'show_movie', 'show_season_page', 'show_ctdown']) {
+  for (const name of ['show_series', 'show_movie', 'show_season_page', 'show_ctdown', 'show_periods']) {
     const r = response('dvb/dvb_archive_' + name + '.json');
     for (const g of A.parseShow(r.status, r.body).groups) {
       for (const e of g.episodes) {
@@ -490,4 +490,121 @@ test('client: a transport that throws at once is a rejected promise (the page do
   }));
   await assert.rejects(client.show('ct:1', 's', 2));
   await assert.rejects(client.home());
+});
+
+// --- Year and month (T32): spec/apps.md "Archiv" → show page, spec/dvb-gateway.md "Archive" → "Year and month" ---
+
+test('periods: Czech month names (golden)', () => {
+  for (const c of cases.periods.monthName) assert.equal(A.monthName(c.month), c.name, String(c.month));
+  assert.equal(cases.periods.monthName.length, 12);
+  assert.equal(A.monthName(0), '');
+  assert.equal(A.monthName(13), '');
+});
+
+test('periods: the chips of the gateway periods (golden)', () => {
+  const labels = (chips) => chips.map((c) => ({ label: c.label, selected: c.selected }));
+  for (const c of cases.periods.chips) {
+    // through the parser, as the gateway's answer comes
+    const show = A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [{ title: 'iVysílání',
+      periods: c.periods, episodes: [{ source: 'ct', idec: '1' }] }] }));
+    const chips = A.periodChips(A.periodsOf(show.groups));
+    assert.deepEqual(labels(chips.years), c.years, c.name);
+    assert.deepEqual(labels(chips.months), c.months, c.name);
+  }
+  const [first, second] = cases.periods.chips;
+  assert.notDeepEqual(first.months, second.months);
+  // each chip also says what it selects
+  assert.deepEqual(A.periodChips(A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [{ title: 'i',
+    periods: second.periods, episodes: [{ source: 'ct', idec: '1' }] }] })).groups[0].periods).months.map((m) => m.month), [12, 1]);
+});
+
+test('periods: a year alone selects its newest month (golden)', () => {
+  for (const c of cases.periods.selectYear) assert.equal(A.selectYear(c.months), c.month, c.name);
+  assert.equal(A.selectYear([]), null);
+  // the parser applies it when the gateway's month is missing or not one of the year's
+  const p = (o) => A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [{ title: 'i', periods: o,
+    episodes: [{ source: 'ct', idec: '1' }] }] })).groups[0].periods;
+  assert.equal(p({ years: [2025], year: 2025, months: [1, 12, 6] }).month, 12);
+  assert.equal(p({ years: [2025], year: 2025, months: [12, 6], month: 7 }).month, 12);
+  assert.equal(p({ years: [2025], year: 2025, months: [12, 6], month: 6 }).month, 6);
+});
+
+test('periods parser: defensive, broken periods are no chips', () => {
+  const p = (o) => A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [{ title: 'i', periods: o,
+    episodes: [{ source: 'ct', idec: '1' }] }] })).groups[0].periods;
+  assert.deepEqual(p({ years: [2026, '2025', 2025.5, 2025, 2025, 1700], year: 2026, months: [11, 0, 13, '10', 10, 10], month: 10 }),
+    { years: [2026, 2025], year: 2026, months: [11, 10], month: 10 });
+  assert.equal(p(undefined), null);
+  assert.equal(p(null), null);
+  assert.equal(p([2026]), null);
+  assert.equal(p({ years: [2026], year: 2024, months: [1], month: 1 }), null); // a year not listed
+  assert.equal(p({ years: [2026], months: [1], month: 1 }), null); // no year
+  assert.equal(p({ years: [2026], year: 2026, months: [], month: 1 }), null); // no months
+  assert.equal(p({ years: [], year: 2026, months: [1], month: 1 }), null);
+  assert.deepEqual(A.periodChips(null), { years: [], months: [] });
+  // only a ČT group's periods count
+  const rec = A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [{ title: 'Nahráno z antény',
+    periods: { years: [2026], year: 2026, months: [1], month: 1 }, episodes: [{ source: 'rec', recordingId: 'r1' }] }] }));
+  assert.equal(A.periodsOf(rec.groups), null);
+});
+
+test('periods: the request carries the season, year, month and page', () => {
+  assert.equal(A.showQuery(null, 1, null), '');
+  assert.equal(A.showQuery(null, 2, null), '?page=2');
+  assert.equal(A.showQuery('s/2', 1, null), '?season=s%2F2&page=1');
+  assert.equal(A.showQuery(null, 1, { year: 2005 }), '?year=2005&page=1'); // a year alone: the gateway picks the month
+  assert.equal(A.showQuery(null, 1, { year: 2005, month: 1 }), '?year=2005&month=1&page=1');
+  assert.equal(A.showQuery('s1', 3, { year: 2026, month: 11 }), '?season=s1&year=2026&month=11&page=3');
+  assert.notEqual(A.showQuery(null, 1, { year: 2005, month: 1 }), A.showQuery(null, 1, { year: 2005 }));
+});
+
+test('periods: client path of another month and its next page', async () => {
+  const seen = [];
+  const client = new CT.ArchiveClient(new CT.DvbClient(new CT.DvbConfig('http://pi.local:8098', KEY), (req) => {
+    seen.push(req.url.replace('http://pi.local:8098', ''));
+    return Promise.resolve({ status: 200, body: body(SHOW) });
+  }));
+  await client.show('ct:10195164142', null, 1, { year: 2025 });
+  await client.show('ct:10195164142', null, 2, { year: 2025, month: 10 });
+  assert.deepEqual(seen, ['/dvb/archive/show/ct:10195164142?year=2025&page=1',
+    '/dvb/archive/show/ct:10195164142?year=2025&month=10&page=2']);
+});
+
+test('periods: a next page keeps the group periods, another month replaces them', () => {
+  const periods = { years: [2026, 2025], year: 2026, months: [11, 10], month: 11 };
+  const show = A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [
+    { title: 'iVysílání', season: null, nextPage: 2, periods, episodes: [{ source: 'ct', idec: '1' }] },
+    { title: 'Nahráno z antény', episodes: [{ source: 'rec', recordingId: 'r1' }] }] }));
+  // page 2 of the same month (the gateway sends the periods again, but the group's own stay)
+  const page2 = A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [
+    { title: 'iVysílání', season: null, nextPage: null, episodes: [{ source: 'ct', idec: '2' }] }] })).groups;
+  const paged = A.withPage(show.groups, 0, page2);
+  assert.deepEqual(paged[0].periods, periods);
+  assert.deepEqual(paged[0].episodes.map((e) => e.idec), ['1', '2']);
+  // October: its episodes and its periods instead, ours stay
+  const october = A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [
+    { title: 'iVysílání', season: null, nextPage: null, periods: Object.assign({}, periods, { month: 10 }),
+      episodes: [{ source: 'ct', idec: '10' }] }] })).groups;
+  const switched = A.withSeason(show.groups, october);
+  assert.equal(A.periodsOf(switched).month, 10);
+  assert.deepEqual(switched.map((g) => g.episodes[0].idec || g.episodes[0].recordingId), ['10', 'r1']);
+  assert.equal(A.periodsOf(show.groups).month, 11);
+});
+
+test('periods: the shared sample', () => {
+  const r = response('dvb/dvb_archive_show_periods.json');
+  const show = A.parseShow(r.status, r.body);
+  const periods = A.periodsOf(show.groups);
+  assert.ok(periods, 'the ČT group has periods');
+  const chips = A.periodChips(periods);
+  assert.equal(chips.years.filter((c) => c.selected).length, 1);
+  assert.equal(chips.months.filter((c) => c.selected).length, 1);
+  assert.ok(chips.months.every((c) => c.label), 'every month named');
+  // the episodes are that month's (Prague time), newest first
+  const ct = show.groups.filter(A.isCtGroup)[0].episodes.filter((e) => e.aired !== null);
+  for (const e of ct) {
+    const [y, m] = CT.Days.today(e.aired).split('-').map(Number);
+    assert.deepEqual([y, m], [periods.year, periods.month], e.idec);
+  }
+  for (let i = 1; i < ct.length; i++) assert.ok(ct[i - 1].aired >= ct[i].aired, 'newest first');
 });

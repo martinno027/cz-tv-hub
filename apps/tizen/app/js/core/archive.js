@@ -10,6 +10,8 @@
   var J = CT.Json;
 
   var THUMB_PATH = /^\/dvb\/recording\/([A-Za-z0-9_-]{1,80})\/thumb\.jpg$/;
+  var MONTHS = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen', 'červenec', 'srpen', 'září', 'říjen',
+    'listopad', 'prosinec'];
   var SOURCES = ['ct', 'rec', 'both'];
   var KINDS = ['movie', 'series'];
 
@@ -34,6 +36,28 @@
 
   function nextPage(o) {
     return positiveInt(o.nextPage);
+  }
+
+  /** Whole numbers of a list field within [min, max], each once, in the order sent. */
+  function wholes(o, key, min, max) {
+    var out = [];
+    J.arr(o, key).forEach(function (v) {
+      if (isNumber(v) && v === Math.floor(v) && v >= min && v <= max && out.indexOf(v) < 0) out.push(v);
+    });
+    return out;
+  }
+
+  /**
+   * A ČT group's `periods` (T32) → {years, year, months, month} or null (no chips). The selected year has to be one
+   * of the years and its months must not be empty; a month missing or not listed is the year's newest (the rule of a
+   * year alone).
+   */
+  function parsePeriods(o) {
+    if (!isObject(o)) return null;
+    var years = wholes(o, 'years', 1880, 2200);
+    var months = wholes(o, 'months', 1, 12);
+    if (years.indexOf(o.year) < 0 || !months.length) return null;
+    return { years: years, year: o.year, months: months, month: months.indexOf(o.month) >= 0 ? o.month : Archive.selectYear(months) };
   }
 
   /** CT's GraphQL sometimes uses names, the gateway may pass names or slugs: "ČT1" / "ct1" → the CT channel. */
@@ -190,9 +214,9 @@
 
     /**
      * GET /dvb/archive/show/<id> → {card, description, creators, countries, seasons: [{id, title}],
-     * groups: [{title, season, nextPage, episodes}], attribution}; a show without a usable card is an error. A ČT
-     * group carries its `season` (id or null) and `nextPage` (more of its episodes by ?season=&page=); the
-     * "Nahráno z antény" group has neither. `error` = the gateway's text when iVysílání did not answer (a show in both
+     * groups: [{title, season, nextPage, periods, episodes}], attribution}; a show without a usable card is an error.
+     * A ČT group carries its `season` (id or null), `nextPage` (more of its episodes by ?season=&page=) and, with more
+     * than 100 episodes, `periods` (the year and month chips, T32; else null); the "Nahráno z antény" group has none. `error` = the gateway's text when iVysílání did not answer (a show in both
      * sources then comes with only our recorded episodes).
      */
     parseShow: function (status, body) {
@@ -214,6 +238,7 @@
             title: J.str(g, 'title') || '',
             season: J.str(g, 'season'),
             nextPage: nextPage(g),
+            periods: parsePeriods(g.periods),
             episodes: J.arr(g, 'episodes').map(Archive.parseEpisode).filter(Boolean)
           };
         }).filter(function (g) { return g.episodes.length; }),
@@ -383,10 +408,52 @@
       var same = ct.filter(function (g) { return g.season === group.season; })[0] || ct[0] || null;
       var out = groups.slice();
       out[index] = {
-        title: group.title, season: group.season, nextPage: same ? same.nextPage : null,
+        title: group.title, season: group.season, nextPage: same ? same.nextPage : null, periods: group.periods || null,
         episodes: group.episodes.concat(same ? same.episodes.filter(function (e) { return e.source === 'ct'; }) : [])
       };
       return out;
+    },
+
+    /** Czech name of month 1–12 ("leden" … "prosinec"), else ''. */
+    monthName: function (month) {
+      return MONTHS[month - 1] || '';
+    },
+
+    /** A year alone (T32): its newest month of those the gateway lists for it, or null. */
+    selectYear: function (months) {
+      return months && months.length ? Math.max.apply(null, months) : null;
+    },
+
+    /** The year/month chips of a group's periods: {years: [{label, selected, year}], months: [{label, selected, month}]}. */
+    periodChips: function (periods) {
+      if (!periods) return { years: [], months: [] };
+      return {
+        years: periods.years.map(function (y) { return { label: String(y), selected: y === periods.year, year: y }; }),
+        months: periods.months.map(function (m) {
+          return { label: Archive.monthName(m), selected: m === periods.month, month: m };
+        })
+      };
+    },
+
+    /** The periods of a show's iVysílání episode list (its first ČT group with them), or null. */
+    periodsOf: function (groups) {
+      var group = groups.filter(function (g) { return Archive.isCtGroup(g) && g.periods; })[0];
+      return group ? group.periods : null;
+    },
+
+    /**
+     * The query of a show request: `?season=&year=&month=&page=` with the parts there are (`period` = {year, month?}:
+     * a year alone = its newest month, the gateway picks it); nothing for the show as the gateway opens it.
+     */
+    showQuery: function (season, page, period) {
+      var parts = [];
+      if (season) parts.push('season=' + encodeURIComponent(season));
+      if (period && period.year) {
+        parts.push('year=' + period.year);
+        if (period.month) parts.push('month=' + period.month);
+      }
+      if (parts.length || page > 1) parts.push('page=' + (page || 1));
+      return parts.length ? '?' + parts.join('&') : '';
     },
 
     /** The film's episode to play from a show page: its first iVysílání episode, else its first episode. */
@@ -429,10 +496,12 @@
     return this.get(path).then(function (r) { return Archive.parseSearch(r.status, r.body); });
   };
 
-  /** A show; with `season` (and `page`) the iVysílání episodes of that season; a later page without one too. */
-  ArchiveClient.prototype.show = function (id, season, page) {
-    var query = season ? '?season=' + encodeURIComponent(season) + '&page=' + (page || 1) : page > 1 ? '?page=' + page : '';
-    return this.get('/dvb/archive/show/' + segment(id) + query).then(function (r) {
+  /**
+   * A show; with `season` (and `page`) the iVysílání episodes of that season; a later page without one too;
+   * `period` = {year, month?} (T32) those of that year and month.
+   */
+  ArchiveClient.prototype.show = function (id, season, page, period) {
+    return this.get('/dvb/archive/show/' + segment(id) + Archive.showQuery(season, page, period)).then(function (r) {
       return Archive.parseShow(r.status, r.body);
     });
   };

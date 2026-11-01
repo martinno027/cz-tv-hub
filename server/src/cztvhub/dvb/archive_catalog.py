@@ -4,6 +4,8 @@ household's own recordings, in ČT's categories, one card per normalised title (
 - ČT is asked like ``api.py`` does (the same endpoint and honest User-Agent, never the website), one request at a
   time, answers cached 6 h (rows, sub-genres), 1 h (a show, its episodes), 10 min (a search); at most 3 pages of
   20 shows per row. Nothing of ČT's is stored on disk.
+- An episode list of more than 100 gets year/month periods (T32, ``EpisodePeriods``): ČT has no date filter, so a
+  year is found by bisection over its date-ordered list and read in chunks of 100, all kept for the show TTL.
 - Our recordings are ended programmes of the continuous recording (the gateway passes them in); the same cleaned
   title is one show. Their categories come from the stored TMDb match or the DVB genre, computed per answer and
   never stored (golden ``spec/fixtures/archive_cases.json``).
@@ -25,7 +27,7 @@ from typing import Any, Callable, Iterable
 from .. import api as ct_api
 from ..channels import CHANNELS as CT_CHANNELS
 from . import details as dt
-from .epg import genre_text
+from .epg import PRAGUE, genre_text
 from .tmdbstore import Entry, TmdbStore
 
 ROW_TTL = 6 * 3600.0
@@ -40,6 +42,11 @@ MAX_PAGES = 3  # ≤ 60 shows of a row or search, no crawling
 HOME_REC = 10  # our shows mixed into a home row (and per category page)
 EPISODE_PAGE = 20
 MAX_EPISODE_PAGES = 10
+PERIODS_OVER = 100  # more playable episodes than this: year and month chips (T32)
+CT_LIMIT = 100  # ČT's largest `limit` (2026-11-01: 100 works, 200 is a validation error)
+OLDEST_PROBE = 10  # the oldest episodes asked for the oldest year
+YEAR_MAX_CHUNKS = 30  # ≤ 3000 episodes of one year read (Události: ~475 a year)
+PERIODS_MAX = 32  # episode lists with periods kept in memory
 RECORDINGS_PAGE = 20
 MAX_RECORDINGS_PAGES = 50
 LISTED_SECONDS = 7 * 86400  # a ČT title counts as "listed by the archive" this long after an answer showed it
@@ -52,6 +59,11 @@ CT_IMAGE_RE = re.compile(r"^https://[A-Za-z0-9.-]+\.ceskatelevize\.cz/[^\s\"<>]{
 CT_ID_RE = re.compile(r"^[A-Za-z0-9]{1,32}$")
 IDEC_RE = re.compile(r"^[A-Za-z0-9]{1,32}$")  # an episode's id is its IDEC (the VOD path plays it)
 SEASON_RE = re.compile(r"^[A-Za-z0-9:_-]{1,80}$")
+# ČT answers an error when offset + limit is over 10 000 (measured 2026-11-01 on Události, 9970 episodes: offset
+# 9900 limit 100 gives 70, offset 9909 limit 100 an error): a search window. Episodes past it cannot be read in
+# the newest-first list.
+CT_WINDOW = 10000
+GROUP_PREFIX = "group:"  # ČT's groups of other versions (sign language, subtitles), not seasons
 _SPACES = re.compile(r"[ \t\r\n\f\v]+")
 SORTS = {"popular": "popular_previous_seven_days", "newest": "catchup_broadcast", "az": "alphabet"}
 
@@ -119,6 +131,10 @@ class CtNotFound(CtError, NotFound):
 
 class BadInput(Exception):
     """A sub-genre or season that is not the category's or show's."""
+
+
+class BadPeriod(BadInput):
+    """A year or month the show's episode list does not have (or a list without periods)."""
 
 
 # -- rules (golden spec/fixtures/archive_cases.json) -----------------------------------------------
@@ -216,6 +232,7 @@ class CtArchiveClient:
         self._lock = threading.Lock()  # one ČT request at a time
         self._cache_lock = threading.Lock()
         self._cache: OrderedDict[str, tuple[float, float, Any]] = OrderedDict()
+        self._periods: OrderedDict[str, EpisodePeriods] = OrderedDict()
 
     def _cached(self, key: str) -> tuple[bool, Any]:
         with self._cache_lock:
@@ -228,12 +245,29 @@ class CtArchiveClient:
         found, value = self._cached(key)
         if found:
             return value
+        fresh, payload = self._fetch(query, variables, key)
+        if not fresh:  # another thread fetched it while this one waited for the slot
+            return payload
+        with self._cache_lock:
+            now = self.clock()
+            self._cache[key] = (now, ttl, payload)
+            self._cache.move_to_end(key)
+            for k in [k for k, v in self._cache.items() if now - v[0] >= v[1]]:
+                del self._cache[k]
+            while len(self._cache) > CT_CACHE_MAX:
+                self._cache.popitem(last=False)
+        return payload
+
+    def _fetch(self, query: str, variables: dict, key: str | None = None) -> tuple[bool, dict]:
+        """One ČT request through the one request slot (the archive's only pacing) → (fresh, payload); with
+        ``key`` answered from the cache instead (fresh False) when another thread fetched it meanwhile."""
         if not self._lock.acquire(timeout=CT_WAIT):
             raise CtError("another ČT request is still running")
         try:
-            found, value = self._cached(key)
-            if found:
-                return value
+            if key is not None:
+                found, value = self._cached(key)
+                if found:
+                    return False, value
             try:
                 data = self._post({"query": query, "variables": variables})
             except ct_api.StreamError as exc:  # a post built on api.py's helpers
@@ -249,15 +283,7 @@ class CtArchiveClient:
         payload = data.get("data")
         if not isinstance(payload, dict) or errors:
             raise CtError(f"ČT GraphQL: {sorted(str(c) for c in codes) or 'no data'}")
-        with self._cache_lock:
-            now = self.clock()
-            self._cache[key] = (now, ttl, payload)
-            self._cache.move_to_end(key)
-            for k in [k for k, v in self._cache.items() if now - v[0] >= v[1]]:
-                del self._cache[k]
-            while len(self._cache) > CT_CACHE_MAX:
-                self._cache.popitem(last=False)
-        return payload
+        return True, payload
 
     def subgenres(self, category_id: str) -> list[dict]:
         data = self._query(f"sub:{category_id}", ROW_TTL, SUBGENRES_QUERY, {"id": category_id})
@@ -299,9 +325,44 @@ class CtArchiveClient:
         countries = raw.get("countriesOfOrigin") if isinstance(raw.get("countriesOfOrigin"), list) else []
         show["countries"] = [c["title"] for c in countries if isinstance(c, dict) and _text(c.get("title"))]
         seasons = raw.get("seasons") if isinstance(raw.get("seasons"), list) else []
+        # Only real seasons ("season:…", "I. řada"). ČT also lists groups of other versions of the same episodes
+        # ("group:…", e.g. Události's "Znakový jazyk a skryté titulky", 2026-11-01): taken as a season, the page
+        # showed only those versions (since 2021) instead of the whole list (since 2005).
         show["seasons"] = [{"id": s["id"], "title": s["title"]} for s in seasons if isinstance(s, dict)
-                           and isinstance(s.get("id"), str) and SEASON_RE.match(s["id"]) and _text(s.get("title"))]
+                           and isinstance(s.get("id"), str) and SEASON_RE.match(s["id"])
+                           and not s["id"].startswith(GROUP_PREFIX) and _text(s.get("title"))]
         return show
+
+    def episode_chunk(self, show_id: str, season: str | None, offset: int, limit: int,
+                      oldest: bool = False) -> tuple[list[dict | None], int | None]:
+        """``limit`` episodes from ``offset``, uncached (``EpisodePeriods`` keeps what it learns): one entry per
+        position, None where ČT's item is not an episode we can show; ČT's total or None."""
+        season_arg = f", seasonId: {json.dumps(season)}" if season else ""
+        limit = min(limit, CT_WINDOW - offset)  # ČT refuses offset + limit over its window (an error, not fewer)
+        if limit <= 0:
+            return [], None
+        query = EPISODES_QUERY % (limit, offset, "oldest" if oldest else "newest", season_arg)
+        _, data = self._fetch(query, {"id": show_id})
+        raw = data.get("programme") if isinstance(data.get("programme"), dict) else {}
+        found = raw.get("episodes") if isinstance(raw.get("episodes"), dict) else {}
+        total = found.get("totalCount")
+        return [parse_episode(i) for i in _items(found)], \
+            total if isinstance(total, int) and not isinstance(total, bool) and total >= 0 else None
+
+    def periods(self, show_id: str, season: str | None) -> "EpisodePeriods":
+        """The year/month index of one episode list, kept for the show TTL (all of it expires together)."""
+        key = f"{show_id}:{season}"
+        with self._cache_lock:
+            now = self.clock()
+            for k in [k for k, v in self._periods.items() if now - v.created >= SHOW_TTL]:
+                del self._periods[k]
+            found = self._periods.get(key)
+            if found is None:
+                found = self._periods[key] = EpisodePeriods(self, show_id, season, now)
+                while len(self._periods) > PERIODS_MAX:
+                    self._periods.popitem(last=False)
+            self._periods.move_to_end(key)
+            return found
 
     def episodes(self, show_id: str, season: str | None, page: int, oldest: bool) -> tuple[list[dict], int]:
         season_arg = f", seasonId: {json.dumps(season)}" if season else ""
@@ -313,6 +374,142 @@ class CtArchiveClient:
         total = found.get("totalCount")
         items = [e for e in map(parse_episode, _items(found)) if e is not None]
         return items, total if isinstance(total, int) and not isinstance(total, bool) else len(items)
+
+
+def local_month(episode: dict | None) -> tuple[int, int] | None:
+    """(year, month) of an episode's airing in Prague's calendar (ČT's own: a programme at 00:30 on 1 January
+    belongs to the new year, as iVysílání lists it), None without a date."""
+    aired = episode.get("aired") if episode else None
+    if not aired:
+        return None
+    local = datetime.strptime(aired, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(PRAGUE)
+    return local.year, local.month
+
+
+class EpisodePeriods:
+    """Years and months of a long ČT episode list (spec "Year and month (T32)"). ČT has no date filter, but its
+    ``newest`` list is ordered by airing, so a year starts at the first offset whose episode is that year or older
+    (bisection with ``limit: 1``), and is read in chunks of 100 from there until an older episode shows up. Every
+    episode seen is kept by its offset, so later bisections start narrower and the year below the one just read
+    starts where that read stopped (no requests). Episodes without a date are left out of every month."""
+
+    def __init__(self, ct: CtArchiveClient, show_id: str, season: str | None, created: float):
+        self.ct, self.show_id, self.season, self.created = ct, show_id, season, created
+        self.lock = threading.Lock()
+        self.total: int | None = None
+        self.known: dict[int, dict | None] = {}  # offset in the newest-first list → episode (None: not one)
+        self.newest_year: int | None = None
+        self.oldest_year: int | None = None
+        self.read: dict[int, OrderedDict[int, list[dict]]] = {}  # year → month → episodes, newest first
+        self.empty: set[int] = set()  # years of the range found to have no episode (left out of ``years``)
+
+    def _chunk(self, offset: int, limit: int) -> None:
+        items, total = self.ct.episode_chunk(self.show_id, self.season, offset, limit)
+        if total is not None:
+            self.total = total
+        for i, item in enumerate(items):
+            self.known[offset + i] = item
+        if len(items) < limit and self.total is not None:  # the list ended earlier than ČT's total said
+            self.total = min(self.total, offset + len(items))
+
+    def _year_at(self, offset: int) -> int | None:
+        found = local_month(self.known.get(offset))
+        return found[0] if found else None
+
+    def years(self) -> list[int]:
+        """Newest first, every year from the newest to the oldest episode's; [] = no periods (≤ 100 episodes or
+        no dates). Years found empty are left out (``months`` finds them)."""
+        with self.lock:
+            if self.total is None:
+                self._chunk(0, CT_LIMIT)  # the newest year's first chunk, and ČT's total
+            if self.total is None or self.total <= PERIODS_OVER:
+                return []
+            if self.newest_year is None:
+                dated = [y for y in (self._year_at(i) for i in range(min(CT_LIMIT, self.total))) if y]
+                self.newest_year = max(dated) if dated else None
+            if self.newest_year is None:
+                return []
+            if self.oldest_year is None:
+                # a few, not one: the oldest may have no date (the same single request either way)
+                # (only for the range: offsets are always those of the newest-first list)
+                items, _ = self.ct.episode_chunk(self.show_id, self.season, 0, OLDEST_PROBE, oldest=True)
+                oldest = next((m for m in map(local_month, items) if m), None)
+                known = [y for y in (self._year_at(i) for i in self.known) if y]
+                self.oldest_year = min([oldest[0]] if oldest else known)
+            return [y for y in range(self.newest_year, min(self.oldest_year, self.newest_year) - 1, -1)
+                    if y not in self.empty]
+
+    def in_range(self, year: int) -> bool:
+        return self.newest_year is not None and self.oldest_year is not None and \
+            min(self.oldest_year, self.newest_year) <= year <= self.newest_year
+
+    def _start(self, year: int) -> int:
+        """The first offset whose episode is of ``year`` or older (bisection over what is not known yet)."""
+        if year >= (self.newest_year or year):
+            return 0
+        lo, hi = 0, self.total or 0
+        for offset in self.known:
+            y = self._year_at(offset)
+            if y is None:
+                continue
+            if y > year:
+                lo = max(lo, offset + 1)
+            else:
+                hi = min(hi, offset)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if mid not in self.known:
+                self._chunk(mid, 1)
+                if mid not in self.known:  # past the list's real end
+                    hi = mid
+                    continue
+            y = self._year_at(mid)
+            if y is not None and y > year:
+                lo = mid + 1
+            else:  # this year or older; an episode without a date starts the read earlier, never later
+                hi = mid
+        return lo
+
+    def months(self, year: int) -> "OrderedDict[int, list[dict]]":
+        """The year's months that have an episode, newest first, each with its episodes newest first."""
+        with self.lock:
+            if year in self.read:
+                return self.read[year]
+            start = self._start(year)
+            offset, chunks, found = start, 0, []
+            while self.total is None or offset < self.total:
+                if offset not in self.known:
+                    if chunks >= YEAR_MAX_CHUNKS:
+                        break
+                    self._chunk(offset, CT_LIMIT)
+                    chunks += 1
+                    if offset not in self.known:
+                        break
+                item = self.known[offset]
+                y = self._year_at(offset)
+                if y is not None and y < year:
+                    break
+                if y == year:
+                    found.append(item)
+                offset += 1
+            if not found:
+                # Empty, and so is every newer year up to the episode just before its start. The older ones down
+                # to the next episode cost nothing when the caller tries them: their start and chunk are known.
+                newer = self._year_at(start - 1) if start > 0 else None
+                self.empty.update(range(year, newer if newer is not None and newer > year else year + 1))
+            by_month: dict[int, list[dict]] = {}
+            for item in found:
+                by_month.setdefault(local_month(item)[1], []).append(item)
+            ordered: OrderedDict[int, list[dict]] = OrderedDict()
+            for month in sorted(by_month, reverse=True):
+                ordered[month] = sorted(by_month[month], key=lambda e: e["aired"], reverse=True)
+            self.read[year] = ordered
+            return ordered
+
+
+def _nearest(year: int, years: list[int]) -> int:
+    """The next older year of ``years`` (newest first), else the next newer one."""
+    return next((y for y in years if y < year), None) or min(y for y in years if y > year)
 
 
 def _items(found: dict) -> list:
@@ -714,11 +911,15 @@ class ArchiveCatalog:
         more = page < MAX_PAGES and (len(shows) >= PAGE or len(mine) > page * HOME_REC)
         return self._finish({"cards": cards, "nextPage": page + 1 if more else None}, failed)
 
-    def show(self, card_id: str, season: str | None, page: int) -> dict:
+    def show(self, card_id: str, season: str | None, page: int, year: int | None = None,
+             month: int | None = None) -> dict:
         """``ct:<id>`` or ``rec:<id>``; NotFound → 404, BadInput → 400, CtError → 502. The same answer for
-        ``?season=&page=``: the ČT group then holds that page (the apps replace it on page 1, append later)."""
+        ``?season=&page=``: the ČT group then holds that page (the apps replace it on page 1, append later).
+        More than 100 episodes: the group has ``periods`` and holds a month's episodes (``year``/``month``)."""
         kind, _, ident = card_id.partition(":")
         if kind == "rec":
+            if year is not None or month is not None:
+                raise BadPeriod("our recordings have no periods")
             show = next((s for s in self.rec_shows() if s.ident == ident), None)
             if show is None:
                 raise NotFound(card_id)
@@ -731,7 +932,19 @@ class ArchiveCatalog:
             if season is not None and season not in {s["id"] for s in seasons}:
                 raise BadInput("unknown season")
             chosen = season or (seasons[0]["id"] if seasons else None)
-            episodes, total = self.ct.episodes(ident, chosen, page, oldest=bool(seasons))
+            periods = None
+            if year is None and month is None:
+                episodes, total = self.ct.episodes(ident, chosen, page, oldest=bool(seasons))
+                more = page < MAX_EPISODE_PAGES and (page - 1) * EPISODE_PAGE + len(episodes) < total
+                if total > PERIODS_OVER:
+                    found = self._periods(ident, chosen, None, None, page)
+                    if found is not None:  # else: no dated episodes, the list as up to 100
+                        episodes, more, periods = found
+            else:
+                found = self._periods(ident, chosen, year, month, page)
+                if found is None:
+                    raise BadPeriod("no periods")
+                episodes, more, periods = found
         except CtNotFound:
             raise
         except CtError as exc:
@@ -739,7 +952,6 @@ class ArchiveCatalog:
         ct_card = self.ct_cards([info])[0]  # kind and year from the show itself, also after a search card
         mine = next((s for s in self.rec_shows() if s.key == ct_card.key), None)
         card = both(ct_card.data, self._rec_info([mine])[0][1]) if mine else ct_card.data
-        more = page < MAX_EPISODE_PAGES and (page - 1) * EPISODE_PAGE + len(episodes) < total
         group_title = next((s["title"] for s in seasons if s["id"] == chosen), CT_GROUP)
         out: dict[str, Any] = {"card": card, "description": info["description"]}
         if info["creators"]:
@@ -747,12 +959,53 @@ class ArchiveCatalog:
         if info["countries"]:
             out["countries"] = info["countries"]
         out["seasons"] = seasons
-        groups = [{"title": group_title, "season": chosen, "episodes": episodes,
-                   "nextPage": page + 1 if more else None}]
+        group: dict[str, Any] = {"title": group_title, "season": chosen}
+        if periods is not None:
+            group["periods"] = periods
+        group["episodes"] = episodes
+        group["nextPage"] = page + 1 if more else None
+        groups = [group]
         if mine:
             groups.append(self._rec_group(mine))
         out["groups"] = groups
         return self._finish(out, False)
+
+    def _periods(self, ident: str, season: str | None, year: int | None, month: int | None,
+                 page: int) -> tuple[list[dict], bool, dict] | None:
+        """(the month's page of episodes, more, ``periods``) or None when the list has none; BadPeriod for a year
+        or month it does not have. Default: the newest year, a year's newest month; a year found empty (also one
+        asked for again from a stale chip): the next older year with episodes, else the next newer."""
+        index = self.ct.periods(ident, season)
+        years = index.years()
+        if not years:
+            return None
+        if year is None:
+            if month is not None:
+                raise BadPeriod("a month needs its year")
+            year = years[0]
+        elif year not in years:
+            if not (year in index.empty and index.in_range(year)):
+                raise BadPeriod("unknown year")
+            year, month = _nearest(year, years), None  # a stale chip: the nearest year with episodes
+        for _ in range(len(years) + 1):  # each empty year leaves the list, so this ends; the bound is a guard
+            by_month = index.months(year)
+            if by_month:
+                break
+            years = index.years()  # now without it (and any empty year it showed up)
+            if not years or year in years:
+                return None
+            year, month = _nearest(year, years), None
+        else:
+            return None
+        if month is None:
+            month = next(iter(by_month))
+        elif month not in by_month:
+            raise BadPeriod("unknown month")
+        episodes = by_month[month]
+        start = (page - 1) * EPISODE_PAGE
+        more = page < MAX_EPISODE_PAGES and len(episodes) > start + EPISODE_PAGE
+        return episodes[start:start + EPISODE_PAGE], more, {"years": index.years(), "year": year,
+                                                            "months": list(by_month), "month": month}
 
     def _show_without_ct(self, ident: str, exc: CtError) -> dict:
         """ČT is down: a show the archive listed that we also recorded still shows our episodes."""

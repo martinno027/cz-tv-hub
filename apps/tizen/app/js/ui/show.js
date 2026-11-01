@@ -3,7 +3,8 @@
  * screen over the tab. It shows at once from the card and fills in from GET /dvb/archive/show/<id>: facts (source
  * · year · kind · countries · episode count), the TMDb rating, description, creators; a film gets the T15 buttons
  * (Pokračovat od … / Přehrát / Zpět), a series the season chips and its episodes (each Přehrát or Pokračovat od …,
- * not playable ones dimmed), and "Nahráno z antény" lists our recorded episodes. The episode list is built around
+ * not playable ones dimmed), and "Nahráno z antény" lists our recorded episodes. A ČT list of more than 100 episodes
+ * comes a month at a time: year and month chips under the season chips (T32). The episode list is built around
  * the focus only. Return closes it; after the player the buttons and positions are recomputed.
  */
 (function (root) {
@@ -15,10 +16,20 @@
 
   var EP_STEP = 76;
   var EP_VISIBLE = 5;
+  var EP_VISIBLE_PERIODS = 4; // with the year and month chips
+  var ZONES = ['buttons', 'seasons', 'years', 'months', 'episodes']; // top to bottom
   var PAGE_AHEAD = 4; // the next page of episodes is asked for this many episodes before the end
 
   function $(id) {
     return document.getElementById(id);
+  }
+
+  /** A long chip row (a show since 2005 has 22 years) scrolls so that `chip` (focused, else selected) is in view. */
+  function revealChip(box, chip) {
+    if (!chip) return;
+    var left = chip.offsetLeft - box.offsetLeft;
+    if (left < box.scrollLeft) box.scrollLeft = left;
+    else if (left + chip.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollLeft = left + chip.offsetWidth - box.clientWidth;
   }
 
   function ShowPage(app, screen) {
@@ -29,7 +40,10 @@
     this.error = null;
     this.season = 0;
     this.seasonFocus = 0; // the season chip focused (chosen with OK)
-    this.zone = 'buttons'; // 'buttons' | 'seasons' | 'episodes' | 'none' (a series page with nothing to focus)
+    this.zone = 'buttons'; // one of ZONES | 'none' (a series page with nothing to focus)
+    this.yearFocus = 0; // the year / month chip focused (chosen with OK)
+    this.monthFocus = 0;
+    this.choice = null; // {year, month?} asked for and not answered yet: its chip shows selected meanwhile
     this.buttons = [];
     this.button = 0;
     this.lines = []; // the episode list: [{header} | {episode}]
@@ -53,6 +67,9 @@
     this.error = null;
     this.season = 0;
     this.seasonFocus = 0;
+    this.yearFocus = 0;
+    this.monthFocus = 0;
+    this.choice = null;
     this.zone = 'buttons';
     this.button = 0;
     this.episode = 0;
@@ -75,18 +92,20 @@
 
   /**
    * GET /dvb/archive/show/<id> (`season` = null: the show as the gateway opens it). `group` = null: page 1 of a
-   * season replaces the iVysílání episodes; a group index: its next page is added to it. Our recorded episodes stay.
+   * season (or of a `period` {year, month?}, T32) replaces the iVysílání episodes; a group index: its next page is
+   * added to it. Our recorded episodes stay. `failed` (optional) puts back what was chosen before.
    */
-  ShowPage.prototype.load = function (season, page, first, group) {
+  ShowPage.prototype.load = function (season, page, first, group, period, failed) {
     var self = this;
     var client = this.screen.client();
     var card = this.card;
     if (!client) return;
     var token = ++this.token;
     if (group !== null && group !== undefined) this.loadingPage = true;
-    client.show(card.id, season, page).then(function (show) {
+    client.show(card.id, season, page, period || null).then(function (show) {
       if (self.card !== card || self.token !== token) return;
       self.loadingPage = false;
+      self.choice = null;
       if (first) self.data = show;
       else if (group !== null && group !== undefined) self.data.groups = A.withPage(self.data.groups, group, show.groups);
       else self.data.groups = A.withSeason(self.data.groups, show.groups);
@@ -96,6 +115,8 @@
     }, function (e) {
       if (self.card !== card || self.token !== token) return;
       self.loadingPage = false;
+      self.choice = null; // the chips show what is listed again
+      if (failed) failed();
       if (first) self.error = e.userMessage || A.FAILED;
       else self.app.toast(e.userMessage || A.FAILED);
       self.render(false);
@@ -138,10 +159,13 @@
     this.renderImage(card);
     this.renderButtons();
     this.renderSeasons();
+    this.renderPeriods();
     this.renderEpisodes();
     $('sh-state').textContent = this.stateLine();
     if (fresh) {
       this.zone = this.isFilm() ? 'buttons' : this.episodes.length ? 'episodes' : this.hasSeasons() ? 'seasons' : 'none';
+      // a show without seasons that comes a month at a time starts on its selected year (T32)
+      if (!this.isFilm() && !this.hasSeasons() && this.periods()) this.moveZoneTo('years');
       this.button = 0;
       this.episode = 0;
     }
@@ -213,6 +237,38 @@
     if (seasons.length < 2 && this.zone === 'seasons') this.zone = this.buttons.length ? 'buttons' : 'none';
   };
 
+  /**
+   * The periods shown: the gateway's, with a choice not answered yet as selected; while another year loads its
+   * months are not known yet, so the month chips are hidden.
+   */
+  ShowPage.prototype.periods = function () {
+    var periods = this.data && !this.isFilm() ? A.periodsOf(this.data.groups) : null;
+    if (!periods || !this.choice) return periods;
+    if (!this.choice.month) return { years: periods.years, year: this.choice.year, months: [], month: null };
+    return { years: periods.years, year: this.choice.year, months: periods.months, month: this.choice.month };
+  };
+
+  /** Year and month chips (T32) under the season chips; the focus leaves a row that is gone. */
+  ShowPage.prototype.renderPeriods = function () {
+    var chips = A.periodChips(this.periods());
+    [['sh-years', chips.years], ['sh-months', chips.months]].forEach(function (row) {
+      var box = $(row[0]);
+      box.innerHTML = '';
+      row[1].forEach(function (c) {
+        var chip = el('div', 'day', c.label);
+        chip.classList.toggle('selected', c.selected);
+        box.appendChild(chip);
+      });
+      box.classList.toggle('hidden', !row[1].length);
+    });
+    $('show').classList.toggle('periods', chips.years.length > 0);
+    this.yearFocus = Math.min(this.yearFocus, Math.max(0, chips.years.length - 1));
+    this.monthFocus = Math.min(this.monthFocus, Math.max(0, chips.months.length - 1));
+    if (!chips.years.length && (this.zone === 'years' || this.zone === 'months')) {
+      this.zone = this.hasSeasons() ? 'seasons' : this.buttons.length ? 'buttons' : 'none';
+    }
+  };
+
   /** The list: a film's other episodes (e.g. ours of it), a series' episodes; groups under their titles. */
   ShowPage.prototype.renderEpisodes = function () {
     var self = this;
@@ -237,8 +293,9 @@
     }
     if (this.list) this.list.clear();
     var track = $('sh-episodes').firstChild;
-    $('sh-episodes').classList.toggle('hidden', !lines.length); // shown first: its height counts the lines
-    this.list = new Cards.Lines(track, lines.length, EP_STEP, Cards.Lines.fitting($('sh-episodes'), EP_STEP, EP_VISIBLE),
+    var visible = this.periods() ? EP_VISIBLE_PERIODS : EP_VISIBLE; // the year and month chips take a line (T32)
+    $('sh-episodes').classList.toggle('hidden', !lines.length); // shown first: its height counts the lines (T31)
+    this.list = new Cards.Lines(track, lines.length, EP_STEP, Cards.Lines.fitting($('sh-episodes'), EP_STEP, visible),
       function (i) { return self.lineElement(i); });
   };
 
@@ -263,6 +320,18 @@
     Array.prototype.forEach.call($('sh-seasons').childNodes, function (chip, i) {
       chip.classList.toggle('focused', zone === 'seasons' && i === seasonFocus);
     });
+    var yearFocus = this.yearFocus;
+    var monthFocus = this.monthFocus;
+    [['sh-years', 'years', yearFocus], ['sh-months', 'months', monthFocus]].forEach(function (row) {
+      var box = $(row[0]);
+      var shown = null;
+      Array.prototype.forEach.call(box.childNodes, function (chip, i) {
+        var focused = zone === row[1] && i === row[2];
+        chip.classList.toggle('focused', focused);
+        if (focused || (!shown && chip.classList.contains('selected'))) shown = chip;
+      });
+      revealChip(box, shown);
+    });
     var focusedLine = zone === 'episodes' ? this.episodes[this.episode] : null;
     if (this.list) {
       this.list.sync(focusedLine === null || focusedLine === undefined ? null : focusedLine);
@@ -276,38 +345,30 @@
       if (!this.press.active()) Cards.Menu.onKey(key); // not the held OK that opened it
       return;
     }
-    var seasons = this.data && !this.isFilm() && this.data.seasons.length > 1;
     switch (key) {
       case 'back':
         this.close();
         return;
       case 'up':
-        if (this.zone === 'episodes') {
-          if (this.episode > 0) this.episode--;
-          else if (seasons) this.enterSeasons();
-          else if (this.buttons.length) this.zone = 'buttons';
-        } else if (this.zone === 'seasons' && this.buttons.length) {
-          this.zone = 'buttons';
-        }
+        if (this.zone === 'episodes' && this.episode > 0) this.episode--;
+        else this.moveZone(-1);
         break;
       case 'down':
-        if (this.zone === 'buttons' || this.zone === 'none') {
-          if (seasons) this.enterSeasons();
-          else if (this.episodes.length) this.zone = 'episodes';
-        } else if (this.zone === 'seasons') {
-          if (this.episodes.length) this.zone = 'episodes';
-        } else if (this.episode < this.episodes.length - 1) {
-          this.episode++;
+        if (this.zone === 'episodes') {
+          if (this.episode < this.episodes.length - 1) this.episode++;
+        } else {
+          this.moveZone(1);
         }
         this.pageAhead();
         break;
       case 'left':
       case 'right': {
         var dir = key === 'left' ? -1 : 1;
-        if (this.zone === 'buttons') this.button = Math.max(0, Math.min(this.buttons.length - 1, this.button + dir));
-        else if (this.zone === 'seasons') {
-          this.seasonFocus = Math.max(0, Math.min(this.data.seasons.length - 1, this.seasonFocus + dir));
-        }
+        var clamp = function (i, n) { return Math.max(0, Math.min(n - 1, i + dir)); };
+        if (this.zone === 'buttons') this.button = clamp(this.button, this.buttons.length);
+        else if (this.zone === 'seasons') this.seasonFocus = clamp(this.seasonFocus, this.data.seasons.length);
+        else if (this.zone === 'years') this.yearFocus = clamp(this.yearFocus, $('sh-years').childNodes.length);
+        else if (this.zone === 'months') this.monthFocus = clamp(this.monthFocus, $('sh-months').childNodes.length);
         break;
       }
       case 'enter':
@@ -319,9 +380,59 @@
     this.applyFocus();
   };
 
-  ShowPage.prototype.enterSeasons = function () {
-    this.zone = 'seasons';
-    this.seasonFocus = this.season;
+  /** The rows there are now, top to bottom (buttons, season / year / month chips, episodes). */
+  ShowPage.prototype.zones = function () {
+    var chips = A.periodChips(this.periods());
+    var present = {
+      buttons: this.buttons.length > 0, seasons: this.hasSeasons(), years: chips.years.length > 0,
+      months: chips.months.length > 0, episodes: this.episodes.length > 0
+    };
+    return ZONES.filter(function (z) { return present[z]; });
+  };
+
+  /** Up (-1) / down (1) to the next row there is; a chip row is entered on its selected chip. */
+  ShowPage.prototype.moveZone = function (dir) {
+    var zones = this.zones();
+    var at = ZONES.indexOf(this.zone);
+    var next = zones.filter(function (z) { return dir > 0 ? ZONES.indexOf(z) > at : ZONES.indexOf(z) < at; });
+    if (next.length) this.moveZoneTo(dir > 0 ? next[0] : next[next.length - 1]);
+  };
+
+  /** Into row `zone`; a chip row on its selected chip. */
+  ShowPage.prototype.moveZoneTo = function (zone) {
+    if (zone === 'seasons') this.seasonFocus = this.season;
+    var chips = A.periodChips(this.periods());
+    var selected = function (list) { return Math.max(0, list.map(function (c) { return c.selected; }).indexOf(true)); };
+    if (zone === 'years') this.yearFocus = selected(chips.years);
+    if (zone === 'months') this.monthFocus = selected(chips.months);
+    this.zone = zone;
+  };
+
+  /** The season of the iVysílání list now (the chosen season chip, else the ČT group's own). */
+  ShowPage.prototype.ctSeason = function () {
+    if (this.hasSeasons()) return this.data.seasons[this.season].id;
+    var group = this.data.groups.filter(A.isCtGroup)[0];
+    return group ? group.season : null;
+  };
+
+  /** OK on a year chip (a year alone: the gateway answers with its newest month) or a month chip. */
+  ShowPage.prototype.choosePeriod = function () {
+    var chips = A.periodChips(this.periods());
+    var period;
+    if (this.zone === 'years') {
+      var year = chips.years[this.yearFocus];
+      if (!year || year.selected) return;
+      period = { year: year.year };
+    } else {
+      var month = chips.months[this.monthFocus];
+      if (!month || month.selected) return;
+      period = { year: this.periods().year, month: month.month };
+    }
+    this.choice = period;
+    this.episode = 0;
+    this.load(this.ctSeason(), 1, false, null, period);
+    this.renderPeriods();
+    this.applyFocus();
   };
 
   ShowPage.prototype.enter = function () {
@@ -333,11 +444,18 @@
       this.app.play(b.request);
       return;
     }
+    if (this.zone === 'years' || this.zone === 'months') return this.choosePeriod();
     if (this.zone === 'seasons') {
       if (this.seasonFocus === this.season) return;
+      var self = this;
+      var previous = this.season;
       this.season = this.seasonFocus;
       this.episode = 0;
-      this.load(this.data.seasons[this.season].id, 1, false, null);
+      this.choice = null; // another season comes with its own newest month
+      this.load(this.data.seasons[this.season].id, 1, false, null, null, function () {
+        self.season = previous; // not answered: the season listed stays chosen
+        self.seasonFocus = previous;
+      });
       this.renderSeasons();
       this.applyFocus();
       return;
@@ -381,16 +499,21 @@
     if (key === 'enter') this.press.up();
   };
 
-  /** Near the end of the focused episode's group: its next page (`?season=<its season>&page=<its nextPage>`). */
+  /**
+   * Near the end of the focused episode's group: its next page (`?season=<its season>&page=<its nextPage>`, with the
+   * group's year and month when it has them).
+   */
   ShowPage.prototype.pageAhead = function () {
     var data = this.data;
     var line = this.lines[this.episodes[this.episode]];
-    if (!data || !line || this.loadingPage || this.zone !== 'episodes') return;
+    // not while another year or month is coming (its answer replaces this list)
+    if (!data || !line || this.loadingPage || this.choice || this.zone !== 'episodes') return;
     var group = data.groups[line.group];
     if (!group || !group.nextPage) return;
     var at = this.episodes[this.episode];
     var left = this.lines.filter(function (l, i) { return i > at && l.episode && l.group === line.group; }).length;
-    if (left < PAGE_AHEAD) this.load(group.season, group.nextPage, false, line.group);
+    var period = group.periods ? { year: group.periods.year, month: group.periods.month } : null;
+    if (left < PAGE_AHEAD) this.load(group.season, group.nextPage, false, line.group, period);
   };
 
   /** After the player: the buttons (a new "Pokračovat" focused first) and the episodes' positions again. */
