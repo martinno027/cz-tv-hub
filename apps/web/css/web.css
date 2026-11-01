@@ -192,3 +192,79 @@ body.web-nokey #screen-settings.active ~ #web-nokey {
 #web-rotate.visible {
   display: flex;
 }
+
+/* T31: the stage is as tall as the window (web-stage.js sets its height); the full-screen layers follow it */
+body.web #programme,
+body.web #show,
+body.web #player,
+body.web #avplayer,
+body.web #html5player {
+  height: 100%;
+}
+
+/* a show's episodes take the height left under the head (more lines in a taller window, archive-cards.js fitting) */
+body.web #show {
+  display: flex;
+  flex-direction: column;
+}
+
+body.web #sh-head,
+body.web #sh-notice,
+body.web #sh-seasons {
+  flex: none;
+}
+
+body.web #sh-episodes {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 228px;
+}
+
+/* Nastavení: the choice of three sections centred in the window (spec/web.md "Nastavení choice") */
+body.web #set-choice {
+  width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Kanály: drag and drop — the row being dragged, and the line where it lands */
+body.web #set-channels {
+  position: relative;
+}
+
+body.web #set-channels .ch-row {
+  cursor: grab;
+}
+
+body.web.web-dnd,
+body.web.web-dnd * {
+  cursor: grabbing !important;
+}
+
+body.web .ch-row.web-dragging {
+  opacity: 0.5;
+}
+
+.web-drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--focus);
+  pointer-events: none;
+  z-index: 5;
+}
+
+#show > .web-back-link {
+  flex: none;
+  align-self: flex-start;
+  margin: -40px 0 4px;
+}
+
+/* the full-screen pages scroll when taller than the window (short windows, phones on their side) */
+body.web #programme,
+body.web #show {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

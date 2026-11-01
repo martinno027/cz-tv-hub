@@ -237,8 +237,9 @@
     }
     if (this.list) this.list.clear();
     var track = $('sh-episodes').firstChild;
-    this.list = new Cards.Lines(track, lines.length, EP_STEP, EP_VISIBLE, function (i) { return self.lineElement(i); });
-    $('sh-episodes').classList.toggle('hidden', !lines.length);
+    $('sh-episodes').classList.toggle('hidden', !lines.length); // shown first: its height counts the lines
+    this.list = new Cards.Lines(track, lines.length, EP_STEP, Cards.Lines.fitting($('sh-episodes'), EP_STEP, EP_VISIBLE),
+      function (i) { return self.lineElement(i); });
   };
 
   ShowPage.prototype.lineElement = function (i) {

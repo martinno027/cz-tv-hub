@@ -124,6 +124,15 @@
     this.track.style.transform = 'translateY(' + -this.top * this.step + 'px)';
   };
 
+  /**
+   * Lines of `step` px that fit `el`'s height, at least `min` (the TV's fixed count; the web's taller windows show
+   * more, spec/web.md "Layout (T31)"). Before layout (height 0) `min`.
+   */
+  Lines.fitting = function (el, step, min) {
+    var h = el ? el.clientHeight : 0;
+    return Math.max(min, Math.floor(h / step));
+  };
+
   /** Drops every built line (the data changed). */
   Lines.prototype.clear = function () {
     this.track.innerHTML = '';

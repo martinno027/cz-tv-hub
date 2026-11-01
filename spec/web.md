@@ -46,8 +46,17 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
 - **Fullscreen**: a **"Celá obrazovka"** button (icon ⛶) at the right end of the tab bar and in the player bar,
   the key **F**, and a double click on the video; uses the browser's Fullscreen API on the whole page (the player
   keeps its bar); "Ukončit celou obrazovku" / Esc leaves it. Hidden where the browser has no Fullscreen API (iPhone).
-- **Layout**: the TV layout (1920 × 1080) scaled to the window, kept 16:9, centred (letterboxed). On a phone held
-  upright: "Otočte telefon na šířku." over the page (v1; a separate narrow layout is not part of T27).
+- **Layout (T31, owner 2026-11-01: "rámeček má být přes celý prohlížeč")**: the app fills the **whole browser
+  window**, no black borders: the TV layout is scaled by the window's width (1920 px wide), and its height is the
+  window's height at that scale, so lists, the guide grid and the Archiv grid simply show more or fewer rows. A phone held
+  upright shows "Otočte telefon na šířku." as before; a window shorter than 600 TV px at that scale too.
+  **"‹ Zpět" only where Back means something** (a programme or show page, a Nastavení section, the Archiv
+  sub-menu, the player), inside that screen's own header within the window; never on Živě, the guide, Archiv or the
+  Nastavení choice, never over content.
+- **Nastavení choice**: the three items (Kanály, Profil, Server) are centred horizontally in the window (web only).
+- **Kanály: drag and drop** (web): a channel row can be dragged with the mouse (or a long touch and drag) to a new
+  place in the list; the drop position is shown as a line between rows; dropping saves the order exactly as the ▲▼
+  buttons do (the same prefs, profile sync, numbers renumbered). ▲▼ and the keyboard keep working.
 - **No download**: no download button, no saving or export anywhere in the web layer; media only through the
   gateway's existing HLS routes.
 - **Storage**: `localStorage` of that browser instead of Tizen's (same keys and shapes as the Samsung app:
