@@ -26,7 +26,7 @@ from . import archive_catalog as catalog
 from . import ctweb
 from . import breaks as ads
 from . import details as tmdb
-from . import tmdbstore
+from . import tmdbkeys, tmdbstore
 from .archive import MAX_PROGRAMME, Archive, ArchiveError, parse_recording_id, recording_id
 from .buffer import BufferStore
 from .eit import EitStore
@@ -167,12 +167,15 @@ class DvbGateway:
         self._thumb_dvr: list[DvrEntry] = []
         self._thumb_dvr_at = float("-inf")
         self._thumb_dvr_lock = threading.Lock()
-        if cfg.tmdb.enabled:
-            self.details: tmdb.Details | None = tmdb.Details(cfg.tmdb.key, self.dvb.state_dir, now=now, log=log,
-                                                             months=self.tmdb_months)
-        else:
-            self.details = None
-            tmdb.remove_cache(self.dvb.state_dir, log)  # no key, nothing from TMDb kept
+        # TMDb: [tmdb] key, else a key entered on /admin (tmdbkeys.py); tmdb_apply() switches it on/off live
+        self.tmdb_keys = tmdbkeys.KeyFile(self.dvb.state_dir)
+        self.tmdb_limiter = tmdb.Limiter()  # shared by lookups and the /admin key check (the 30/min limit)
+        self.tmdb_source: str | None = None
+        self.details: tmdb.Details | None = None
+        self.tmdb_worker: tmdbstore.TmdbWorker | None = None
+        self._tmdb_key: str | None = None
+        self._tmdb_lock = threading.Lock()
+        self._started = False
         self.fetch_schedules = ct_api.fetch_schedules
         self._ct_schedules: dict[tuple[str, date], tuple[float, list[ct_api.Programme]]] = {}
         self._ct_lock = threading.Lock()
@@ -182,12 +185,33 @@ class DvbGateway:
                                               store=lambda: self.details.store if self.details else None,
                                               thumbs=lambda: self.thumbs.enabled, now=now, log=log,
                                               on_listed=lambda: self.tmdb_worker and self.tmdb_worker.poke())
-        self.tmdb_worker: tmdbstore.TmdbWorker | None = None
-        if self.details is not None:
-            details = self.details
-            self.tmdb_worker = tmdbstore.TmdbWorker(details.store, self.catalog.wanted,
-                                                    lambda query: details.refresh(query, background=True),
-                                                    tmdb.TmdbBusy, tmdb.TmdbError, log=log)
+        self.tmdb_apply()
+
+    def tmdb_apply(self) -> None:
+        """Use the key that wins now (config, token, API key); no key = off and the store deleted. Called at start
+        and after a key is saved or removed on /admin; nothing happens while the key stays the same."""
+        with self._tmdb_lock:
+            key, source = tmdbkeys.effective(self.cfg.tmdb.key, self.tmdb_keys.load())
+            self.tmdb_source = source
+            if key == self._tmdb_key:
+                return
+            old = self.tmdb_worker
+            self.tmdb_worker = None
+            if old is not None:
+                old.stop()  # waits for its round, so nothing writes the store after this
+            if key:
+                details = tmdb.Details(key, self.dvb.state_dir, now=self.now, log=self.log,
+                                       months=self.tmdb_months, limiter=self.tmdb_limiter)
+                worker = tmdbstore.TmdbWorker(details.store, self.catalog.wanted,
+                                              lambda query: details.refresh(query, background=True),
+                                              tmdb.TmdbBusy, tmdb.TmdbError, log=self.log)
+                self.details, self.tmdb_worker = details, worker
+                if self._started:
+                    worker.start()
+            else:
+                self.details = None
+                tmdb.remove_cache(self.dvb.state_dir, self.log)  # no key, nothing from TMDb kept
+            self._tmdb_key = key
 
     def tmdb_months(self) -> int:
         """``/admin`` "Obnovit údaje z TMDb po N měsících" (default 5, any positive number)."""
@@ -199,13 +223,17 @@ class DvbGateway:
         self.retention.start()
         self.archive.start()
         threading.Thread(target=self._collect_loop, name="dvb-epg-history", daemon=True).start()
-        if self.tmdb_worker is not None:
-            self.tmdb_worker.start()
+        with self._tmdb_lock:
+            self._started = True
+            if self.tmdb_worker is not None:
+                self.tmdb_worker.start()
 
     def stop(self) -> None:
         self._collector_stop.set()
-        if self.tmdb_worker is not None:
-            self.tmdb_worker.stop()
+        with self._tmdb_lock:
+            self._started = False
+            if self.tmdb_worker is not None:
+                self.tmdb_worker.stop()
         self.archive.stop()
         self.retention.stop()
         self.hls.shutdown()

@@ -128,6 +128,10 @@ of "done".
 - The apps' Tailscale node state (its private keys) only in the Keychain / encrypted prefs, passed to the bridge in
   memory; a Tailscale auth key typed on the TV is used once and never stored. *Wrong:* `tailscaled.state` or the key
   in a plain file, preferences or a log line.
+- TMDb keys entered on `/admin` only in `<state dir>/tmdb-keys.json` (0600) and in the request to TMDb; `/admin`
+  shows the last four characters; log lines name only which key; saving needs the admin login, header and same
+  origin, and `[tmdb] key` in the config makes them read-only (`409`). *Wrong:* a key in an answer, a log line, an
+  error text (a v3 key rides in the URL) or a file with wider bits.
 - Profile passwords only as PBKDF2-SHA256 (200 000 iterations, salt per profile) and session tokens only as SHA-256
   in `profiles.json` (0600, atomic writes); the TVs keep only the profile name and token in secure storage, never the
   password. *Wrong:* a password or token in a log line, in `profiles.json` in clear, or in the TV's plain preferences.
@@ -152,3 +156,4 @@ of "done".
 | ---- | ---- | ----- | -------- |
 | 2026-10-24 | T05 | Channel timeline (`/dvb/timeline`, views, apps' timeline players) | Key required (401), worker key 403/404, media outside the window 404, no playlist over a whole recording; open timeline views capped at 4 per channel; view keys were never pruned (fixed); apps accept the JSON's playlist only as a gateway path (added to the checklist). |
 | 2026-11-01 | T33 | `/admin` (Access), the update from `/admin`, "Irreversible admin actions are logged" | Admin auth, header and same origin cover `POST /admin/api/update` (tests, mutations); requests and refusals logged. Found while building: `git pull --ff-only` alone does not stop on non-conflicting local edits or on another branch (it fast-forwards that branch to `main`): explicit check step; the status written by root into the gateway user's directory would have been a symlink-write primitive: written as `cztvhub` instead. Item added under Access. |
+| 2026-11-01 | T39 | `/admin` TMDb keys (Access, Secrets, irreversible actions logged) | Saving/removing needs admin login, `X-Cztvhub-Admin` and same origin (tests: 401/403, no TMDb request, no file); `[tmdb] key` in the config makes both `409`; the file is 0600 also over a leftover tmp file; no key value in any answer or log line after a save, a refusal, TMDb down (URL with `api_key` in the error) or a removal (tests, mutations red); the key check shares the lookups' limiter. Nothing open. |

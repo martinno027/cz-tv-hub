@@ -68,7 +68,10 @@ or Poslanecká sněmovna Parlamentu ČR.
   off for the household (`/admin`) and per TV. Thumbnails are never published, committed or shown in screenshots.
 
 ## Programme details (TMDb, approved by the user on 2026-10-24; extended for the archive on 2026-10-25)
-- Optional, off without the household's own TMDb API key (free, non-commercial use only). The Raspberry Pi sends TMDb
+- Optional, off without the household's own TMDb API key (free, non-commercial use only), set in the config or
+  entered on `/admin` (stored only on the Pi, readable only by the service, never shown again or logged; approved by
+  the user on 2026-11-01). Saving a key on `/admin` sends TMDb one check request with that key, counted in the same
+  limit. The Raspberry Pi sends TMDb
   only the cleaned title of a programme, from its own address: for a programme a viewer opens, and in the background
   (one at a time, at most 30 per minute) for programmes the archive lists, meaning the household's recordings within
   retention and iVysílání shows from ČT's public API. No viewing history, device or profile data is sent. Results

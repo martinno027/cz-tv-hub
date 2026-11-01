@@ -451,12 +451,13 @@ current list once and keep it elsewhere as the default).
   save/clear/copy is logged (`admin: defaults: saved | cleared | copied from profile <name>`).
 
 ## Programme details (T15, TMDb, approved by the user on 2026-10-24; `src/cztvhub/dvb/details.py`)
-Extra facts for the apps' programme page: year, a poster, TMDb's rating, the original title. Off without
-`[tmdb] key` in the config (the household's own free key; never in the template as a value, never logged).
+Extra facts for the apps' programme page: year, a poster, TMDb's rating, the original title. Off without a key:
+`[tmdb] key` in the config, or a key entered on `/admin` (T39, below); the household's own free key, never in the
+template as a value, never logged, never returned.
 - `GET /dvb/details?source=dvb&id=<event id from /dvb/epg>` or `GET /dvb/details?source=ct&channel=<CT slug>&date=
   <YYYY-MM-DD broadcast day>&idec=<idec>` (app key). **A programme id, never free text**: the gateway finds the
   programme in its own EPG (TVHeadend + EPG history) or in the CT schedule of that day (`api.py`, cached 10 min, the
-  `check`-free path of `serve`), and only then asks TMDb. Unknown id → `404`; `[tmdb] key` missing → `404 {"error":
+  `check`-free path of `serve`), and only then asks TMDb. Unknown id → `404`; no key → `404 {"error":
   "Podrobnosti nejsou zapnuté"}` (the apps then show the page without the TMDb lines).
 - **Lookup**: title cleaned of what EPGs append (`(14)`, roman series numbers `VI`, `- díl 3`, trailing `II`/`(R)`/
   `HD`, a leading `Film:`), a year from the description when it states one (`(USA, 2010)`, `… 2010)`), the kind
@@ -563,7 +564,7 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
   z TMDb po N měsících", any positive integer, default 5; a warning above 6: "Licence TMDb povoluje uchovávat údaje
   nejvýš 6 měsíců. Delší doba je vaše rozhodnutí a TMDb může klíč zrušit."), one TMDb request at a time, ≤ 30 per
   minute together with the page lookups, page lookups first; an entry not refreshed is deleted N months after
-  `fetchedAt` (checked on read and at start). No `[tmdb] key` → no lookups and the store is deleted. Only the
+  `fetchedAt` (checked on read and at start). No key → no lookups and the store is deleted. Only the
   cleaned title goes to TMDb, never client text (search results are looked up by their ČT/EPG title).
 - **API** (app key; worker key `403`; JSON):
   - `GET /dvb/archive` → `{"rows": [{"id": "recordings" | "<category slug>", "title", "cards": [card…], "more":
@@ -693,8 +694,22 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
   - `/admin`: `GET /admin/api/tmdb?page=n` (50 per page, by title), `POST /admin/api/tmdb` `{"months": N}` |
     `{"refresh": key}` (the stored cleaned title only) | `{"delete": key}` | `{"deleteAll": true}`; logged `admin:
     tmdb: refresh after N month(s)`, `… refresh <title>: match | no match | failed (…)`, `… delete <title>`, `…
-    delete all (n entries)`. A shorter N deletes older entries at once. Without `[tmdb] key` the tab says TMDb is
+    delete all (n entries)`. A shorter N deletes older entries at once. Without a key the tab says TMDb is
     off; the months setting can still be changed.
+  - **Keys on `/admin`** (T39, approved by the owner 2026-11-01, legal-guard the same day): the tab "TMDb" has a
+    masked field each for the **API Read Access Token** (v4, sent as the bearer header) and the **API Key** (v3, sent
+    as `api_key`); either or both. Which key is used: `[tmdb] key` from the config, else the token, else the API key;
+    none = off and the store deleted. `POST /admin/api/tmdb` `{"setKey": {"kind": "token"|"apiKey", "value": "…"}}`:
+    the format is checked (API Key = 32 hex characters, token = a JWT), then **one key check** with TMDb (`GET
+    /3/configuration`, through the same limiter as the lookups, so it counts toward the 30 per minute); refused
+    (`401`) → `400` "TMDb tento … odmítlo; nic se neuložilo.", TMDb busy → `503`, no answer → `502`; only a checked
+    key is stored. `{"removeKey": "token"|"apiKey"}` removes one. Both apply at once without a restart (the old
+    background worker stops before the new one starts). With `[tmdb] key` set both answer `409` and the fields are
+    read-only. Stored in `<state dir>/tmdb-keys.json` (0600, atomic write), read only by the service; `GET
+    /admin/api/tmdb` returns only `keys: {source, editable, token, apiKey}` with the last four characters of each
+    stored value. Logged without values: `admin: tmdb: <name> saved (checked with TMDb), in use: <source>`, `…
+    <name> refused by TMDb, not saved`, `… <name> removed, in use: <source>` or `…, TMDb off, deleted n stored
+    entries`. When `[tmdb] key` later leaves the config, a key from `/admin` takes over and the store stays.
 - legal-guard 2026-10-25: approve with changes (all in this section); approved by the owner the same day.
 
 ## Web (T27, draft for the owner's review; `spec/web.md`)

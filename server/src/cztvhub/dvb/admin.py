@@ -38,7 +38,7 @@ from ..config import Config
 from . import defaults as dflt
 from . import details as tmdb
 from . import epg
-from . import tmdbstore
+from . import tmdbkeys, tmdbstore
 from .update import Updater
 from .gateway import DvbGateway, Response, error, json_response
 from .profiles import ProfileError, parse_body
@@ -49,6 +49,7 @@ ADMIN_USER = "admin"
 CHANNEL_RE = re.compile(r"^/admin/api/channels/([A-Za-z0-9_-]{1,64})$")
 PROFILE_RE = re.compile(r"^/admin/api/profiles/([0-9a-f]{16})$")
 TMDB_PATH = "/admin/api/tmdb"
+TMDB_CONFIG_KEY = "Klíč je nastavený v konfiguraci ([tmdb] key v /etc/cztvhub/cztvhub.conf) a platí ten; tady ho změnit nejde."
 UPDATE_PATH = "/admin/api/update"
 SIGNIN_PATH = "/admin/api/signin"
 TMDB_KEY_MAX = 600  # a store key: ["kind", year, "cleaned title"]
@@ -532,7 +533,7 @@ class AdminSite:
         """The store, read-only: one page of entries by title, the refresh period and its warning."""
         details = self.gateway.details
         months = self.gateway.tmdb_months()
-        doc: dict[str, Any] = {"enabled": details is not None, "months": months,
+        doc: dict[str, Any] = {"enabled": details is not None, "months": months, "keys": self._tmdb_keys(),
                                "licenceMonths": tmdbstore.LICENCE_MONTHS,
                                "warning": tmdbstore.WARNING if months > tmdbstore.LICENCE_MONTHS else None}
         if details is None:
@@ -550,6 +551,53 @@ class AdminSite:
         return json_response(200, {**doc, "total": total, "page": page, "pages": pages,
                                    "entries": [self._tmdb_row(e, store) for e in entries]})
 
+    def _tmdb_keys(self) -> dict:
+        """What /admin may know of the keys: which one is used, and only the last four characters of stored ones."""
+        stored = self.gateway.tmdb_keys.load()
+        return {"source": self.gateway.tmdb_source, "editable": not self.gateway.cfg.tmdb.key,
+                **{kind: tmdbkeys.hint(stored[kind]) if kind in stored else None for kind in tmdbkeys.NAMES}}
+
+    def _tmdb_set_key(self, kind: Any, value: Any) -> Response:
+        """Save a key after one check with TMDb (through the shared limiter); a refused key is not stored."""
+        if self.gateway.cfg.tmdb.key:
+            return error(409, TMDB_CONFIG_KEY)
+        if kind not in tmdbkeys.NAMES or not isinstance(value, str) or len(value) > tmdbkeys.TOKEN_MAX + 64:
+            return error(400, "Neplatný klíč")
+        name = tmdbkeys.NAMES[kind]
+        try:
+            value = tmdbkeys.check(kind, value)
+        except tmdbkeys.KeyFormatError as exc:
+            return error(400, str(exc))
+        try:
+            tmdb.verify(value, self.gateway.tmdb_limiter)
+        except tmdb.TmdbRefused:
+            self.gateway.log(f"admin: tmdb: {name} refused by TMDb, not saved")
+            return error(400, f"TMDb tento {name} odmítlo; nic se neuložilo.")
+        except tmdb.TmdbBusy:
+            return error(503, "TMDb teď nepřijímá dotazy, zkuste to za chvíli; nic se neuložilo.")
+        except tmdb.TmdbError:
+            self.gateway.log(f"admin: tmdb: {name} not checked, TMDb did not answer; not saved")
+            return error(502, "TMDb neodpovídá, klíč nejde ověřit; nic se neuložilo.")
+        self.gateway.tmdb_keys.set(kind, value)
+        self.gateway.tmdb_apply()
+        self.gateway.log(f"admin: tmdb: {name} saved (checked with TMDb), in use: {self.gateway.tmdb_source}")
+        return self._tmdb_overview("1")
+
+    def _tmdb_remove_key(self, kind: Any) -> Response:
+        if self.gateway.cfg.tmdb.key:
+            return error(409, TMDB_CONFIG_KEY)
+        if kind not in tmdbkeys.NAMES:
+            return error(400, "Neplatný klíč")
+        details = self.gateway.details
+        before = len(details.store) if details is not None else 0
+        self.gateway.tmdb_keys.set(kind, None)
+        self.gateway.tmdb_apply()
+        off = self.gateway.details is None
+        self.gateway.log(f"admin: tmdb: {tmdbkeys.NAMES[kind]} removed"
+                         + (f", TMDb off, deleted {before} stored entr{'y' if before == 1 else 'ies'}" if off
+                            else f", in use: {self.gateway.tmdb_source}"))
+        return self._tmdb_overview("1")
+
     @staticmethod
     def _tmdb_row(entry: tmdbstore.Entry, store: tmdbstore.TmdbStore) -> dict:
         return {"key": entry.key, "title": entry.title, "kind": entry.kind, "year": entry.year,
@@ -564,6 +612,13 @@ class AdminSite:
             payload = parse_body(body, 2048)
         except ProfileError as exc:
             return json_response(exc.status, exc.payload(), exc.headers)
+        if "setKey" in payload:
+            spec = payload["setKey"]
+            if not isinstance(spec, dict):
+                return error(400, "Neplatný klíč")
+            return self._tmdb_set_key(spec.get("kind"), spec.get("value"))
+        if "removeKey" in payload:
+            return self._tmdb_remove_key(payload["removeKey"])
         details = self.gateway.details
         if "months" in payload:
             months = payload["months"]
@@ -575,7 +630,7 @@ class AdminSite:
                              + (f", deleted {removed} older entr{'y' if removed == 1 else 'ies'}" if removed else ""))
             return self._tmdb_overview("1")
         if details is None:
-            return error(404, "TMDb není zapnuté (chybí [tmdb] key)")
+            return error(404, "TMDb není zapnuté (chybí klíč)")
         store = details.store
         if payload.get("deleteAll") is True:
             removed = store.delete_all()
@@ -604,7 +659,8 @@ class AdminSite:
             self.gateway.log(f"admin: tmdb: refresh {entry.title}: {'match' if match else 'no match'}")
             refreshed = store.get(key)
             return json_response(200, {"entry": self._tmdb_row(refreshed, store) if refreshed else None})
-        return error(400, 'Očekávám {"months": N}, {"refresh": "…"}, {"delete": "…"} nebo {"deleteAll": true}')
+        return error(400, 'Očekávám {"months": N}, {"refresh": "…"}, {"delete": "…"}, {"deleteAll": true}, '
+                          '{"setKey": {"kind": "apiKey|token", "value": "…"}} nebo {"removeKey": "apiKey|token"}')
 
     def _rename(self, channel_id: str | None, payload: dict) -> Response:
         raw = {channel_id: payload.get("name")} if channel_id else payload.get("names")
@@ -798,6 +854,9 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
 </section>
 <section id="tmdb" hidden>
   <p class="sub" id="tmdb-state"></p>
+  <h3>Klíč TMDb</h3>
+  <p class="help" id="tmdb-keys-note"></p>
+  <table><tbody id="tmdb-key-rows"></tbody></table>
   <form id="tmdb-months-form" class="setting">
     <label for="tmdb-months">Obnovit údaje z TMDb po</label>
     <input id="tmdb-months" type="number" min="1" step="1" inputmode="numeric" style="width: 7em">
@@ -973,7 +1032,49 @@ function pollUpdate() {
   }, 3000);
 }
 
-var tmdbPage = 1, tmdbConfirm = null;
+var tmdbPage = 1, tmdbConfirm = null, tmdbKeyConfirm = null;
+var TMDB_KEYS = [["token", "API Read Access Token"], ["apiKey", "API Key"]];
+var TMDB_SOURCES = {config: "klíč z konfigurace ([tmdb] key)", token: "API Read Access Token", apiKey: "API Key"};
+function renderTmdbKeys(keys) {
+  document.getElementById("tmdb-keys-note").textContent = (keys.source
+      ? "Používá se: " + TMDB_SOURCES[keys.source] + ". " : "Žádný klíč, TMDb je vypnuté. ")
+    + (keys.editable
+      ? "Stačí jeden z klíčů (TMDb → Nastavení → API); když jsou oba, použije se token. Klíč se před uložením ověří u TMDb, uloží se jen na Raspberry a zpátky se nezobrazuje."
+      : "Klíč je nastavený v /etc/cztvhub/cztvhub.conf ([tmdb] key) a platí ten; tady ho změnit nejde.");
+  var body = document.getElementById("tmdb-key-rows");
+  body.textContent = "";
+  TMDB_KEYS.forEach(function (k) {
+    var kind = k[0], tr = el("tr");
+    tr.appendChild(el("td", "name", k[1]));
+    tr.appendChild(el("td", null, keys[kind] ? "nastaveno · končí " + keys[kind] : "nenastaveno"));
+    var input = el("input");
+    input.type = "password"; input.autocomplete = "off"; input.placeholder = keys[kind] ? "nový klíč" : "vložte klíč";
+    input.disabled = !keys.editable; input.setAttribute("aria-label", k[1]);
+    var td = el("td"); td.appendChild(input); tr.appendChild(td);
+    var cell = el("td", "confirm");
+    if (tmdbKeyConfirm === kind) {
+      var lastOne = keys[kind] && !keys[kind === "token" ? "apiKey" : "token"];
+      cell.appendChild(el("span", null, lastOne ? "Smazat? TMDb se vypne a uložené údaje se smažou. " : "Smazat? "));
+      var yes = el("button", "danger", "Smazat"), no = el("button", null, "Zpět");
+      yes.addEventListener("click", function () { tmdbKeyConfirm = null; tmdbAction({removeKey: kind}, k[1] + " je smazaný."); });
+      no.addEventListener("click", function () { tmdbKeyConfirm = null; loadTmdb(tmdbPage); });
+      cell.appendChild(yes); cell.appendChild(no);
+    } else {
+      var save = el("button", null, "Uložit"), del = el("button", null, "Smazat");
+      save.disabled = !keys.editable; del.disabled = !keys.editable || !keys[kind];
+      save.addEventListener("click", function () {
+        if (!input.value.trim()) { say("Vložte " + k[1] + ".", true); return; }
+        say("Ověřuji klíč u TMDb…");
+        var value = input.value; input.value = "";
+        tmdbAction({setKey: {kind: kind, value: value}}, k[1] + " je ověřený a uložený.");
+      });
+      del.addEventListener("click", function () { tmdbKeyConfirm = kind; loadTmdb(tmdbPage); });
+      cell.appendChild(save); cell.appendChild(del);
+    }
+    tr.appendChild(cell);
+    body.appendChild(tr);
+  });
+}
 function months(n) { return n + " " + plural(n, "měsíc", "měsíce", "měsíců"); }
 function entries(n) { return n + " " + plural(n, "záznam", "záznamy", "záznamů"); }
 function loadTmdb(page) {
@@ -981,7 +1082,8 @@ function loadTmdb(page) {
     tmdbPage = data.page;
     document.getElementById("tmdb-state").textContent = data.enabled
       ? "Uloženo " + entries(data.total) + ", obnova po " + months(data.months) + "."
-      : "TMDb je vypnuté (v konfiguraci chybí [tmdb] key), nic se neukládá.";
+      : "TMDb je vypnuté (chybí klíč), nic se neukládá.";
+    renderTmdbKeys(data.keys);
     var input = document.getElementById("tmdb-months");
     if (document.activeElement !== input) input.value = String(data.months);
     var warning = document.getElementById("tmdb-warning");
