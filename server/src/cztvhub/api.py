@@ -35,6 +35,8 @@ query($channels: [String!]!, $date: Date!) {
   }
 }
 """
+# The same with ČT's originalTitle, asked only by the gateway's /dvb/details (gateway.CT_ORIGINAL_TITLE, T44).
+SCHEDULE_QUERY_ORIGINAL = SCHEDULE_QUERY.replace("episodeTitle ", "episodeTitle originalTitle ")
 
 
 class StreamError(Exception):
@@ -76,6 +78,7 @@ class Programme:
     description: str = ""
     genre: str = ""
     image: str = ""
+    original_title: str = ""  # only when asked for (fetch_schedules(original_title=True))
 
 
 def _request_json(url: str, timeout: float, body: dict | None = None):
@@ -135,19 +138,26 @@ def fetch_vod_url(idec: str, timeout: float = 10.0) -> str:
     raise StreamError(f"{idec}: no stream URL in API response", "Video není k dispozici")
 
 
+def _text(value: object) -> str:
+    """A text field as text; anything else (null, a number, an object) stays unknown."""
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _parse_time(value: str) -> datetime:
     # Python < 3.11 (Kodi) does not accept a trailing "Z".
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def schedule_request(slugs: list[str], day: date) -> dict:
+def schedule_request(slugs: list[str], day: date, original_title: bool = False) -> dict:
     """The GraphQL body of a schedule request (also sent unchanged by the gateway's ``/dvb/ct/schedule``)."""
-    return {"query": SCHEDULE_QUERY, "variables": {"channels": list(slugs), "date": day.strftime("%m.%d.%Y")}}
+    return {"query": SCHEDULE_QUERY_ORIGINAL if original_title else SCHEDULE_QUERY,
+            "variables": {"channels": list(slugs), "date": day.strftime("%m.%d.%Y")}}
 
 
-def fetch_schedules(slugs: list[str], day: date, timeout: float = 10.0) -> dict[str, list[Programme]]:
+def fetch_schedules(slugs: list[str], day: date, timeout: float = 10.0,
+                    original_title: bool = False) -> dict[str, list[Programme]]:
     """Programme of the given broadcast day for channels identified by EPG slug (e.g. "ct1")."""
-    data = _request_json(GRAPHQL_URL, timeout, schedule_request(slugs, day)) or {}
+    data = _request_json(GRAPHQL_URL, timeout, schedule_request(slugs, day, original_title)) or {}
     plans = (data.get("data") or {}).get("TVProgramDailyChannelsPlanV2")
     if plans is None:
         raise StreamError(f"schedule query failed: {data.get('errors')}", "Program se nepodařilo načíst")
@@ -167,6 +177,7 @@ def fetch_schedules(slugs: list[str], day: date, timeout: float = 10.0) -> dict[
                     description=item.get("description") or "",
                     genre=item.get("genre") or "",
                     image=item.get("imageUrl") or "",
+                    original_title=_text(item.get("originalTitle")),
                 ))
             except (KeyError, TypeError, ValueError, AttributeError):
                 continue  # skip malformed entries, keep the rest

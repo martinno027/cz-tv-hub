@@ -54,7 +54,8 @@ class StoreTest(unittest.TestCase):
         with sqlite3.connect(self.dir / ts.FILE) as db:
             columns = [row[1] for row in db.execute("PRAGMA table_info(entries)")]
         self.assertEqual(columns, ["key", "kind", "year", "title", "matched", "match_kind", "tmdb_id", "rating_value",
-                                   "rating_votes", "genre_ids", "genre_names", "match_year", "poster", "fetched_at"])
+                                   "rating_votes", "genre_ids", "genre_names", "match_year", "poster", "fetched_at",
+                                   "rules"])
 
     def test_mode_is_restored(self):
         store = self.make()

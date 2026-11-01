@@ -479,7 +479,28 @@ template as a value, never logged, never returned.
   guessed (episode line or a series genre = `tv`, else `movie`, falling back to the other). TMDb `search/movie` or
   `search/tv` with `language=cs-CZ`, then `.../{id}` for details. **A match only when** the cleaned title equals the
   result's Czech or original title (casefold, no diacritics, letters and digits only) and, when we have a year, it is
-  within ±1; otherwise `{"match": null}` (no rating is better than a wrong one). At most one TMDb request at a time,
+  within ±1; otherwise `{"match": null}` (no rating is better than a wrong one).
+  **T44 (owner 2026-11-01, example „Detektiv Grace: Hodinky smrti (2024)": Britský krimifilm (2024) in the EPG, on
+  TMDb the series „Grace" (cs „Detektiv Grace", 2021–) whose feature-length episode is „Hodinky smrti")**:
+  (1) **series: episode** — when the whole title finds nothing and it has a separator (`: `, ` – `, ` - `), the part
+  before it is tried as `tv` (then as `movie`); (2) **a series' year** — for `tv` the EPG year is the episode's, so a
+  series matches when it started no later than that year + 1 (the latest such start wins; several equal → no match),
+  not within ±1; a film keeps ±1; (3) **ČT's `originalTitle`** — once checked on ČT's schedule (field accepted by ČT on
+  2026-11-01, values not yet seen: ČT was down), a ČT programme that is not Czech is searched by its original title
+  first. The same rules for the archive's background lookups. At most four searches per programme (each counts in
+  the limit of 30 per minute); still only a title or the part of one goes to TMDb. Golden: `spec/fixtures/
+  tmdb_title_cases.json` (title + description → the searches in order, and which result matches).
+  Details (T44, `details.searches`): the order is the original title (guessed kind, then the other), the title (the
+  same), then the series part (`tv`, then `movie`), each text cleaned for its kind, the same kind and text asked
+  once, stopping at the first match and cut after four searches (with an original title and a "series: episode"
+  title the four end before the part); the details request of a match comes on top. "Not Czech" = ČT sent an
+  original title that differs from the title after `normalise`. The original title is not part of the store key
+  (kind, year, cleaned title), so `/admin`'s refresh of an entry and the archive's lookups (iVysílání shows carry
+  no original title) do not use it yet; asking ČT for it is behind `gateway.CT_ORIGINAL_TITLE`, off until the
+  field's values are checked. Every store entry carries the version of these matching rules (`rules`, 2 = T44;
+  rows from before count as 1): a **no match of older rules is looked up again at once** (page lookup and the
+  archive's worker) and stored with the current version; a match stays until its normal refresh.
+  At most one TMDb request at a time,
   at most 30 per minute; TMDb errors → `{"match": null, "error": "…"}` with 200, nothing cached.
 - **Answer**: `{"match": null | {"kind": "movie"|"tv", "title", "originalTitle", "year", "overview"?, "genres":
   [..], "runtimeMinutes"?, "rating": {"value": 7.4, "votes": 1234} | null, "poster": "/dvb/details/image/w342/<file>"
@@ -574,8 +595,9 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
   diacritics, letters and digits) are one card with `source: "both"`, **iVysílání first** (its image, year, episodes);
   the show page lists our recorded episodes as an extra group "Nahráno z antény".
 - **TMDb store** (`<state_dir>/tmdb.sqlite`, 0600; replaces `tmdb-cache.json`): key = kind + year + cleaned title;
-  match / no match, TMDb id, rating value + votes, genres, year, poster path, `fetchedAt`. Background worker: titles
-  the archive lists that have no entry, or whose entry is older than **N months** (`/admin` setting "Obnovit údaje
+  match / no match, TMDb id, rating value + votes, genres, year, poster path, `fetchedAt`, and our matching rules'
+  version `rules` (T44, "Programme details"). Background worker: titles the archive lists that have no entry, a no
+  match of older rules, or whose entry is older than **N months** (`/admin` setting "Obnovit údaje
   z TMDb po N měsících", any positive integer, default 5; a warning above 6: "Licence TMDb povoluje uchovávat údaje
   nejvýš 6 měsíců. Delší doba je vaše rozhodnutí a TMDb může klíč zrušit."), one TMDb request at a time, ≤ 30 per
   minute together with the page lookups, page lookups first; an entry not refreshed is deleted N months after

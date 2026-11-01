@@ -3,8 +3,9 @@
 Only the gateway talks to TMDb, with the household's own key (``[tmdb] key`` or one entered on ``/admin``,
 ``tmdbkeys.py``; none = off), and only for a programme
 the gateway found in its own EPG or the CT schedule: TMDb gets the cleaned title, nothing else (the year and the
-kind only decide which result is accepted). A result counts only when its title equals ours and its year is within
-±1 of the one the description states; anything less is "no match" (no rating is better than a wrong one).
+kind only decide which result is accepted). A result counts only when its title equals ours and its year fits the
+one the description states (a film ±1, a series started by then, T44); anything less is "no match" (no rating is
+better than a wrong one).
 Results are kept in the TMDb store (``tmdbstore.py``, ``<state dir>/tmdb.sqlite``, 0600) with only what the rule
 lists; TMDb's titles, overview and runtime stay in memory, like the posters. Page lookups go before the archive's
 background lookups (``Limiter``). The key never appears in a log line, an exception or an answer.
@@ -62,6 +63,8 @@ _LEAD = re.compile(r"^film\s*:\s*", re.IGNORECASE)
 _ROMAN = re.compile(r"\s+(?=[IVX])X{0,3}(?:IX|IV|V?I{0,3})$")  # a series number: "Kobra 11 IV"
 _EPISODE_MARK = re.compile(r"\(\d{1,3}(?:/\d{1,3})?\)|\b(?:díl|část|epizoda)\s+\d{1,4}\b", re.IGNORECASE)
 _YEAR = re.compile(r"\b(1[89]\d\d|20\d\d)\s*\)")  # "(USA, 2010)", "… 2010)"
+_SERIES_PART = re.compile(r": | – | - ")  # "Detektiv Grace: Hodinky smrti" = series: episode (T44)
+SEARCHES_MAX = 4  # TMDb searches per programme (T44); the details request of a match comes on top
 SOAP = 0x15  # ETSI EN 300 468 content nibble: soap / melodrama / folklore (series)
 
 
@@ -88,6 +91,7 @@ class Programme:
     description: str = ""
     genres: tuple[int, ...] = ()  # DVB content codes
     genre: str = ""  # a genre as text (CT)
+    original_title: str = ""  # CT's originalTitle (only while gateway.CT_ORIGINAL_TITLE is on, T44)
 
 
 @dataclass(frozen=True)
@@ -95,9 +99,11 @@ class Query:
     title: str  # cleaned, series number kept (a film's "Rocky II")
     year: int | None
     kind: str  # the guess, tried first
+    original: str = ""  # cleaned original title of a non-Czech CT programme, searched first; not in the key
 
     @property
     def key(self) -> str:
+        # Without the original title: the store keeps only the title (admin's refresh rebuilds the query from it)
         return json.dumps([self.kind, self.year, self.title], ensure_ascii=False)
 
 
@@ -149,7 +155,39 @@ def make_query(programme: Programme, this_year: int) -> Query | None:
     title = clean_title(programme.title)
     if not normalise(title):
         return None
-    return Query(title, description_year(programme.description, this_year), guess_kind(programme))
+    original = clean_title(programme.original_title)
+    if normalise(original) == normalise(title):  # none, or the same: a Czech programme
+        original = ""
+    return Query(title, description_year(programme.description, this_year), guess_kind(programme), original)
+
+
+def series_part(title: str) -> str:
+    """The series of a "series: episode" title (the part before the first ``: ``, `` – `` or `` - ``), else ""."""
+    m = _SERIES_PART.search(title or "")
+    return title[:m.start()].strip() if m else ""
+
+
+def searches(query: Query) -> list[tuple[str, str]]:
+    """The TMDb searches for ``query`` in order, (kind, text), at most SEARCHES_MAX (T44): a CT original title
+    (guessed kind, then the other), the title (the same), then the series part of a "series: episode" title
+    (tv, then movie). Each text cleaned for its kind; the same kind and text are asked once."""
+    other = "movie" if query.kind == "tv" else "tv"
+    plan = []
+    if query.original:
+        plan += [(query.kind, query.original), (other, query.original)]
+    plan += [(query.kind, query.title), (other, query.title)]
+    part = series_part(query.title)
+    if part:
+        plan += [("tv", part), ("movie", part)]
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for kind, text in plan:
+        title = clean_title(text, kind)
+        if not normalise(title) or (kind, normalise(title)) in seen:
+            continue
+        seen.add((kind, normalise(title)))
+        out.append((kind, title))
+    return out[:SEARCHES_MAX]
 
 
 def _year(value: Any) -> int | None:
@@ -159,8 +197,10 @@ def _year(value: Any) -> int | None:
 
 
 def pick(results: Any, title: str, year: int | None, kind: str) -> dict | None:
-    """The one search result whose Czech or original title equals ours (and year within ±1 when we have one).
-    Several equally good ones are no match: without a year a common title is a guess."""
+    """The one search result whose Czech or original title equals ours and, when we have a year, a film released
+    within ±1 of it (the closest wins) or a series that started no later than year + 1 (the EPG year is the
+    episode's; the latest such start wins, T44). Several equally good ones are no match: without a year a common
+    title is a guess."""
     target = normalise(title)
     names, date_field = (("title", "original_title"), "release_date") if kind == "movie" \
         else (("name", "original_name"), "first_air_date")
@@ -174,7 +214,12 @@ def pick(results: Any, title: str, year: int | None, kind: str) -> dict | None:
             found.append((0, item))
             continue
         theirs = _year(item.get(date_field))
-        if theirs is not None and abs(theirs - year) <= 1:
+        if theirs is None:
+            continue
+        if kind == "tv":
+            if theirs <= year + 1:
+                found.append((year + 1 - theirs, item))
+        elif abs(theirs - year) <= 1:
             found.append((abs(theirs - year), item))
     if not found:
         return None
@@ -456,13 +501,13 @@ class Details:
         if query is None:
             return self.answer(None)
         entry = self.store.get(query.key)
-        if entry is not None:
+        if entry is not None and not entry.outdated:  # a no match of older rules is asked again (T44)
             return self.answer(self._match(entry))
         if not self._lookup.acquire(timeout=WAIT_SECONDS):
             return self.answer(None, TmdbBusy.user_message)
         try:
             entry = self.store.get(query.key)
-            if entry is not None:
+            if entry is not None and not entry.outdated:
                 return self.answer(self._match(entry))
             try:
                 match = self.refresh(query)
@@ -484,10 +529,7 @@ class Details:
         return match
 
     def _search(self, query: Query, background: bool) -> tuple[dict | None, Any]:
-        for kind in (query.kind, "movie" if query.kind == "tv" else "tv"):
-            title = clean_title(query.title, kind)
-            if not normalise(title):
-                continue
+        for kind, title in searches(query):
             data = self.client.get(f"search/{kind}", {"query": title, "language": LANGUAGE,
                                                       "include_adult": "false"}, background)
             result = pick(data.get("results"), title, query.year, kind)
