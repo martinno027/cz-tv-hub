@@ -73,6 +73,9 @@ jobs:
           node-version: "22"
       - run: node --test test/*.test.js
         working-directory: apps/tizen
+      # the web app (T27) shares the Samsung code; its own layer and adapters
+      - run: node --test test/*.test.js
+        working-directory: apps/web
 
   tvos-core:
     runs-on: macos-latest

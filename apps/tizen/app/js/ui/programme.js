@@ -142,7 +142,7 @@
   ProgrammePage.prototype.renderButtons = function () {
     var box = $('pg-buttons');
     var focusedId = this.buttons[this.focus] ? this.buttons[this.focus].id : null;
-    this.buttons = CT.Programme.actions(this.entry, Date.now(), this.app.resumeStore);
+    this.buttons = CT.Programme.actions(this.entry, Date.now(), this.app.resumeStore, !!CT.Platform.officialApp);
     this.buttons.push({ id: 'back', label: 'Zpět', request: null });
     box.innerHTML = '';
     this.buttons.forEach(function (b) {
@@ -172,6 +172,7 @@
         break;
       case 'enter': {
         var b = this.buttons[this.focus];
+        if (b.id === 'openOfficialApp') return CT.Platform.officialApp();
         if (!b.request) return this.app.closeProgramme();
         this.app.play(b.request);
         return;

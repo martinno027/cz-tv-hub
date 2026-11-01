@@ -80,18 +80,20 @@
     /**
      * The page's buttons for an entry on this TV: [{id, label, request}] (no "Otevřít v iVysílání" on Samsung).
      * The requests are those of the old choice (Entries.select), "Pokračovat" carrying the remembered position.
+     * `officialApp` (the web): "Otevřít v iVysílání" too, {id: 'openOfficialApp', request: null}.
      */
-    actions: function (entry, now, store) {
+    actions: function (entry, now, store, officialApp) {
       var s = CT.Entries.select(entry, now, store);
       var facts = Programme.facts(entry, now);
       facts.resume = s.type === 'choice' && !!s.resume;
       var fromStart = s.type === 'play' ? s.request : s.type === 'choice' ? s.fromStart : null;
       var live = s.type === 'choice' ? s.live : null;
-      return Programme.buttons(facts, false).map(function (id) {
+      return Programme.buttons(facts, !!officialApp).map(function (id) {
+        if (id === 'openOfficialApp') return { id: id, label: 'Otevřít v iVysílání', request: null };
         if (id === 'resume') return { id: id, label: 'Pokračovat od ' + s.resumeLabel, request: s.resume };
         if (id === 'startOver') return { id: id, label: 'Od začátku', request: fromStart };
         return { id: id, label: 'Živě', request: live };
-      }).filter(function (b) { return !!b.request; });
+      }).filter(function (b) { return !!b.request || b.id === 'openOfficialApp'; });
     },
 
     /** The state line, as in the guide detail of the other apps: what the buttons do, or why there are none. */

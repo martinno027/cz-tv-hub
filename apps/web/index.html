@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <title>Televize</title>
+  <!-- The Samsung app's own look (served at /web/app/), then what only the web adds. No inline scripts or styles. -->
+  <link rel="stylesheet" href="app/css/app.css">
+  <link rel="stylesheet" href="css/web.css">
+</head>
+<body class="web">
+  <div id="web-loading">Načítání…</div>
+  <noscript>Televize potřebuje zapnutý JavaScript.</noscript>
+  <!-- hls.js (Apache-2.0, vendor/LICENSE, pinned in README.md), then the loader of the Samsung app (js/boot.js) -->
+  <script src="vendor/hls.min.js"></script>
+  <script src="js/boot.js"></script>
+</body>
+</html>

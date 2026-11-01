@@ -7,6 +7,20 @@ sudo useradd --system --no-create-home --shell /usr/sbin/nologin cztvhub 2>/dev/
 sudo mkdir -p /opt/cztvhub
 sudo cp -r src /opt/cztvhub/
 
+# The household web app for /web/ ([dvb] web_dir, default /opt/cztvhub/web; served only with the gateway on).
+# Staged as this user (git gives the version line), then swapped in whole; on failure the old copy stays.
+web_stage=$(mktemp -d)
+trap 'rm -rf "$web_stage"' EXIT
+if python3 deploy/stage_web.py "$web_stage/web"; then
+  sudo rm -rf /opt/cztvhub/web.new
+  sudo cp -R "$web_stage/web" /opt/cztvhub/web.new
+  sudo chmod -R u=rwX,go=rX /opt/cztvhub/web.new
+  sudo rm -rf /opt/cztvhub/web
+  sudo mv /opt/cztvhub/web.new /opt/cztvhub/web
+else
+  echo "web: not installed (reason above); /opt/cztvhub/web left as it was" >&2
+fi
+
 # Config: created once (DVB disabled); deploy/install-dvb.sh enables DVB.
 if ! sudo test -f /etc/cztvhub/cztvhub.conf; then
   sudo install -d -m 0750 -o cztvhub -g cztvhub /etc/cztvhub

@@ -273,6 +273,7 @@
     this.numberEntry = new CT.NumberEntry(function (n) { self.zapToNumber(n); });
     this.tl = null; // TimelineController while an Anténa timeline plays
     this.timelineAt = null; // {id, time}: the timeline window and wall clock to continue at after re-resolving
+    this.errorAction = null; // {label, run} under the error shown now (CT.Platform.playErrorAction), OK runs it
     var cb = {
       onReady: function () {
         self.hideMessage();
@@ -291,7 +292,8 @@
       }
     };
     var hasAvPlay = root.webapis && root.webapis.avplay;
-    this.backend = this.mainBackend = hasAvPlay ? new AvPlayBackend(cb) : new Html5Backend(cb);
+    var platformBackend = CT.Platform.playerBackend ? CT.Platform.playerBackend(cb) : null; // the web: <video> + hls.js
+    this.backend = this.mainBackend = platformBackend || (hasAvPlay ? new AvPlayBackend(cb) : new Html5Backend(cb));
     // ?demo: a simulated player for timelines, so the timeline bar can be checked in a browser
     this.demoBackend = CT.Demo.enabled ? CT.Demo.backend(cb) : null;
     $('avplayer').style.display = hasAvPlay ? 'block' : 'none';
@@ -425,11 +427,18 @@
     this.stopBreaks();
     this.backend.close();
     this.showMessage('Načítání…');
+    var request = this.request;
     var planned = at ? this.app.planner.timelineWindow(at.id, this.request.title, at.time) :
       this.app.planner.plan(this.request, forceRefresh);
     planned.then(function (target) {
       if (token !== self.loadToken) return;
       self.useTarget(target);
+      var refusal = CT.Platform.refusePlay ? CT.Platform.refusePlay(target) : null;
+      if (refusal) {
+        self.backend.close();
+        self.showMessage(refusal);
+        return;
+      }
       self.plannedAt = Date.now();
       self.timelineAt = null;
       if (self.tl) self.tl.setWindow(target.timeline);
@@ -447,7 +456,19 @@
     }, function (e) {
       if (token !== self.loadToken) return;
       self.showMessage(e && e.userMessage ? e.userMessage : CT.Messages.GENERIC);
+      self.offerErrorAction(request, e);
     });
+  };
+
+  /** Under a playback error: the platform's way on (the web: "Otevřít v iVysílání" for CT), OK runs it. */
+  Player.prototype.offerErrorAction = function (request, error) {
+    var action = CT.Platform.playErrorAction ? CT.Platform.playErrorAction(request, error) : null;
+    if (!action) return;
+    this.errorAction = action;
+    var button = document.createElement('div');
+    button.className = 'button focused';
+    button.textContent = action.label;
+    $('player-message').appendChild(button);
   };
 
   /** The backend for `target` and the timeline controller for a timeline; returns nothing. */
@@ -505,6 +526,7 @@
       this.backend.close();
       this.showMessage(CT.Messages.PLAYBACK);
       if (this.request.kind === 'pspLive') this.explainPsp();
+      this.offerErrorAction(this.request, null);
     }
   };
 
@@ -591,6 +613,10 @@
         // While "Přeskočit reklamu" is shown, OK presses it; otherwise OK pauses.
         if (this.skipTo !== null) {
           this.skipAd();
+          return;
+        }
+        if (this.errorAction) {
+          this.errorAction.run();
           return;
         }
         if (!this.target) return;
@@ -760,12 +786,14 @@
   };
 
   Player.prototype.showMessage = function (text) {
+    this.errorAction = null; // a new message replaces the button under the old one
     var m = $('player-message');
     m.textContent = text;
     m.style.display = 'flex';
   };
 
   Player.prototype.hideMessage = function () {
+    this.errorAction = null;
     $('player-message').style.display = 'none';
   };
 

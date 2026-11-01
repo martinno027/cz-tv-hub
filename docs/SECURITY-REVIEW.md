@@ -29,6 +29,24 @@ of "done".
   admin header, same origin) and never linked to a profile. *Wrong:* an app route that writes the default, or a
   profile change that silently changes it.
 - A feature with a missing key or password is off. *Wrong:* an empty `[admin] password` meaning "no login".
+- The web app's files (`/web/`, `dvb/web.py`) are the only thing served without a key: only regular files of the
+  served types under `[dvb] web_dir`; traversal (`..`, `%2e%2e`, encoded slashes), dot files, directories and
+  symlinks leaving the directory are `404`; the web is off at start when `web_dir` is, contains or sits inside
+  `hls_dir`, `buffer_dir`, `state_dir`, `breaks_dir` or the config's directory; `install.sh` copies only the built
+  app (`deploy/stage_web.py`: no `local-config.js`, no fixtures). *Wrong:* a recording, `profiles.json` or the
+  config reachable under `/web/`, a key preset in `/opt/cztvhub/web`.
+- The `cztvhub_key` cookie never changes anything: every POST/PUT (and any future DELETE) under `/dvb/*` needs the
+  key or the worker key as an `Authorization` header; the server grants no CORS preflight
+  (`tests/test_dvb_cookie.py` sweeps every route shape). *Wrong:* a new state-changing route that accepts the
+  cookie (with the web app the cookie is in every browser that opened `/web/`).
+- GET routes with side effects (live sessions, thumbnails, TMDb lookups on request, `/dvb/ct/*`) can be started with
+  the cookie alone; `SameSite=Strict` and `Path=/dvb` keep foreign sites out, but cookies ignore ports: every page
+  on the Pi's host name is the same site and receives the cookie for its own `/dvb` paths. *Wrong:* another web UI
+  with untrusted content on the Pi's name (TVHeadend on `127.0.0.1` only, as above).
+- The web's `Content-Security-Policy` is on every `/web/` answer: `script-src 'self'` (no inline scripts, no
+  `unsafe-*`), `frame-ancestors 'none'`, and other hosts only the measured ČT ones in `dvb/web.py`
+  (`tests/test_dvb_web.py` checks the header). It is the guard for `/admin` on the same origin. *Wrong:* an inline
+  script in `apps/web`, a host added without measuring it, the Chamber's CDN before the owner approves the web for it.
 
 ### Network
 
@@ -38,6 +56,11 @@ of "done".
 - Tailscale inside the apps (`apps/tailnet`): the bridge listens on `127.0.0.1` only and forwards only to the
   gateway `host:port` from the app's settings; Tailscale's log upload is compiled out (`ts_omit_logtail`) and disabled.
   *Wrong:* the bridge on `0.0.0.0`, a target taken from the request, or logs leaving the TV.
+- ČT stream answers (`/dvb/ct/live`, `/dvb/ct/vod`) go only to peers on the home LAN (`dvb/ctweb.py home_lan`:
+  RFC 1918, link-local, ULA, loopback; the tailnet `100.64.0.0/10` and `fd7a:115c:a1e0::/48` excluded; IPv4-mapped
+  IPv6 judged as IPv4), checked before ČT is asked (legal limit, tested with mutations). *Wrong:* a reverse proxy in
+  front of the gateway (`tailscale serve`, nginx): every tailnet request then comes from `127.0.0.1` and passes as
+  home.
 
 ### What leaves the Pi
 
@@ -59,6 +82,11 @@ of "done".
   User-Agent; ČT is asked one request at a time with cached rows. *Wrong:* a faked browser, crawling whole
   categories, search text in a log line.
 - CT internet streams are only redirected. *Wrong:* the server fetching or caching CT video.
+- `/dvb/ct/*` sends ČT exactly the request of `api.py` (fixed live/vod parameters, the fixed schedule query; channel
+  ids and slugs from `channels.py`, idecs digits only, dates in the guide range), with our User-Agent and nothing of
+  the client's request; ČT's status and body go back unchanged; stream answers at most 60 s in memory, schedules
+  10 min; no URL in a log line. *Wrong:* a client query or header forwarded, a DRM variant requested, a signed URL in
+  the journal or on disk.
 
 ### Secrets
 

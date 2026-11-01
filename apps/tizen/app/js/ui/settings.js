@@ -54,7 +54,7 @@
   };
 
   SettingsScreen.prototype.show = function () {
-    $('version-line').textContent = SettingsScreen.versionText(root.CT_BUILD_INFO);
+    $('version-line').textContent = SettingsScreen.versionText(root.CT_BUILD_INFO) + CT.Platform.versionSuffix;
     var s = CT.SettingsStore.load();
     $('set-address').value = s ? s.address : '';
     $('set-key').value = s ? s.key : '';
@@ -100,7 +100,7 @@
       this.renderProfile();
     } else {
       this.zone = 'form';
-      this.focus = 0;
+      this.focus = this.firstField();
       this.revealKey(false); // masked again whenever the section opens (spec/apps.md "Showing a key")
     }
     this.applyFocus();
@@ -110,6 +110,11 @@
   SettingsScreen.prototype.revealKey = function (shown) {
     $('set-key').type = shown ? 'text' : 'password';
     $('set-key-reveal').textContent = shown ? 'Skrýt' : 'Zobrazit';
+  };
+
+  /** The first Server control: the address field, or the key where the platform fixes the address (the web). */
+  SettingsScreen.prototype.firstField = function () {
+    return CT.Platform.gatewayAddress ? 1 : 0;
   };
 
   /** Back to the choice, focus on the item of the section just left. */
@@ -149,7 +154,7 @@
     var sources = [{ source: 'ct', label: 'Internetová TV (ČT)' }];
     if (dvb) sources.push({ source: 'dvb', label: 'Anténa' });
     // Reads "Poslanecká sněmovna PČR · jen přímé přenosy" (the full label would not fit the row).
-    sources.push({ source: 'psp', label: CT.Psp.SWITCH_LABEL, detail: 'PČR · jen přímé přenosy' });
+    if (CT.Platform.sourceAllowed('psp')) sources.push({ source: 'psp', label: CT.Psp.SWITCH_LABEL, detail: 'PČR · jen přímé přenosy' });
     sources.forEach(function (s) {
       var on = !CT.ChannelPrefs.isSourceOff(app.channelPrefs, s.source);
       var row = el('div', 'ch-row ch-source' + (on ? '' : ' off'));
@@ -292,7 +297,8 @@
   };
 
   SettingsScreen.prototype.save = function () {
-    var address = $('set-address').value;
+    var fixed = CT.Platform.gatewayAddress; // the web: the page's own gateway, no address field
+    var address = fixed ? fixed() : $('set-address').value;
     var key = $('set-key').value;
     var config;
     try {
@@ -360,7 +366,7 @@
           if (key === 'up') this.pfFocus = Math.max(0, this.pfFocus - 1);
         } else {
           if (forward) this.focus = Math.min(this.focus + 1, 2);
-          if (key === 'up') this.focus = Math.max(0, this.focus - 1);
+          if (key === 'up') this.focus = Math.max(this.firstField(), this.focus - 1);
         }
         this.applyFocus();
         return true;
@@ -373,8 +379,8 @@
     switch (key) {
       case 'up':
         if (this.focus === 4) this.focus = 2;
-        else if (this.focus === 5) this.focus = 0;
-        else if (this.focus > 0) this.focus = this.focus === 3 ? 1 : this.focus - 1;
+        else if (this.focus === 5) this.focus = this.firstField();
+        else if (this.focus > this.firstField()) this.focus = this.focus === 3 ? 1 : this.focus - 1;
         break;
       case 'down':
         if (this.focus === 5) {

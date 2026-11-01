@@ -19,24 +19,27 @@ from .m3u import build_playlist
 if TYPE_CHECKING:
     from .dvb.admin import AdminSite
     from .dvb.gateway import DvbGateway
+    from .dvb.web import WebSite
 
 STREAM_RE = re.compile(r"^/ct/(CH_\d+)\.m3u8$")
 DVB_DISABLED = '{"error": "DVB není zapnuté"}'.encode("utf-8")
 TOO_LARGE = '{"error": "Příliš velký požadavek"}'.encode("utf-8")
 
 
-def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, admin: AdminSite | None = None):
+def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, admin: AdminSite | None = None,
+                 web: WebSite | None = None):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def _send(self, status, body=b"", content_type="text/plain; charset=utf-8", headers=None):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
+            if status != 304:  # a 304 has no body; its length would be the 200's
+                self.send_header("Content-Length", str(len(body)))
             for key, value in (headers or {}).items():
                 self.send_header(key, value)
             self.end_headers()
-            if self.command != "HEAD":
+            if self.command != "HEAD" and status != 304:
                 self.wfile.write(body)
 
         def do_HEAD(self):
@@ -46,6 +49,8 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
             path, _, query = self.path.partition("?")
             if path.startswith("/dvb/"):
                 return self._dvb(path, query)
+            if _is_web(path):
+                return self._web(path)
             if path == "/admin" or path.startswith("/admin/"):
                 return self._admin(path, query=query)
             if path == "/health":
@@ -65,18 +70,40 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
 
         def do_PUT(self):
             path, _, query = self.path.partition("?")
+            if _is_web(path):
+                return self._web(path)
             body = self._body(path.startswith("/dvb/"))
             if body is not None:
                 self._dvb(path, query, "PUT", body)
 
         def do_POST(self):
             path, _, query = self.path.partition("?")
+            if _is_web(path):
+                return self._web(path)
             body = self._body(path.startswith("/dvb/") or path.startswith("/admin/"))
             if body is None:
                 return
             if path.startswith("/dvb/"):
                 return self._dvb(path, query, "POST", body)
             self._admin(path, "POST", body)
+
+        def _other(self):
+            """DELETE, PATCH, OPTIONS: 405 on /web (spec), as before (501) elsewhere."""
+            if _is_web(self.path.partition("?")[0]):
+                return self._web(self.path.partition("?")[0])
+            self.close_connection = True
+            self.send_error(501, "Unsupported method (%r)" % self.command)
+
+        do_DELETE = do_PATCH = do_OPTIONS = _other
+
+        def _web(self, path):
+            """The web app's files (dvb/web.py); only with the gateway on."""
+            if self.command not in ("GET", "HEAD"):
+                self.close_connection = True  # a body, if any, is not read
+            if web is None or not web.enabled:
+                return self._send(404, b"web is off\n")
+            resp = web.handle(self.command, path, self.headers)
+            self._send(resp.status, resp.body, resp.content_type, resp.headers)
 
         def _body(self, routed: bool):
             """The request body, or None after answering: 400 elsewhere or without a length, 413 too large."""
@@ -111,18 +138,23 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
     return Handler
 
 
+def _is_web(path: str) -> bool:
+    return path == "/web" or path.startswith("/web/")
+
+
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
 
 def serve(host: str, port: int, resolver: StreamResolver | None = None, gateway: DvbGateway | None = None,
-          admin: AdminSite | None = None):
-    server = Server((host, port), make_handler(resolver or StreamResolver(), gateway, admin))
+          admin: AdminSite | None = None, web: WebSite | None = None):
+    server = Server((host, port), make_handler(resolver or StreamResolver(), gateway, admin, web))
     if gateway is not None:
         gateway.start()
     dvb = ", DVB gateway: /dvb/" if gateway is not None else ""
     dvb += ", admin: /admin" if admin is not None else ""
+    dvb += ", web: /web/" if web is not None and web.enabled else ""
     print(f"cz-tv-hub listening on {host}:{port}  (playlist: /playlist.m3u{dvb})", flush=True)
     try:
         server.serve_forever()

@@ -24,6 +24,8 @@
 
   CT.Keys = {
     name: function (event) {
+      var platform = CT.Platform;
+      if (platform && platform.keyName) return platform.keyName(event, CODES);
       return CODES[event.keyCode] || null;
     },
 

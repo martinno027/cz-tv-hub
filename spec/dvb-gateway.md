@@ -527,6 +527,43 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     off; the months setting can still be changed.
 - legal-guard 2026-10-25: approve with changes (all in this section); approved by the owner the same day.
 
+## Web (T27, draft for the owner's review; `spec/web.md`)
+- **Static files** `GET /web/` and `GET /web/<path>`: the web app (`spec/web.md`) from `[dvb] web_dir` (default
+  `/opt/cztvhub/web`, copied by `install.sh`); only when the gateway is on. No key needed for the files themselves
+  (the page has to load to ask for the key; it carries no data). Only files that exist under that directory:
+  paths are normalised and anything outside it, a dot file, a directory listing or a symlink leaving it is `404`.
+  At start the web is **off** (with a log line) when `web_dir` is, contains or sits inside `hls_dir`, `buffer_dir`
+  or the state directory: one config mistake must not publish recordings without a key. Nothing but the built web
+  app goes there (no keys, config or real data; demo fixtures only the synthetic `spec/fixtures`). `web_dir` has a
+  default in code, so it is not in the config template;
+  methods other than GET/HEAD `405`. Content types by extension (`.html .js .css .svg .png .woff2 .json`), `Cache-
+  Control: no-cache` + `ETag`. Every answer carries `Content-Security-Policy` with `default-src 'self'`, no inline
+  scripts, `frame-ancestors 'none'`, and `img-src`/`media-src`/`connect-src` limited to `'self'`, `blob:` and **only
+  the hosts the web needs**, measured 2026-11-01 and listed in `web.py` (a test checks the header; the source
+  rule enforced in code): ČT's stream CDN `ivys-nw-cdn.o2tv.cz` (master playlist) and `*.o2-tv.cz` (variant
+  playlists, segments), ČT's images and subtitles `ctfs.ceskatelevize.cz` (img/connect only); the Chamber's CDN
+  only once the Chamber on the web is approved (not now: a test asserts it is absent). Behind a reverse proxy
+  (`tailscale serve`, nginx) every request would look like loopback = home: not supported (SECURITY-REVIEW), `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer`. `/web` redirects to `/web/`.
+- **ČT for the web** (app key as for every `/dvb/*`, worker key `403`): the gateway calls the same ČT API the apps
+  call, from the Pi, and answers **ČT's status and JSON body unchanged** (the web reuses the Samsung parsers), with
+  the honest user agent of `api.py`; nothing else of the request is forwarded (no client headers, no cookies):
+  - `GET /dvb/ct/live/<CH_n>` → ČT `playlist-live … /channel/<CH_n>` (`CH_n` from `channels.py` only, else `404`);
+  - `GET /dvb/ct/vod/<idec>` → ČT `playlist-vod … /media/external/<idec>` (`idec` only as real idecs look, digits,
+    checked on the whole schedule feed when building; else `400`);
+  - **live and vod only for clients on the home LAN** (the peer address in the private IPv4/IPv6 ranges, **not**
+    the tailnet `100.64.0.0/10` / `fd7a:115c:a1e0::/48`, not loopback through a proxy): otherwise `403 {"error":
+    "ČT jde v prohlížeči přehrát jen doma. …"}` without asking ČT (legal-guard 2026-11-01: the "home only" limit is
+    the gateway's, not ČT's IP check; a legal limit, so tested with a mutation). The schedule is open on both;
+  - `GET /dvb/ct/schedule?channels=<slug,…>&date=YYYY-MM-DD` → ČT GraphQL with the **fixed** schedule query of
+    `api.py` (`channels` 1–6 of the known GraphQL names, `date` within the guide range of 7 days back and 2 ahead,
+    else `400`). Never a client-supplied query.
+  Exactly the request parameters of `api.py` (no client query forwarded, never a DRM variant, `skipIpAddressCheck`
+  untouched); ČT's answer unchanged, including `isBlocked`, `UNSUPPORTED_DRM`, `MISSING_LICENCE_*` (a test shows
+  nothing is filtered or rewritten). Stream answers are cached at most 60 s in memory, never written, never logged
+  with their URLs; schedules up to 10 min in memory. ČT unreachable → `502 {"error": "iVysílání teď
+  neodpovídá"}`. This is metadata only: video never passes through the gateway (hard rule).
+
 ## EPG history (`src/cztvhub/dvb/epgstore.py`)
 The gateway remembers the EPG events it sees (every 30 min the next 3 days, plus every `/dvb/epg` answer) in
 `<state dir>/epg-history.json`: titles, times, genre only. For the not-yet-started part of a fetched window
