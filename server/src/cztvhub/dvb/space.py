@@ -2,7 +2,8 @@
 
 Pure decisions, no I/O, so the rules are unit-tested:
 1. Age always wins: every block that ended more than ``max_days`` (1..14) ago goes, whatever the free space.
-2. Free space: while less than the reserve (10 % of the disk, at least 5 GB) would be free, the oldest block of
+2. Free space: while less than the reserve (10 % of the disk, at least 5 GB, or the household's own number from
+   /admin, 1 GB .. half of the disk, T43) would be free, the oldest block of
    the channel that currently holds the most hours goes, so every recorded channel keeps about the same last
    N hours. A channel's newest block (the one being written) is never touched.
 3. If the reserve still cannot be reached, recording pauses (the gateway's hard stop; TVHeadend's own free-space
@@ -21,14 +22,41 @@ MIN_DAYS, MAX_DAYS = 1, 14
 RESERVE_SHARE = 0.10
 RESERVE_MIN = 5 * 1000 ** 3
 RESUME_MARGIN = 1000 ** 3  # resume recording once 1 GB more than the reserve is free
+GB = 1000 ** 3
+RESERVE_MIN_GB = 1  # the smallest reserve /admin accepts (T43); the largest is half of the disk
+RATE_MIN_SECONDS = 600  # a channel's bitrate counts once 10 minutes are recorded
 
 
 def clamp_days(days: int) -> int:
     return max(MIN_DAYS, min(MAX_DAYS, int(days)))
 
 
-def reserve_bytes(total: int) -> int:
+def auto_reserve_bytes(total: int) -> int:
     return max(RESERVE_MIN, int(total * RESERVE_SHARE))
+
+
+def reserve_max_gb(total: int) -> int:
+    """The largest reserve /admin accepts: half of the disk, in whole GB."""
+    return int(total // 2 // GB)
+
+
+def reserve_bytes(total: int, override_gb: int | None = None) -> int:
+    """The free space the retention keeps: the household's own number of GB (clamped to half of the disk, in
+    case the disk was replaced by a smaller one since) or the automatic rule."""
+    if override_gb is None:
+        return auto_reserve_bytes(total)
+    return max(RESERVE_MIN_GB * GB, min(int(override_gb) * GB, reserve_max_gb(total) * GB))
+
+
+def rates(blocks: dict[str, list[BlockInfo]]) -> dict[str, float]:
+    """Measured bytes per second of each channel with at least ``RATE_MIN_SECONDS`` recorded."""
+    out = {}
+    for channel, items in blocks.items():
+        seconds = sum(b.seconds for b in items)
+        size = sum(b.bytes for b in items)
+        if seconds >= RATE_MIN_SECONDS and size > 0:
+            out[channel] = size / seconds
+    return out
 
 
 @dataclass
@@ -39,8 +67,9 @@ class Plan:
 
 
 def plan(blocks: dict[str, list[BlockInfo]], now: float, max_days: int, free: int, total: int,
-         extra: int = 0) -> Plan:
-    """``extra``: bytes to free beyond the reserve (``RESUME_MARGIN`` while recording is paused)."""
+         extra: int = 0, reserve_gb: int | None = None) -> Plan:
+    """``extra``: bytes to free beyond the reserve (``RESUME_MARGIN`` while recording is paused);
+    ``reserve_gb``: the household's reserve from /admin (None = automatic)."""
     days = clamp_days(max_days)
     cutoff = now - days * DAY
     delete: list[BlockInfo] = []
@@ -58,7 +87,7 @@ def plan(blocks: dict[str, list[BlockInfo]], now: float, max_days: int, free: in
             else:
                 keep.append(block)
         left[channel] = keep
-    need = reserve_bytes(total) + extra - (free + gained)
+    need = reserve_bytes(total, reserve_gb) + extra - (free + gained)
     while need > 0:
         # the channel with the most hours that still has a block besides the one being written
         candidates = [(sum(b.seconds for b in items), channel) for channel, items in left.items() if len(items) > 1]
@@ -72,19 +101,14 @@ def plan(blocks: dict[str, list[BlockInfo]], now: float, max_days: int, free: in
     return Plan(delete, max(0, need), reasons)
 
 
-def hours_per_channel(blocks: dict[str, list[BlockInfo]], free: int, total: int, max_days: int) -> float | None:
+def hours_per_channel(blocks: dict[str, list[BlockInfo]], free: int, total: int, max_days: int,
+                      reserve_gb: int | None = None) -> float | None:
     """Rough capacity at the measured bitrates: hours of each recorded channel the disk holds with the reserve
     kept (capped by the day limit)."""
-    rates = []
-    used = 0
-    for items in blocks.values():
-        seconds = sum(b.seconds for b in items)
-        size = sum(b.bytes for b in items)
-        used += size
-        if seconds >= 600 and size > 0:
-            rates.append(size / seconds)
-    if not rates:
+    measured = rates(blocks)
+    if not measured:
         return None
-    usable = max(0, free + used - reserve_bytes(total))
-    hours = usable / sum(rates) / 3600
+    used = sum(b.bytes for items in blocks.values() for b in items)
+    usable = max(0, free + used - reserve_bytes(total, reserve_gb))
+    hours = usable / sum(measured.values()) / 3600
     return round(min(hours, clamp_days(max_days) * 24), 1)

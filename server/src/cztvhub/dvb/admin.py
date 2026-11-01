@@ -38,6 +38,7 @@ from ..config import Config
 from . import defaults as dflt
 from . import details as tmdb
 from . import epg
+from . import space
 from . import tmdbkeys, tmdbstore
 from .update import Updater
 from .gateway import DvbGateway, Response, error, json_response
@@ -88,6 +89,12 @@ PAGE_HEADERS = {
 }
 
 
+def _mux_names(own: list, muxes: dict) -> list[str]:
+    """Names of the multiplexes a channel's services are in (the service's own mux name when the mux is gone)."""
+    return [muxes[m].name if m in muxes else next(s.mux_name for s in own if s.mux == m)
+            for m in sorted({s.mux for s in own if s.mux})]
+
+
 class ChannelAdmin:
     """Channel switches against TVHeadend; no own state."""
 
@@ -109,7 +116,6 @@ class ChannelAdmin:
         rows = []
         for channel in channels:
             own = [services[s] for s in channel.services if s in services]
-            mux_ids = sorted({s.mux for s in own if s.mux})
             rule = next((r for r in rules if r.channel == channel.uuid), None)
             event = airing.get(channel.uuid)
             # TVHeadend names a channel after its service; a different name was set on rename (autoname off)
@@ -126,8 +132,7 @@ class ChannelAdmin:
                 # tuned at all: an enabled service in an enabled multiplex
                 "received": any(s.enabled and muxes.get(s.mux) is not None and muxes[s.mux].enabled == MUX_ENABLE
                                 for s in own),
-                "multiplexes": [muxes[m].name if m in muxes else next(s.mux_name for s in own if s.mux == m)
-                                for m in mux_ids],
+                "multiplexes": _mux_names(own, muxes),
                 "recordingRule": None if rule is None else rule.enabled,
                 "recordings": recordings.get(channel.uuid, 0),
                 # what is on right now (EPG); none for channels whose multiplex is not received
@@ -138,6 +143,17 @@ class ChannelAdmin:
         # stable order like a TV's channel list (hidden channels stay in place, greyed out)
         rows.sort(key=lambda r: (r["number"] <= 0, r["number"], r["name"].casefold()))
         return rows
+
+    def labels(self) -> dict[str, dict]:
+        """Name and multiplexes of every channel, for "Přehled nahrávek": three TVHeadend requests instead of the
+        eight of ``overview`` (no DVR grids, autorec rules or EPG, T43)."""
+        services = {s.uuid: s for s in self.client.services()}
+        muxes = {m.uuid: m for m in self.client.muxes()}
+        out = {}
+        for channel in self.client.channels(include_disabled=True):
+            own = [services[s] for s in channel.services if s in services]
+            out[channel.uuid] = {"name": channel.name, "multiplexes": _mux_names(own, muxes)}
+        return out
 
     def set_offered(self, channel_ids: str | list[str], offered: bool) -> list[str]:
         """Show or hide one or more channels at once; returns what changed, in Czech, for the page.
@@ -343,7 +359,7 @@ class AdminSite:
 
     def _storage(self) -> Response:
         """"Přehled nahrávek": per recorded channel hours, how far back, size, measured bitrate, gaps."""
-        rows = {r["id"]: r for r in self.admin.overview()}
+        rows = self.admin.labels()
         data = self.gateway.archive.overview({i: r["name"] for i, r in rows.items()})
         for channel in data["channels"]:
             channel["multiplexes"] = rows[channel["id"]]["multiplexes"] if channel["id"] in rows else []
@@ -407,24 +423,36 @@ class AdminSite:
         return json_response(200, {"changes": done})
 
     def _settings(self, body: bytes) -> Response:
-        """Household switches; for now "Náhledy pořadů" (spec/dvb-gateway.md "Thumbnails")."""
+        """Household switches: "Náhledy pořadů" (spec/dvb-gateway.md "Thumbnails"), and in "Přehled nahrávek" how
+        long recordings are kept and the free-space reserve (T43)."""
         try:
             payload: Any = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             payload = None
+        archive = self.gateway.archive
         days = payload.get("maxDays") if isinstance(payload, dict) else None
-        if isinstance(days, int) and not isinstance(days, bool):
+        if isinstance(payload, dict) and "reserveGb" in payload:
+            gb = payload["reserveGb"]
+            top = space.reserve_max_gb(archive.store.disk()[1])
+            if gb is not None and (not isinstance(gb, int) or isinstance(gb, bool) or
+                                   not space.RESERVE_MIN_GB <= gb <= top):
+                return error(400, f"Rezervu lze nastavit na {space.RESERVE_MIN_GB} až {top} GB (nejvýš polovina "
+                                  f"disku), nebo automaticky")
+            archive.set_reserve_gb(gb)
+            self.gateway.log(f"admin: reserve {'automatic' if gb is None else f'{gb} GB'}")
+        elif isinstance(days, int) and not isinstance(days, bool):
             if not 1 <= days <= 14:
                 return error(400, "Uchovávat lze 1 až 14 dní")
-            self.gateway.archive.set_max_days(days)
+            archive.set_max_days(days)
             self.gateway.log(f"admin: recordings kept {days} days")
         elif not isinstance(payload, dict) or not isinstance(payload.get("thumbnails"), bool):
-            return error(400, 'Očekávám {"thumbnails": true|false} nebo {"maxDays": 1..14}')
+            return error(400, 'Očekávám {"thumbnails": true|false}, {"maxDays": 1..14} nebo '
+                              '{"reserveGb": počet GB | null}')
         else:
             self.gateway.thumbs.set_enabled(payload["thumbnails"])
             self.gateway.log(f"admin: thumbnails {'on' if payload['thumbnails'] else 'off'}")
         return json_response(200, {"settings": {"thumbnails": self.gateway.thumbs.enabled,
-                                                "maxDays": self.gateway.archive.max_days()}})
+                                                "maxDays": archive.max_days(), "reserveGb": archive.reserve_gb()}})
 
     def _profile(self, profile_id: str | None, body: bytes, headers: Mapping[str, str] | None = None,
                  client: str = "") -> Response:
@@ -798,12 +826,24 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
 automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostatku místa a nelze ho stáhnout ani sdílet.</p>
 <div id="msg" role="status" aria-live="polite"></div>
 <section id="storage" hidden>
+  <label class="setting">Uchovávat nahrávky nejvýše <select id="maxdays"></select> (dříve se maže, když dochází místo)</label>
+  <form class="setting" id="reserve-form">Rezerva volného místa
+    <input id="reserve-gb" type="number" min="1" step="1" inputmode="numeric" style="width: 8em" aria-label="Rezerva v GB"
+      placeholder="automaticky" disabled> GB
+    <button type="submit" id="reserve-save" disabled>Uložit</button>
+    <button type="button" id="reserve-auto" disabled>Automaticky</button>
+    <span class="meta" id="reserve-now"></span>
+  </form>
   <div class="totals" id="totals"></div>
+  <div class="totals" id="rates"></div>
   <table><thead><tr><th>Kanál</th><th>Multiplex</th><th>Stav</th><th class="n">Uloženo</th><th>Zpět do</th><th class="n">Velikost</th>
-    <th class="n">Datový tok</th><th class="n">Výpadky</th></tr></thead><tbody id="storage-rows"></tbody></table>
+    <th class="n">Datový tok</th><th class="n">Výpadky</th></tr></thead><tbody id="storage-rows">
+    <tr><td colspan="8" class="meta" id="storage-loading">Načítám přehled nahrávek…</td></tr></tbody></table>
   <p class="help">Když místo dochází, maže se nejstarších 10 minut z kanálu, který má uloženo nejvíc hodin, takže
-  každý nahrávaný kanál drží zhruba stejný počet posledních hodin. Na disku zůstává rezerva 10 % (nejméně 5 GB);
-  když ji nejde udržet, nahrávání se pozastaví. Datový tok je změřený ze skutečných nahrávek.</p>
+  každý nahrávaný kanál drží zhruba stejný počet posledních hodin. Na disku zůstává rezerva volného místa –
+  automaticky 10 % disku (nejméně 5 GB), nebo vlastní počet GB (1 GB až polovina disku); když ji nejde udržet,
+  nahrávání se pozastaví. Datový tok je změřený ze skutečných nahrávek; průměr za hodinu počítá kanály, které mají
+  uloženo aspoň 10 minut.</p>
 </section>
 <section id="profiles" hidden>
   <table><thead><tr><th>Jméno</th><th>Vytvořen</th><th>Poslední změna</th><th class="n">Přihlášeno</th><th></th></tr></thead>
@@ -887,7 +927,6 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
 </section>
 <section id="channels">
 <label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
-<label class="setting">Uchovávat nahrávky nejvýše <select id="maxdays"></select> (dříve se maže, když dochází místo)</label>
 <div class="list">
   <div class="filters" role="search">
     <input type="search" id="f-text" placeholder="Hledat název" aria-label="Hledat v názvu i původním názvu">
@@ -925,7 +964,7 @@ function say(text, isError) {
   msg.textContent = "";
   if (text) msg.appendChild(el("div", "msg" + (isError ? " err" : ""), text));
 }
-function gb(n) { return n < 1e9 ? Math.round(n / 1e6) + " MB" : (n / 1e9).toFixed(n >= 1e11 ? 0 : 1) + " GB"; }
+function gb(n) { return n < 1e9 ? Math.round(n / 1e6) + " MB" : (n / 1e9).toFixed(n >= 1e11 ? 0 : 1).replace(".", ",") + " GB"; }
 function plural(n, one, few, many) { return n === 1 ? one : (n > 1 && n < 5 ? few : many); }
 function channels(n) { return n + " " + plural(n, "kanál", "kanály", "kanálů"); }
 function hm(iso) { return new Date(iso).toLocaleTimeString("cs-CZ", {hour: "2-digit", minute: "2-digit"}); }
@@ -1412,23 +1451,41 @@ function when(iso) {
   var d = new Date(iso);
   return d.toLocaleDateString("cs-CZ", {day: "numeric", month: "numeric"}) + " " + hm(iso);
 }
-function loadStorage() {
+function storageNote(text, cls) {
+  var body = document.getElementById("storage-rows");
+  body.textContent = "";
+  var tr = el("tr"), td = el("td", cls, text);
+  td.colSpan = 8; tr.appendChild(td); body.appendChild(tr);
+  return td;
+}
+function perHour(v) { return v == null ? "—" : v.toFixed(1).replace(".", ","); }
+var reserveTop = 0;
+// quiet: the minute refresh keeps the table as it is until the new answer is there
+function loadStorage(quiet) {
+  if (!quiet) {
+    document.getElementById("totals").textContent = "";
+    document.getElementById("rates").textContent = "";
+    storageNote("Načítám přehled nahrávek…", "meta").id = "storage-loading";
+  }
   return api("GET", "/admin/api/storage").then(function (data) {
     var t = document.getElementById("totals");
     t.textContent = "";
-    function tot(label, value, cls) { var p = el("span", cls || null, label + " "); p.appendChild(el("b", null, value)); t.appendChild(p); }
+    function tot(label, value, cls, box) { var p = el("span", cls || null, label + " "); p.appendChild(el("b", null, value)); (box || t).appendChild(p); }
     tot("Disk:", gb(data.disk.freeBytes) + " volno z " + gb(data.disk.totalBytes));
-    tot("Rezerva:", gb(data.disk.reserveBytes));
+    tot("Rezerva:", gb(data.disk.reserveBytes) + (data.disk.reserveGb == null ? " (automaticky)" : ""));
     tot("Nahrávky:", gb(data.usedBytes));
     tot("Nejvýše:", data.maxDays + plural(data.maxDays, " den", " dny", " dní"));
     if (data.hoursPerChannel != null) tot("Vejde se zhruba:", hours(data.hoursPerChannel) + " na kanál");
     if (data.paused) tot("", "Nahrávání pozastaveno – plný disk", "warn");
+    var r = document.getElementById("rates");
+    r.textContent = "";
+    tot("Průměrně za hodinu:", perHour(data.averageGbPerHour) + (data.averageGbPerHour == null ? "" : " GB"), null, r);
+    tot("Všechny kanály dohromady:", perHour(data.totalGbPerHour) + (data.totalGbPerHour == null ? "" : " GB/h"), null, r);
+    maxdays.value = String(data.maxDays);
+    renderReserve(data.disk);
     var body = document.getElementById("storage-rows");
     body.textContent = "";
-    if (!data.channels.length) {
-      var tr = el("tr"), td = el("td", null, "Nic se nenahrává. Zapněte „Nahrávat“ u kanálů v záložce Kanály.");
-      td.colSpan = 8; tr.appendChild(td); body.appendChild(tr);
-    }
+    if (!data.channels.length) storageNote("Nic se nenahrává. Zapněte „Nahrávat“ u kanálů v záložce Kanály.");
     data.channels.forEach(function (c) {
       var tr = el("tr");
       tr.appendChild(el("td", null, c.name));
@@ -1441,8 +1498,43 @@ function loadStorage() {
       tr.appendChild(el("td", "n", c.gaps ? c.gaps + " (" + String(c.gapMinutes).replace(".", ",") + " min)" : "–"));
       body.appendChild(tr);
     });
-  }, function (e) { say("Přehled se nepodařilo načíst: " + e.message, true); });
+  }, function (e) {
+    if (!quiet) storageNote("Přehled nahrávek se nepodařilo načíst: " + e.message, "warn");
+    say("Přehled se nepodařilo načíst: " + e.message, true);
+  });
 }
+
+var reserveInput = document.getElementById("reserve-gb");
+function renderReserve(disk) {
+  reserveTop = disk.reserveMaxGb;
+  if (document.activeElement !== reserveInput) reserveInput.value = disk.reserveGb == null ? "" : String(disk.reserveGb);
+  document.getElementById("reserve-now").textContent = (disk.reserveGb == null ?
+    "nyní automaticky (" + gb(disk.reserveAutoBytes) + ")" : "nyní " + disk.reserveGb + " GB, automaticky by bylo " +
+    gb(disk.reserveAutoBytes)) + "; lze 1 až " + disk.reserveMaxGb + " GB";
+  ["reserve-gb", "reserve-save", "reserve-auto"].forEach(function (id) { document.getElementById(id).disabled = false; });
+}
+function saveReserve(value) {
+  ["reserve-gb", "reserve-save", "reserve-auto"].forEach(function (id) { document.getElementById(id).disabled = true; });
+  return api("POST", "/admin/api/settings", {reserveGb: value}).then(function (data) {
+    var v = data.settings.reserveGb;
+    reserveInput.value = v == null ? "" : String(v);
+    say(v == null ? "Rezerva volného místa je automatická." : "Rezerva volného místa je " + v + " GB.");
+  }, function (e) {
+    say("Rezervu se nepodařilo uložit: " + e.message, true);
+  }).then(function () { return loadStorage(true); });
+}
+document.getElementById("reserve-form").addEventListener("submit", function (ev) {
+  ev.preventDefault();
+  var text = reserveInput.value.trim();
+  if (!text) { saveReserve(null); return; }
+  var n = Number(text);
+  if (!(n >= 1 && n <= reserveTop && Math.floor(n) === n)) {
+    say("Rezervu lze nastavit na 1 až " + reserveTop + " GB (celé číslo), nebo automaticky.", true);
+    return;
+  }
+  saveReserve(n);
+});
+document.getElementById("reserve-auto").addEventListener("click", function () { reserveInput.value = ""; saveReserve(null); });
 
 var maxdays = document.getElementById("maxdays");
 for (var d = 1; d <= 14; d++) {
@@ -1458,7 +1550,7 @@ maxdays.addEventListener("change", function () {
     say("Nahrávky se uchovávají nejvýše " + maxdays.options[maxdays.selectedIndex].text + ".");
   }, function (e) {
     say("Nastavení se nepodařilo uložit: " + e.message, true);
-  }).then(function () { maxdays.disabled = false; return load(); });
+  }).then(function () { maxdays.disabled = false; load(); return loadStorage(true); });
 });
 
 var thumbs = document.getElementById("thumbs");
@@ -1853,7 +1945,7 @@ try {
 setInterval(function () {
   if (busy || pending !== null || editing !== null) return;
   if (!document.getElementById("channels").hidden) load();
-  else if (!document.getElementById("storage").hidden) loadStorage();
+  else if (!document.getElementById("storage").hidden) loadStorage(true);
 }, 60000);
 </script>
 </body>
