@@ -6,6 +6,9 @@ import SwiftUI
 struct LiveView: View {
     @Environment(AppModel.self) private var model
     @State private var onAir = ScheduleStore.OnAir()
+    /// When ČT's schedule last failed and was asked (T42); kept while hidden, so back on screen it asks when due.
+    @State private var retry = ScheduleRetry()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var antennaChannels: [DVBChannel] = []
     @State private var antennaOnAir: [String: DVBEvent] = [:]
     @State private var antennaError: String?
@@ -15,6 +18,8 @@ struct LiveView: View {
     private struct LoadKey: Equatable {
         let gateway: GatewayConfig?
         let reloads: Int
+        /// Live in front, no player over it (T42: no asking behind the player or in the background).
+        let visible: Bool
     }
 
     var body: some View {
@@ -74,12 +79,20 @@ struct LiveView: View {
         }
         // "Is it on now?" of the Chamber's streams shown here, only while this screen is on screen.
         .watchesParliament(channels.compactMap(\.parliamentStream))
-        .task(id: LoadKey(gateway: model.gateway, reloads: model.gatewayReloads)) {
-            // Schedules are cached, so this only hits the network when today's plan is stale.
+        .task(id: LoadKey(gateway: model.gateway, reloads: model.gatewayReloads,
+                          visible: scenePhase == .active && model.session == nil)) {
+            // Schedules are cached, so this only hits the network when today's plan is stale or failed. A failed
+            // ČT day is asked again after 30 s, after 5 minutes every 2 min (spec/apps.md T42, ScheduleRetry), and
+            // only while Živě is visible: not behind the player, not in the background.
+            guard scenePhase == .active, model.session == nil else { return }
+            if retry.failing, let wait = retry.delay(now: Date()), wait > 0 {
+                do { try await Task.sleep(for: .seconds(wait)) } catch { return }  // back on screen before it is due
+            }
             while !Task.isCancelled {
                 onAir = await model.schedules.onAirNow(at: Date())
                 await loadAntenna()
-                try? await Task.sleep(for: .seconds(60))
+                retry.record(failed: !onAir.failed.isEmpty, at: Date())
+                do { try await Task.sleep(for: .seconds(retry.liveWait(now: Date()))) } catch { return }
             }
         }
     }

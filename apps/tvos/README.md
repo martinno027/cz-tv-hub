@@ -50,6 +50,9 @@ Ladicí parametry (jen v Debug buildu), např. `xcrun simctl launch booted cz.cz
 - `-breakURLs first` / `-breakURLs all` – nasimuluje vypršelý odkaz (test opakovaného načtení / chybové hlášky)
 - `-liveScroll psp` – v Živě odroluje na první přenos Poslanecké sněmovny (pro snímky obrazovky; stav přenosů se
   zjišťuje doopravdy, ukázková data tu nejsou)
+- `-failSchedule YES` – každý dotaz na program ČT selže (bez odeslání): „Program se nepodařilo načíst“ v průvodci
+  a v Živě; `-failScheduleSeconds 70` – selhává jen prvních 70 s po spuštění, pak přijde vymyšlený
+  program („Ukázkový pořad“, bez dotazu na ČT) sám, bez znovuotevření (opakovaný dotaz každých 30 s, T42)
 
 ## Anténa (DVB-T2)
 
