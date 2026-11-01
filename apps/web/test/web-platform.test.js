@@ -40,7 +40,7 @@ const KEY = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcd'; // 42, URL-safe base64
 test('Samsung defaults keep the TV paths (nothing replaced)', () => {
   assert.equal(samsung.name, 'tizen');
   for (const k of ['playerBackend', 'refusePlay', 'playErrorAction', 'keyName', 'officialApp', 'gatewayAddress',
-    'fitStage', 'onGatewayConfig']) assert.equal(samsung[k], null, k);
+    'fitStage', 'onGatewayConfig', 'playerHint']) assert.equal(samsung[k], null, k);
   assert.equal(samsung.startOnLoad, true);
   assert.equal(samsung.versionSuffix, '');
   assert.equal(samsung.sourceAllowed('psp'), true);

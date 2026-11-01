@@ -7,7 +7,7 @@ const WEB = path.join(__dirname, '..');
 const APP = path.join(WEB, '..', 'tizen', 'app');
 const samsung = require(path.join(WEB, '..', 'tizen', 'test', 'load.js'));
 
-['web-ct', 'web-player', 'web-input', 'web-stage', 'web-gateway', 'web-demo'].forEach((name) => {
+['web-ct', 'web-player', 'web-focus', 'web-scroll', 'web-history', 'web-fullscreen', 'web-input', 'web-stage', 'web-gateway', 'web-demo', 'web-page'].forEach((name) => {
   require(path.join(WEB, 'js', name + '.js'));
 });
 

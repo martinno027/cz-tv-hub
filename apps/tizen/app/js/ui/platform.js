@@ -24,6 +24,8 @@
     refusePlay: null,
     /** function (request, error) → {label, run} offered under a player error, or null. */
     playErrorAction: null,
+    /** function (kind, player) → the player's key hint ('live' | 'other' | 'timeline'), or null = the TV's own. */
+    playerHint: null,
     /** function (event, codes) → key name or null; null = the remote's codes (keys.js). */
     keyName: null,
     /** function () that opens the official app ("Otevřít v iVysílání"); null = not offered (Samsung). */

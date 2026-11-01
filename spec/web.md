@@ -30,11 +30,22 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
   codecs="hvc1.1.6.L120.90"')` (hls.js) or `video.canPlayType(...)` (native). When the browser cannot decode it, the
   player shows "Tento prohlížeč neumí přehrát vysílání z antény (H.265). Zkuste Safari, nebo Chrome či Edge na
   počítači s podporou HEVC." instead of a black picture. ČT and Poslanecká sněmovna are H.264 and not affected.
-- **Input**: keyboard as the TV remote (arrows, Enter = OK, Esc/Backspace = Back, digits = channel numbers,
-  Space = play/pause, long Enter = long OK) **and** mouse/touch: pointing at a focusable element focuses it, a
-  click/tap is OK on it, a long press is long OK, the mouse wheel / swipe scrolls lists and the guide grid, a
-  visible **‹ Zpět** button top left does Back (needed on touch screens). The player shows its bar on mouse move /
-  tap; dragging the bar seeks.
+- **Input (T29, owner 2026-11-01: "ovládat jako klasický web")**: the mouse works as on any web page, not as a
+  remote: hovering only highlights (no focus jump, no scrolling of the page by hover); **one click acts** (opens a
+  programme, switches a day chip or tab, presses a button, plays a card); the wheel / trackpad / touch scroll the
+  lists and the guide grid natively (horizontally too) without moving a focus; the keyboard focus (arrows, Enter,
+  Esc/Backspace, digits, Space) is shown only while the keyboard is used and disappears on the first mouse action, so
+  a click never leaves a second highlighted item (e.g. a white day chip next to the selected "Dnes").
+  **Back = the browser's Back** (history: the programme page, a Nastavení section, the Archiv sub-menu, the player
+  are history entries; the browser's Back/Forward and Alt+← work); the separate black "‹ Zpět" strip is removed.
+  Where a screen needs a visible way back on touch, it is a "‹ Zpět" link **inside that screen's own header** (the
+  programme page, a Nastavení section, the player bar), never over content. Long press (touch) / right click = long OK.
+  In the guide the detail panel shows the programme under the mouse pointer once it rests there ~0.2 s (no focus
+  change, no scrolling); when the pointer leaves the grid it shows the focused (last clicked) programme again; not
+  on touch (no hover).
+- **Fullscreen**: a **"Celá obrazovka"** button (icon ⛶) at the right end of the tab bar and in the player bar,
+  the key **F**, and a double click on the video; uses the browser's Fullscreen API on the whole page (the player
+  keeps its bar); "Ukončit celou obrazovku" / Esc leaves it. Hidden where the browser has no Fullscreen API (iPhone).
 - **Layout**: the TV layout (1920 × 1080) scaled to the window, kept 16:9, centred (letterboxed). On a phone held
   upright: "Otočte telefon na šířku." over the page (v1; a separate narrow layout is not part of T27).
 - **No download**: no download button, no saving or export anywhere in the web layer; media only through the

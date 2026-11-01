@@ -276,6 +276,7 @@
     this.errorAction = null; // {label, run} under the error shown now (CT.Platform.playErrorAction), OK runs it
     var cb = {
       onReady: function () {
+        self.showHint(self.hintKind); // the platform's hint may depend on the stream (the web: its audio tracks)
         self.hideMessage();
         self.showOsd();
         self.startBreaks();
@@ -301,6 +302,14 @@
     setInterval(function () { self.saveProgress(); }, RESUME_SAVE_MS);
   }
 
+  /** The key hint under the bar: 'live' | 'other' | 'timeline'; the platform may word it (CT.Platform.playerHint). */
+  Player.prototype.showHint = function (kind) {
+    var own = { live: HINT_LIVE, other: HINT_OTHER, timeline: HINT_TIMELINE }[kind];
+    var hook = CT.Platform.playerHint;
+    this.hintKind = kind;
+    $('osd-hint').textContent = (hook ? hook(kind, this) : null) || own;
+  };
+
   Player.prototype.isOpen = function () {
     return this.request !== null;
   };
@@ -311,7 +320,7 @@
     this.timelineAt = null;
     // Zapping uses the list of the moment the player opened (a settings change applies next time).
     this.zapList = isLive(request) ? this.app.channelList(this.app.dvbChannels) : [];
-    $('osd-hint').textContent = isLive(request) ? HINT_LIVE : HINT_OTHER;
+    this.showHint(isLive(request) ? 'live' : 'other');
     $('player').classList.remove('hidden');
     this.updateTitle();
     this.load(false, null);
@@ -481,7 +490,7 @@
     }
     if (target.kind === 'timeline') {
       if (!this.tl) this.tl = new CT.TimelineController(this);
-      $('osd-hint').textContent = HINT_TIMELINE;
+      this.showHint('timeline');
     } else if (this.tl) {
       this.tl.stop();
       this.tl = null;

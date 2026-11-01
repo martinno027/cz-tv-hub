@@ -70,7 +70,7 @@
     return true;
   };
   P.fitStage = function (stage) {
-    CT.WebStage.apply(stage, $('web-rotate'), root, $('web-strip'));
+    CT.WebStage.apply(stage, $('web-rotate'), root);
   };
   P.onGatewayConfig = function (config) {
     doc.body.classList.toggle('web-nokey', !config);
@@ -88,9 +88,6 @@
 
   /** The Samsung markup → the web's: what only the web has, and Nastavení → Server without the address. */
   function adaptPage() {
-    var strip = el('div', 'web-strip');
-    strip.appendChild(el('div', 'web-back', 'button'));
-    doc.body.insertBefore(strip, $('stage'));
     doc.body.appendChild(el('div', 'web-rotate', '', CT.WebStage.ROTATE_TEXT));
     doc.querySelector('main').appendChild(el('div', 'web-nokey', '', CT.WebCt.NO_KEY));
 
@@ -121,8 +118,9 @@
   /** Called by boot.js after the last script: the page, the input, then the app (as Samsung's `load`). */
   function ready() {
     adaptPage();
-    CT.WebInput.install(doc, CT.App, { back: $('web-back') });
+    CT.WebPage.adapt(doc, root); // T29: Zpět links, fullscreen buttons
     CT.App.start();
+    CT.WebPage.wire(doc, root, CT.App); // T29: input, history, fullscreen
     root.addEventListener('orientationchange', function () { CT.App.fitStage(); });
   }
 

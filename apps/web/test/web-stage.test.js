@@ -47,19 +47,15 @@ test('apply: stage transform and the overlay', () => {
   assert.equal(stage.style.transform, 'translate(0px, 0px) scale(1)');
 });
 
-test('"‹ Zpět" strip: the stage fits below it, so the button never covers the TV layout', () => {
-  assert.equal(S.stripHeight(900), 52);
-  assert.equal(S.stripHeight(390), 40); // a phone on its side
-  const f = S.fit(1440, 900, 52);
-  assert.equal(f.scale, Math.min(1440 / 1920, 848 / 1080));
-  assert.ok(f.y >= 52, 'stage starts below the strip: ' + f.y);
-  assert.ok(f.y + 1080 * f.scale <= 900 + 0.5);
-  const wide = S.fit(1920, 1080, 52); // a 16:9 window: smaller, centred left/right, under the strip
-  assert.equal(wide.y, 52);
-  assert.equal(wide.x, Math.round((1920 - 1920 * (1028 / 1080)) / 2));
-  const strip = { style: {} };
+test('no strip (T29): the stage uses the whole window, and the fit is kept for the input (scale)', () => {
+  assert.equal(S.stripHeight, undefined);
+  assert.deepEqual(S.fit(1920, 1080), { scale: 1, x: 0, y: 0 });
+  const owner = S.fit(2000, 1200); // the owner's Chrome window (16:10)
+  assert.equal(owner.scale, 2000 / 1920);
+  assert.equal(owner.x, 0);
+  assert.equal(owner.y, Math.round((1200 - 1080 * 2000 / 1920) / 2));
   const stage = { style: {} };
-  S.apply(stage, null, { innerWidth: 1440, innerHeight: 900 }, strip);
-  assert.equal(strip.style.height, '52px');
-  assert.equal(stage.style.transform, S.transform(S.fit(1440, 900, 52)));
+  S.apply(stage, null, { innerWidth: 2000, innerHeight: 1200 });
+  assert.deepEqual(S.last, owner);
+  assert.equal(stage.style.transform, S.transform(owner));
 });
