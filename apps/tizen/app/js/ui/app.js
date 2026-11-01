@@ -89,7 +89,8 @@
         fetch: function (request) { return self.fetchImage(request); },
         revoke: function (url) { root.URL.revokeObjectURL(url); }
       });
-      this.api = new CT.CtApi(this.transport);
+      // The web asks the gateway instead of CT (spec/web.md "ČT on the web"); Samsung uses the transport as is.
+      this.api = new CT.CtApi(CT.Platform.ctTransport(this.transport, function () { return self.dvbConfig; }));
       this.schedules = new CT.ScheduleRepository(this.api);
       this.live = new CT.LiveResolver(this.api);
       // Poslanecká sněmovna: only the playlist URL, no headers and no cookie (a plain GET without credentials).
@@ -248,6 +249,7 @@
 
     /** The UI is laid out for 1920×1080 (the TV); a desktop browser window scales it to fit. */
     fitStage: function () {
+      if (CT.Platform.fitStage) return CT.Platform.fitStage($('stage'));
       var scale = Math.min(root.innerWidth / 1920, root.innerHeight / 1080);
       $('stage').style.transform = root.tizen || Math.abs(scale - 1) < 0.01 ? '' : 'scale(' + scale + ')';
     },
@@ -281,6 +283,7 @@
       this.dvbChannels = [];
       this.dvbState = config ? { channels: [], onAir: {}, error: null } : null;
       this.dvbThumbs = false;
+      if (CT.Platform.onGatewayConfig) CT.Platform.onGatewayConfig(config);
       this.images.clear('gw');
       this.screens.archive.reset();
       this.checkThumbs();
@@ -381,6 +384,7 @@
 
     /** A whole source ('ct' Internetová TV, 'dvb' Anténa, 'psp' Poslanecká sněmovna) is on; Anténa also needs a gateway. */
     sourceOn: function (source) {
+      if (!CT.Platform.sourceAllowed(source)) return false;
       if (source === 'dvb' && !this.dvbConfig) return false;
       return !CT.ChannelPrefs.isSourceOff(this.channelPrefs, source);
     },
@@ -616,5 +620,5 @@
   };
 
   CT.App = App;
-  root.addEventListener('load', function () { App.start(); });
+  if (CT.Platform.startOnLoad) root.addEventListener('load', function () { App.start(); });
 })(window);

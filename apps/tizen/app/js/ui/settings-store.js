@@ -37,8 +37,9 @@
     config: function () {
       var s = CT.SettingsStore.load();
       if (!s) return null;
+      var fixed = CT.Platform && CT.Platform.gatewayAddress; // the web: always the page's own gateway
       try {
-        return CT.DvbConfig.fromSettings(s.address, s.key);
+        return CT.DvbConfig.fromSettings(fixed ? fixed() : s.address, s.key);
       } catch (e) {
         return null;
       }

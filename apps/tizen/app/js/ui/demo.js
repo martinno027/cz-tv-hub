@@ -23,7 +23,7 @@
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
-  var FIXTURES = '../../../spec/fixtures/';
+  var FIXTURES = CT.Platform ? CT.Platform.fixturesBase : '../../../spec/fixtures/';
   var CT_DAY = '2026-10-16';
   var DVB_DAY = '2026-10-18';
   var DAY_MS = 24 * 3600 * 1000;
