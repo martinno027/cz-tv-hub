@@ -23,7 +23,8 @@ class GatewayTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        cfg = Config(dvb=DvbConfig(enabled=True, key=KEY, retention_days=3, hls_dir=Path(self.tmp.name)))
+        cfg = Config(dvb=DvbConfig(enabled=True, key=KEY, retention_days=3, hls_dir=Path(self.tmp.name),
+                                   state_dir=Path(self.tmp.name) / "state"))  # never /var/lib/cztvhub
         self.client = FakeClient()
         self.hls = HlsManager(Path(self.tmp.name), idle_seconds=30, log=lambda m: None)
         self.addCleanup(self.hls.shutdown)
@@ -222,7 +223,7 @@ class ServerRoutingTest(unittest.TestCase):
     def test_gateway_through_http(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        cfg = Config(dvb=DvbConfig(enabled=True, key=KEY, hls_dir=Path(tmp.name)))
+        cfg = Config(dvb=DvbConfig(enabled=True, key=KEY, hls_dir=Path(tmp.name), state_dir=Path(tmp.name) / "state"))
         gw = DvbGateway(cfg, client=FakeClient(), now=lambda: NOW, log=lambda m: None)
         server = self.serve(gw)
         self.assertEqual(self.request(server, "/dvb/status")[0].status, 401)

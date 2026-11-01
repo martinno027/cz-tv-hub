@@ -126,13 +126,13 @@ class CtWeb:
             if channel not in BY_ID:
                 raise CtWebError(404, "Neznámý kanál ČT")
             self._home_only(client)
-            return self._stream(f"live {channel}", ct_api.LIVE_URL.format(channel=channel))
+            return self._stream("live", ct_api.LIVE_URL.format(channel=channel))  # the log names no channel
         if m := VOD_RE.match(path):
             idec = m.group(1)
             if not IDEC_RE.match(idec):
                 raise CtWebError(400, "Neplatný idec")
             self._home_only(client)
-            return self._stream(f"vod {idec}", ct_api.VOD_URL.format(idec=idec))
+            return self._stream("vod", ct_api.VOD_URL.format(idec=idec))  # nor the programme
         if path == SCHEDULE_PATH:
             return self._schedule(query.get("channels"), query.get("date"))
         return None

@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from .. import logsafe
+
 PLAYLIST = "index.m3u8"
 INIT = "init.mp4"
 SEGMENT_PATTERN = "seg_%05d.m4s"
@@ -437,7 +439,7 @@ class HlsManager:
     def reap(self) -> None:
         for session in self.sessions():
             if session.idle_for() > self.idle_seconds:
-                self.log(f"hls: session {session.key} idle, removing")
+                self.log(f"hls: {logsafe.session_kind(session.key)} idle, removing")
                 self._remove(session)
             elif session.process is not None and not session.usable():
                 self._remove(session)

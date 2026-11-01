@@ -303,10 +303,11 @@ class AdminHttpTest(unittest.TestCase):
     def test_routes_to_admin(self):
         class Site:
             def __init__(self):
-                self.seen = []
+                self.seen, self.clients = [], []
 
-            def handle(self, method, path, headers, body, query=None):
+            def handle(self, method, path, headers, body, query=None, client=""):
                 self.seen.append((method, path, body, query))
+                self.clients.append(client)
                 from cztvhub.dvb.gateway import json_response
                 return json_response(200, {})
 
@@ -317,6 +318,7 @@ class AdminHttpTest(unittest.TestCase):
         self.assertEqual(self.call(port, "POST", "/admin/api/channels/x?y=1", body=b'{"offered": true}')[0], 200)
         self.assertEqual(site.seen, [("GET", "/admin", b"", {}), ("GET", "/admin/api/tmdb", b"", {"page": "2"}),
                                      ("POST", "/admin/api/channels/x", b'{"offered": true}', {})])
+        self.assertEqual(site.clients, ["127.0.0.1"] * 3)  # the peer, for the sign-in log's "sessions ended"
 
 
 if __name__ == "__main__":

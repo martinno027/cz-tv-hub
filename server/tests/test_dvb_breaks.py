@@ -110,7 +110,7 @@ class GatewayBreaksTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
-        cfg = Config(dvb=DvbConfig(enabled=True, key=KEY, hls_dir=root / "hls"),
+        cfg = Config(dvb=DvbConfig(enabled=True, key=KEY, hls_dir=root / "hls", state_dir=root / "state"),
                      ads=AdsConfig(enabled=True, channels=["ČT1 HD"], worker_key=WORKER_KEY,
                                    breaks_dir=root / "breaks"))
         self.client = TwoRecordingsClient()

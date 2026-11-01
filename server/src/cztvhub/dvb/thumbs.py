@@ -14,6 +14,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable
 
+from .. import logsafe
 from .tvheadend import DvrEntry, TvheadendClient, TvhError
 
 MAX_WIDTH = 480
@@ -199,7 +200,7 @@ class Thumbnails:
         try:
             result = self.run(cmd, input=data, capture_output=True, timeout=TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            self.log(f"dvb: thumbnail: ffmpeg: {exc}")
+            self.log(f"dvb: thumbnail: ffmpeg: {logsafe.scrub(str(exc))}")
             return None
         out = getattr(result, "stdout", b"") or b""
         return out if getattr(result, "returncode", 1) == 0 and out.startswith(JPEG_SOI) else None
@@ -208,7 +209,7 @@ class Thumbnails:
         try:
             response = self.client.open_recording(dvr_uuid, offset)
         except TvhError as exc:
-            self.log(f"dvb: thumbnail {dvr_uuid}: {exc}")
+            self.log(f"dvb: thumbnail: {logsafe.scrub(str(exc))}")
             return None
         try:
             if offset and getattr(response, "status", 206) == 200:
@@ -230,7 +231,7 @@ class Thumbnails:
             result = self.run(ffmpeg_command(self.ffmpeg), input=b"".join(chunks), capture_output=True,
                               timeout=TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            self.log(f"dvb: thumbnail {dvr_uuid}: ffmpeg: {exc}")
+            self.log(f"dvb: thumbnail: ffmpeg: {logsafe.scrub(str(exc))}")
             return None
         out = getattr(result, "stdout", b"") or b""
         return out if getattr(result, "returncode", 1) == 0 and out.startswith(JPEG_SOI) else None
