@@ -261,11 +261,15 @@ public struct DVBClient: Sendable {
     public let config: GatewayConfig
     private let transport: HTTPTransport
     private let timeout: TimeInterval
+    /// `X-Cztvhub-Client` (`ClientHeader.value`), put only on the requests `ClientHeader.applies` names; nil = never.
+    public let clientHeader: String?
 
-    public init(config: GatewayConfig, transport: HTTPTransport = URLSessionTransport(), timeout: TimeInterval = 10) {
+    public init(config: GatewayConfig, transport: HTTPTransport = URLSessionTransport(), timeout: TimeInterval = 10,
+                clientHeader: String? = nil) {
         self.config = config
         self.transport = transport
         self.timeout = timeout
+        self.clientHeader = clientHeader
     }
 
     public func status() async throws -> DVBStatus {
@@ -335,6 +339,9 @@ public struct DVBClient: Sendable {
         for (field, value) in config.authorizationHeaders { request.setValue(value, forHTTPHeaderField: field) }
         for (field, value) in headers { request.setValue(value, forHTTPHeaderField: field) }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let clientHeader, ClientHeader.applies(method: method, path: url.path) {
+            request.setValue(clientHeader, forHTTPHeaderField: ClientHeader.field)
+        }
         do {
             return try await transport.send(request)
         } catch is CancellationError {

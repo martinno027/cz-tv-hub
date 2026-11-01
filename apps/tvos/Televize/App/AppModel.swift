@@ -292,7 +292,8 @@ final class AppModel {
             return BridgeWatchTransport(inner) { Task { @MainActor in await tailnet.checkBridge() } }
         }
         // Odebrat bránu while signed in signs out locally first (spec/apps.md "Profil").
-        let client = config.map { DVBClient(config: $0, transport: watched(URLSessionTransport.memoryOnly())) }
+        let client = config.map { DVBClient(config: $0, transport: watched(URLSessionTransport.memoryOnly()),
+                                                   clientHeader: BuildInfo.clientHeader) }
         profile.setAPI(client)
         // The household default belongs to the gateway as saved, not to the bridge's port (new on every start).
         household.setAPI(client, gateway: savedGateway?.baseURL)

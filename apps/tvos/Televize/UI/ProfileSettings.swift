@@ -85,6 +85,9 @@ struct ProfileSettingsSection: View {
             if let errorText {
                 Text(errorText).font(.callout)
             }
+            Text(ClientHeader.note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

@@ -141,6 +141,10 @@ struct ServerSettingsSection: View {
                 if let statusText {
                     Text(statusText).font(.callout)
                 }
+                // Also for TVs without a profile (spec/apps.md "Sign-in note (T37)").
+                Text(ClientHeader.note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if model.savedGateway != nil, model.images.gatewayAllows {
                     @Bindable var images = model.images
@@ -208,7 +212,7 @@ struct ServerSettingsSection: View {
             if model.tailnet.enabled, await model.tailnet.start(target: TailnetRules.target(address: address)) {
                 await model.tailnet.waitUntilRunning()
             }
-            let status = try await DVBClient(config: model.effectiveGateway(config)!).status()
+            let status = try await DVBClient(config: model.effectiveGateway(config)!, clientHeader: BuildInfo.clientHeader).status()
             model.setGateway(config)
             await model.images.refreshStatus(force: true)
             let tuners = status.tuners.count
@@ -231,6 +235,10 @@ enum BuildInfo {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         return "Verze \(version) (build \(BuildStamp.number) · \(BuildStamp.commit) · \(BuildStamp.time))"
     }
+
+    /// `X-Cztvhub-Client` for the gateway's sign-in log: "tvos/1.0 (123)", the build as in the version line.
+    static let clientHeader = ClientHeader.value(
+        version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "", build: BuildStamp.number)
 }
 
 /// "Připojovat přes Tailscale" in Nastavení → Server (spec/apps.md "Tailscale v aplikaci"): the switch, the node's status,
