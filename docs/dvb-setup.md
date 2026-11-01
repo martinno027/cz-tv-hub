@@ -252,6 +252,35 @@ vidět původní název z vysílání. Máte-li v konfiguraci `record_channels` 
 `[ads] channels` vypsané názvy kanálů, upravte je na nové.
 Stejně se chová kanál vypnutý ručně v TVHeadendu (*Enabled*).
 
+### Aktualizace z /admin
+
+Raspberry se dá aktualizovat na nejnovější vydání (větev `main`) z prohlížeče: záložka **Aktualizace** na `/admin`,
+tlačítko **Aktualizovat Raspberry** a potvrzení. Udělá přesně totéž co ruční aktualizace
+
+```bash
+cd ~/cz-tv-hub && git pull --ff-only origin main && bash server/deploy/install.sh
+```
+
+a nic jiného – z prohlížeče nejde zvolit žádný příkaz, větev ani cestu. Služba se při tom restartuje (televize se
+na pár sekund odpojí), stránka ukazuje „Probíhá aktualizace…“ a po dokončení se sama načte znovu. Když nic nového
+není, ukáže „nic nového“ a služba se nerestartuje. Nahoře je vidět, jaká verze (commit) běží.
+
+**Poprvé** je potřeba jednou spustit `bash server/deploy/install.sh` ručně (jako obvykle, z klonu, jako váš běžný
+uživatel se sudo). Skript nainstaluje dvě systemd jednotky, `cztvhub-update.path` a `cztvhub-update.service`, se
+zapsanou cestou ke klonu a jeho vlastníkem. Do té doby záložka píše „Aktualizace z prohlížeče není nainstalovaná“.
+Kontrola: `systemctl status cztvhub-update.path` ukáže `active (waiting)`.
+
+Kdy se aktualizace zastaví (záložka ukáže krok a konec výpisu, celý výpis je v
+`journalctl -u cztvhub-update`):
+- **kontrola klonu**: klon není na větvi `main` (`git switch main`) nebo v něm jsou ručně upravené soubory
+  (`git status`; změny uložte, `git stash`, nebo vraťte `git checkout -- <soubor>`),
+- **git pull**: větev se rozešla s GitHubem (místní commit) – srovnejte ručně; nebo nejde internet,
+- **install.sh**: instalace selhala (např. služba se po restartu neozvala); Raspberry běží dál s tím, co se stihlo
+  nainstalovat, a další stisk instalaci zkusí znovu,
+- **časový limit 10 minut**.
+
+Aktualizaci může spustit jen ten, kdo zná heslo `/admin`. Tlačítko nainstaluje to, co je právě na `main` na GitHubu.
+
 ## 5. Vzdálený přístup: jen vaše domácnost přes Tailscale
 
 - Port 8098 **nikdy nepřesměrovávejte na routeru** a nepoužívejte Tailscale Funnel ani sdílení zařízení

@@ -70,17 +70,46 @@ Prints the playlist the server would serve, for checking the channel list.
 `install.sh` copies the code to `/opt/cztvhub` and the household web app to `/opt/cztvhub/web`
 (`deploy/stage_web.py`, below), installs the systemd unit and restarts the service; an existing
 `/etc/cztvhub/cztvhub.conf` is kept. `install-dvb.sh` also installs TVHeadend (project repository), ffmpeg and
-avahi and creates the config with DVB enabled. Update: `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`.
+avahi and creates the config with DVB enabled. Update: `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`,
+or the button on `/admin` (`update.sh`, below). `install.sh` also installs `cztvhub-update.path` +
+`cztvhub-update.service` (rendered from `deploy/cztvhub-update.service.in` with the clone's absolute path and owner;
+only for a git clone whose path is `/[A-Za-z0-9._/-]+`, else it prints "update from /admin: not installed (…)") and
+writes `/opt/cztvhub/install.json` (the commit, once the service answers). Run as root (by the update) it sets git's
+`safe.directory` for the clone.
 
 After the restart `install.sh` waits up to 30 s for `/health` (`server/deploy/health.sh`; the service first loads
 the index of the continuous recording, which grows with every recorded day) and prints "running on port … (ready
 after N s)"; if it never answers, it prints the service state and its log since the restart and exits non-zero.
-Tests: `bash server/deploy/health.test.sh` (fake curl/systemctl, no Pi).
+Tests: `bash server/deploy/health.test.sh` (fake curl/systemctl, no Pi); the unit files and what `install.sh` does
+with them: `server/tests/test_dvb_update.py` (text checks: `install.sh` itself is not run in a test).
 
 Can go wrong: `install-dvb.sh` asks for a TVHeadend admin name and password (interactive); TVHeadend must listen on
 127.0.0.1 only — the script checks it and warns. Before T07 the check waited only 1 s and reported `curl: (7) Failed
 to connect` for a service that was fine a moment later. "web: not installed" means `apps/web/index.html` is missing in
 the clone (or staging failed, its reason is printed above); the old `/opt/cztvhub/web` then stays.
+
+</details>
+
+<details>
+<summary><code>server/deploy/update.sh</code> — the update from <code>/admin</code> (T33; run by systemd, not by hand)</summary>
+
+Run only by `cztvhub-update.service` (root) when the gateway writes `/var/lib/cztvhub/update-request` (button
+„Aktualizovat Raspberry" on `/admin`, contract in `spec/dvb-gateway.md`). Steps: *check* (clone on `main`, no changes
+to tracked files), *pull* (`git pull --ff-only origin main` as the clone's owner), *install* (`bash
+server/deploy/install.sh` as root; skipped when nothing new and that commit was installed successfully). Writes
+`/var/lib/cztvhub/update-status.json` as user `cztvhub` at the start and end; all steps together 10 minutes; one at a
+time (`flock /run/cztvhub-update.lock`). By hand, to see it run: `sudo touch /var/lib/cztvhub/update-request` (the
+path unit starts it), then `journalctl -u cztvhub-update -f`. Tests: `bash server/deploy/update.test.sh` (throwaway
+git repos, fake `install.sh` and `runuser`, perl stand-ins for `timeout`/`flock` on macOS; never the real Pi).
+
+Can go wrong: `/admin` says "není nainstalovaná" — `install.sh` was not run since T33, the clone is not a git clone
+or its path has spaces/special characters, or `[dvb] state_dir` is not `/var/lib/cztvhub` (the path unit watches
+only that). Failed at *check*: local edits or another branch in the clone. Failed at *pull*: a local commit (not a
+fast-forward) or no network; git's own text is in the status. Failed at *install*: whatever `install.sh` printed
+(e.g. the service did not answer within 30 s); the next press installs again. A run killed by the unit's 15-minute
+backstop leaves "running"; after 20 minutes `/admin` treats it as unfinished and allows a new one. Running
+`update.sh` by hand without `CZTVHUB_REPO`/`CZTVHUB_OWNER` exits 2. Whoever can push to `main` decides what root
+runs on the Pi on the next press, exactly as with a manual pull.
 
 </details>
 
@@ -94,8 +123,9 @@ symlinks, dot files, `local-config.js` (a Samsung build's key preset), `test`/`t
 `install.sh` runs it as the normal user (git) into a temporary directory and swaps the result into
 `/opt/cztvhub/web`. Exit code 3 = no `apps/web/index.html`. Tests: `server/tests/test_deploy_web.py`.
 
-Can go wrong: run under `sudo` in the user's clone, git refuses the repository ("dubious ownership") and the version
-line shows `?`.
+Can go wrong: run by hand under `sudo` in the user's clone, git refuses the repository ("dubious ownership") and the
+version line shows `?` (`install.sh` sets `safe.directory` for the clone, also when the update from `/admin` runs it
+as root).
 
 </details>
 
@@ -236,8 +266,8 @@ alone; a local `main` follows only when it is not checked out. `--dry-run` stops
 the owner's go-ahead with the double approval naming `main` (`/release`). Tests:
 `./scripts/merge-dev-main.test.sh` (throwaway repos and a fake `gh`, never the real remote).
 
-What it does not do: deploy. The Pi updates only with `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`,
-the TV apps only when rebuilt from `main`.
+What it does not do: deploy. The Pi updates only with `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`
+or the button on `/admin` (`update.sh`), the TV apps only when rebuilt from `main`.
 
 Can go wrong: it moves production — what the Pi gets on its next `git pull`. A change to `server/deploy/` or the
 config format is not undone by going back to an older release (what `install.sh` set up on the Pi and the edited

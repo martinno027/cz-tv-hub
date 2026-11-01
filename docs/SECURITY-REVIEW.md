@@ -21,6 +21,18 @@ of "done".
 - The worker key reaches only the worker routes. *Wrong:* the worker key can list channels or play live.
 - `/admin` requires its own password; state-changing requests require the `X-Cztvhub-Admin` header and a same-origin
   `Origin`. *Wrong:* a POST that works from a foreign page, or the admin password equal to the app key.
+- The update from `/admin` (T33, `dvb/update.py`, `deploy/update.sh`): **who** — only a logged-in admin (password,
+  `X-Cztvhub-Admin`, same origin) can request it; the app key, the cookie and the worker key cannot. **What runs** —
+  the gateway only creates `<state dir>/update-request`; root runs the fixed `server/deploy/update.sh` of the clone
+  baked into `cztvhub-update.service` by `install.sh`: branch/changes check and `git pull --ff-only origin main` as
+  the clone's owner, then `install.sh`. **What cannot be chosen** — no command, branch, remote, argument or path
+  comes from the request (the body and the request file's content are ignored); root reads nothing the gateway user
+  wrote and writes nothing into its directory (the status goes through `runuser -u cztvhub`, the lock is in `/run`).
+  The status file holds commit hashes and the step's output, no secrets. *Wrong:* a request field that reaches the
+  script, root writing `update-status.json` (a planted symlink becomes a root write anywhere), the gateway user able
+  to write the clone or the units, the update units installed with `User=cztvhub` able to run `install.sh`, a pull of
+  anything but `origin main`. Accepted: whoever can push to `main` on GitHub decides what root runs on the next
+  press (as with the manual `git pull && install.sh`), and the admin password now also means "deploy `main` now".
 - Profiles (`/dvb/profile*`) need the app key as a header (not the cookie) plus a valid session token; deleting a
   profile or setting a new password on `/admin` ends all its sessions; unknown name and wrong password answer the same
   text after the same work; 5 failures per name lock it for a minute. *Wrong:* a profile call that works with the
@@ -109,10 +121,13 @@ of "done".
 - Input from TVHeadend, CT and the apps is parsed defensively; sizes are capped (request bodies, thumbnail reads,
   bulk admin requests, profile documents 64 KB, 20 profiles, 10 sessions each; JSON with NaN, lone surrogates or deep
   nesting is refused). *Wrong:* an unbounded read or a crash on an unexpected field.
-- Irreversible admin actions are logged (who/what/result). *Wrong:* recordings deleted without a log line.
+- Irreversible admin actions are logged (who/what/result). *Wrong:* recordings deleted without a log line, an
+  update requested from `/admin` without `admin: update requested` (its result is in `journalctl -u cztvhub-update`
+  and `update-status.json`).
 
 ## Runs
 
 | Date | Task | Scope | Findings |
 | ---- | ---- | ----- | -------- |
 | 2026-10-24 | T05 | Channel timeline (`/dvb/timeline`, views, apps' timeline players) | Key required (401), worker key 403/404, media outside the window 404, no playlist over a whole recording; open timeline views capped at 4 per channel; view keys were never pruned (fixed); apps accept the JSON's playlist only as a gateway path (added to the checklist). |
+| 2026-11-01 | T33 | `/admin` (Access), the update from `/admin`, "Irreversible admin actions are logged" | Admin auth, header and same origin cover `POST /admin/api/update` (tests, mutations); requests and refusals logged. Found while building: `git pull --ff-only` alone does not stop on non-conflicting local edits or on another branch (it fast-forwards that branch to `main`): explicit check step; the status written by root into the gateway user's directory would have been a symlink-write primitive: written as `cztvhub` instead. Item added under Access. |

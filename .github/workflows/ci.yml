@@ -19,6 +19,7 @@ jobs:
       - run: python3 -m unittest discover -s tools
       - run: shellcheck -x scripts/*.sh scripts/lib/*.sh server/deploy/*.sh
       - run: bash server/deploy/health.test.sh
+      - run: bash server/deploy/update.test.sh  # T33: the fixed update script (temp git repos, fake install.sh)
       - run: ./scripts/merge-dev-main.test.sh
 
   server:

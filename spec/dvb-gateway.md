@@ -253,6 +253,50 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   Select-all, the bulk buttons and "Zkrátit názvy" act only on visible channels; a filter change drops the selection
   of channels it hides.
 
+## Updating the Pi from `/admin` (T33, owner 2026-11-01: „tlačítko, které aktualizuje raspberry")
+- **What it runs, and only that** (`server/deploy/update.sh`): in the clone `install.sh` was run from, as that
+  clone's owner, (1) *check*: the clone is on branch `main` and has no changes to tracked files (`git pull --ff-only`
+  alone stops neither: a non-conflicting local edit is carried along, and on another branch `git pull origin main`
+  fast-forwards that branch to `main`), (2) *pull*: `git pull --ff-only origin main` (a diverged branch stops it with
+  git's reason), then (3) *install*: as root `bash server/deploy/install.sh` (which restarts the service). Step 3 is
+  skipped ("up-to-date", no restart) when the pull brought nothing and that commit is the last one installed
+  successfully. No other command, branch, argument or path can be chosen from the browser.
+- **How**: the gateway (unprivileged, `NoNewPrivileges`) never runs it. `POST /admin/api/update` (admin auth, the
+  `X-Cztvhub-Admin` header, same origin, as every admin action; body ignored) writes the request file
+  `<state dir>/update-request` (its content ignored) → `202 {"requested": true}`, logged `admin: update requested`;
+  `409` (logged `admin: update refused: …`) when the update is not installed, a run is going or a request is still
+  waiting; `500` when the file cannot be written. A systemd path unit `cztvhub-update.path`
+  (`PathExists=/var/lib/cztvhub/update-request`) starts the oneshot `cztvhub-update.service` (root; `install.sh`
+  renders it from `deploy/cztvhub-update.service.in` with the clone's absolute path and its owner baked in:
+  `CZTVHUB_REPO`, `CZTVHUB_OWNER`, `ExecStart=/bin/bash <clone>/server/deploy/update.sh`). The script deletes the
+  request at the start and at the end (a request while one runs is dropped), runs one at a time (`flock` on
+  `/run/cztvhub-update.lock`; a second run exits without touching the status), gives all steps together 10 minutes
+  (`timeout`; the unit's `TimeoutStartSec=15min` is only a backstop) and writes `<state dir>/update-status.json`
+  `{"state": "running" | "ok" | "failed" | "up-to-date", "started", "finished", "before", "after" (commit hashes),
+  "step": "check" | "pull" | "install" | "timeout" | null, "message" (the last 2 000 characters of the failing
+  step's output, else null)}` at the start and at the end. The script writes it as the service user (`runuser -u
+  cztvhub`, 0644), never as root into the service user's directory (a planted symlink must not make root write
+  elsewhere); the script, not the gateway, writes it, so it survives the restart. The full output goes to the
+  journal (`journalctl -u cztvhub-update`). Running as root in the owner's clone, `install.sh` sets git's
+  `safe.directory` for that clone only (else git refuses it and the web's version line is `?`).
+- `install.sh` writes `/opt/cztvhub/install.json` `{"commit", "installed"}` once the restarted service answers
+  (a failed install is therefore tried again by the next update); the gateway cannot run git itself (it runs a copy
+  in `/opt`, `ProtectHome`).
+- `GET /admin/api/update` → `{"installed": bool, "version": null | {"commit", "installed"}, "status": null |
+  {…as above, unknown values null / state "unknown", "stale": bool}, "requested": bool}`. `installed` = the path
+  unit exists and watches exactly `<state dir>/update-request` (a moved `[dvb] state_dir` is "not installed").
+  A `running` status older than 20 minutes (or without a start time) is `stale`: killed before it could write its
+  end; it no longer blocks a new request.
+- **`/admin`**: tab "Aktualizace": the installed commit (the version line), the last status (failed: step and the
+  output tail), the button **„Aktualizovat Raspberry"** with a confirmation, then "Probíhá aktualizace…" while polling
+  `GET /admin/api/update` every 3 s; once the service answers again after the run, the page reloads (and opens the
+  tab again). Without the path unit (an older install or a non-Pi dev setup) the tab says "Aktualizace z prohlížeče
+  není nainstalovaná – spusťte jednou `bash server/deploy/install.sh`." and has no button.
+- Security (SECURITY-REVIEW): only the admin password reaches it; the unit runs a fixed script from the repo itself;
+  `git pull` only from the configured `origin` and `main`; the gateway user can only create the request file (root
+  reads nothing it wrote). The status file holds no secrets. Whoever can push to `main` on GitHub decides what
+  root runs on the Pi — as with the manual `git pull && install.sh`, now one click away.
+
 ## Profiles (T08, `src/cztvhub/dvb/profiles.py`)
 A household member can keep the TV apps' settings in a **profile** on the Pi and load them on any TV by signing in
 with name + password. Only settings travel (channel order/hidden/sources and the other Nastavení switches, below),
