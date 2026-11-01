@@ -16,6 +16,8 @@ ExecStart=/usr/bin/python3 -m cztvhub serve --config /etc/cztvhub/cztvhub.conf
 Restart=always
 RestartSec=3
 # Temporary HLS (hls_dir); if you move hls_dir to the recordings disk, add that path here.
+# Also the update from /admin (T33): the gateway writes update-request here, cztvhub-update.path (root) reacts, and
+# deploy/update.sh writes update-status.json here as this user (0644). Owner cztvhub, mode 0755 (systemd default).
 StateDirectory=cztvhub
 ReadWritePaths=/var/lib/cztvhub
 # Continuous recording on the recordings disk ([dvb] buffer_dir, see docs/dvb-setup.md); '-' = may not exist

@@ -14,7 +14,8 @@ already offered channel repairs its reception (services / multiplex switched off
 The tab "Výchozí kanály" edits the household default channel list (``defaults.py``); "Použít jako výchozí" on
 the tab "Profily" copies a profile's list into it once. The tab "TMDb" shows the TMDb store (``tmdbstore.py``)
 read-only and paginated, with refresh / delete per entry, delete all and the refresh period; every change is
-logged (``admin: tmdb: …``). The store is never downloadable.
+logged (``admin: tmdb: …``). The store is never downloadable. The tab "Aktualizace" asks the Pi to update itself
+(``update.py``: only a request file; a root systemd unit runs the fixed ``deploy/update.sh``).
 
 Login: HTTP Basic, user ``admin``, ``[admin] password``. State-changing requests must carry the
 ``X-Cztvhub-Admin`` header (a cross-site page cannot send it without a CORS preflight, which this
@@ -36,6 +37,7 @@ from . import defaults as dflt
 from . import details as tmdb
 from . import epg
 from . import tmdbstore
+from .update import Updater
 from .gateway import DvbGateway, Response, error, json_response
 from .profiles import ProfileError, parse_body
 from .setup import RULE_COMMENT, apply_setup, plan_setup, recording_set_up
@@ -45,6 +47,7 @@ ADMIN_USER = "admin"
 CHANNEL_RE = re.compile(r"^/admin/api/channels/([A-Za-z0-9_-]{1,64})$")
 PROFILE_RE = re.compile(r"^/admin/api/profiles/([0-9a-f]{16})$")
 TMDB_PATH = "/admin/api/tmdb"
+UPDATE_PATH = "/admin/api/update"
 TMDB_KEY_MAX = 600  # a store key: ["kind", year, "cleaned title"]
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BULK = 500
@@ -226,10 +229,12 @@ class ChannelAdmin:
 class AdminSite:
     """``/admin`` (page) and ``/admin/api/*`` (JSON) behind HTTP Basic."""
 
-    def __init__(self, cfg: Config, gateway: DvbGateway, admin: ChannelAdmin | None = None):
+    def __init__(self, cfg: Config, gateway: DvbGateway, admin: ChannelAdmin | None = None,
+                 updater: Updater | None = None):
         self.password = cfg.admin.password
         self.gateway = gateway
         self.admin = admin or ChannelAdmin(cfg, gateway.client, gateway.log, gateway.now)
+        self.updater = updater or Updater(cfg.dvb.state_dir)
 
     def handle(self, method: str, path: str, headers: Mapping[str, str], body: bytes = b"",
                query: Mapping[str, str] | None = None) -> Response:
@@ -272,8 +277,14 @@ class AdminSite:
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
                 return self._tmdb(body)
+            if method == "GET" and path == UPDATE_PATH:
+                return json_response(200, self.updater.overview())
+            if method == "POST" and path == UPDATE_PATH:
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._update()
             if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles") \
-                    or path in ("/admin/api/defaults", TMDB_PATH):
+                    or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH):
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -464,6 +475,19 @@ class AdminSite:
         except ProfileError as exc:
             return json_response(exc.status, exc.payload(), exc.headers)
         return json_response(200, doc)
+
+    def _update(self) -> Response:
+        """``POST /admin/api/update`` (body ignored): only writes the request file (update.py); logged."""
+        try:
+            refused = self.updater.request()
+        except OSError as exc:
+            self.gateway.log(f"admin: update request failed: {exc}")
+            return error(500, "Požadavek na aktualizaci se nepodařilo zapsat")
+        if refused is not None:
+            self.gateway.log(f"admin: update refused: {refused}")
+            return error(409, refused)
+        self.gateway.log("admin: update requested")
+        return json_response(202, {"requested": True})
 
     # -- tab "TMDb" (tmdbstore.py) ---------------------------------------------------------
     def _tmdb_overview(self, page_param: str | None) -> Response:
@@ -673,6 +697,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
   <button role="tab" id="tab-profiles" aria-selected="false">Profily</button>
   <button role="tab" id="tab-defaults" aria-selected="false">Výchozí kanály</button>
   <button role="tab" id="tab-tmdb" aria-selected="false">TMDb</button>
+  <button role="tab" id="tab-update" aria-selected="false">Aktualizace</button>
 </div>
 <p class="legal">Nahrávání je soukromá kopie jen pro tuto domácnost. Záznam zůstává na disku tohoto Raspberry, maže se
 automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostatku místa a nelze ho stáhnout ani sdílet.</p>
@@ -736,6 +761,16 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
   nedá stáhnout ani exportovat. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or
   otherwise approved by TMDB.</p>
 </section>
+<section id="update" hidden>
+  <p class="sub" id="update-version"></p>
+  <p id="update-state"></p>
+  <pre class="meta" id="update-message" hidden style="white-space: pre-wrap"></pre>
+  <div class="dactions" id="update-actions"></div>
+  <p class="help">Aktualizace stáhne nejnovější vydání (větev main) do klonu, ze kterého bylo spuštěno install.sh,
+  a znovu spustí install.sh; služba se přitom na chvíli restartuje (televize se během ní na pár sekund odpojí).
+  Spouští se jen tento pevný postup, nic jiného z prohlížeče zvolit nejde. Když má klon místní změny nebo jinou
+  větev než main, aktualizace se zastaví a ukáže důvod.</p>
+</section>
 <section id="channels">
 <label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
 <label class="setting">Uchovávat nahrávky nejvýše <select id="maxdays"></select> (dříve se maže, když dochází místo)</label>
@@ -792,7 +827,7 @@ function api(method, path, body) {
   });
 }
 
-var TABS = ["channels", "storage", "profiles", "defaults", "tmdb"];
+var TABS = ["channels", "storage", "profiles", "defaults", "tmdb", "update"];
 function showTab(name) {
   TABS.forEach(function (t) {
     document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
@@ -802,10 +837,85 @@ function showTab(name) {
   if (name === "profiles") loadProfiles();
   if (name === "defaults" && !dfltDirty) loadDefaults();  // unsaved edits survive a look at another tab
   if (name === "tmdb") loadTmdb(tmdbPage);
+  if (name === "update") loadUpdate();
 }
 TABS.forEach(function (t) {
   document.getElementById("tab-" + t).addEventListener("click", function () { showTab(t); });
 });
+
+var updatePolling = null, updateConfirm = false;
+function shortCommit(c) { return c ? c.slice(0, 7) : "?"; }
+var UPDATE_STEPS = {check: "kontrola klonu", pull: "git pull", install: "install.sh", timeout: "časový limit 10 minut"};
+function renderUpdate(data) {
+  var v = data.version;
+  document.getElementById("update-version").textContent = v
+    ? "Běží verze " + shortCommit(v.commit) + (v.installed ? ", nainstalovaná " + when(v.installed) : "") + "."
+    : "Nainstalovaná verze není známá (install.sh ji zapíše při příští instalaci).";
+  var state = document.getElementById("update-state"), message = document.getElementById("update-message");
+  var actions = document.getElementById("update-actions"), s = data.status;
+  actions.textContent = "";
+  message.hidden = true;
+  if (!data.installed) {
+    state.textContent = "Aktualizace z prohlížeče není nainstalovaná – spusťte jednou bash server/deploy/install.sh.";
+    return false;
+  }
+  var running = !!(data.requested || (s && s.state === "running" && !s.stale));
+  if (running) state.textContent = "Probíhá aktualizace…";
+  else if (!s) state.textContent = "Z této stránky se zatím neaktualizovalo.";
+  else if (s.state === "ok") state.textContent = "Poslední aktualizace " + when(s.finished) + ": hotovo, " +
+    shortCommit(s.before) + " → " + shortCommit(s.after) + ".";
+  else if (s.state === "up-to-date") state.textContent = "Poslední aktualizace " + when(s.finished) +
+    ": nic nového, verze " + shortCommit(s.after) + " už běží.";
+  else if (s.state === "failed") state.textContent = "Poslední aktualizace " + when(s.finished) + " selhala (" +
+    (UPDATE_STEPS[s.step] || "neznámý krok") + "). Raspberry dál běží s verzí " + shortCommit(s.after || s.before) + ".";
+  else if (s.state === "running") state.textContent = "Aktualizace z " + when(s.started) + " se nedokončila.";
+  else state.textContent = "Stav poslední aktualizace nelze přečíst.";
+  if (s && s.state === "failed" && s.message) { message.textContent = s.message; message.hidden = false; }
+  if (running) return true;
+  if (!updateConfirm) {
+    var go = el("button", null, "Aktualizovat Raspberry");
+    go.addEventListener("click", function () { updateConfirm = true; renderUpdate(data); });
+    actions.appendChild(go);
+  } else {
+    actions.appendChild(el("span", null, "Stáhnout nejnovější vydání a restartovat službu?"));
+    var yes = el("button", "danger", "Aktualizovat"), no = el("button", null, "Zrušit");
+    yes.addEventListener("click", function () {
+      updateConfirm = false;
+      yes.disabled = no.disabled = true;
+      api("POST", "/admin/api/update", {}).then(function () { say("Aktualizace spuštěna."); pollUpdate(); },
+        function (e) { say("Aktualizaci se nepodařilo spustit: " + e.message, true); loadUpdate(); });
+    });
+    no.addEventListener("click", function () { updateConfirm = false; renderUpdate(data); });
+    actions.appendChild(yes); actions.appendChild(no);
+  }
+  return false;
+}
+function loadUpdate() {
+  return api("GET", "/admin/api/update").then(function (data) {
+    if (renderUpdate(data)) pollUpdate();
+  }, function (e) { say("Stav aktualizace se nepodařilo načíst: " + e.message, true); });
+}
+// While it runs: poll the status file; install.sh restarts the service, so failed requests mean "wait".
+// Once the service answers again with the run finished, the page reloads (new code, new page).
+function pollUpdate() {
+  if (updatePolling !== null) return;
+  var sawRunning = false;
+  updatePolling = setInterval(function () {
+    api("GET", "/admin/api/update").then(function (data) {
+      var running = renderUpdate(data);
+      if (running) { sawRunning = true; return; }
+      clearInterval(updatePolling);
+      updatePolling = null;
+      if (sawRunning) {
+        try { sessionStorage.setItem("cztvhub-update", "1"); } catch (e) { /* the reload shows Kanály then */ }
+        location.reload();
+      }
+    }, function () {
+      sawRunning = true;
+      document.getElementById("update-state").textContent = "Probíhá aktualizace… (služba se restartuje)";
+    });
+  }, 3000);
+}
 
 var tmdbPage = 1, tmdbConfirm = null;
 function months(n) { return n + " " + plural(n, "měsíc", "měsíce", "měsíců"); }
@@ -1488,6 +1598,9 @@ function load() {
   }, function (e) { say("Nepodařilo se načíst kanály: " + e.message, true); });
 }
 load();
+try {
+  if (sessionStorage.getItem("cztvhub-update")) { sessionStorage.removeItem("cztvhub-update"); showTab("update"); }
+} catch (e) { /* no storage: start on Kanály */ }
 // keep "now playing" current, but never while the user is in the middle of something
 setInterval(function () {
   if (busy || pending !== null || editing !== null) return;

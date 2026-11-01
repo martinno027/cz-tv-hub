@@ -1,0 +1,11 @@
+# Updating the Pi from /admin (spec/dvb-gateway.md "Updating the Pi from /admin", T33). Installed by install.sh.
+# The gateway (user cztvhub) only writes this request file; the root unit below does the rest.
+[Unit]
+Description=cz-tv-hub: update request from /admin
+
+[Path]
+PathExists=/var/lib/cztvhub/update-request
+Unit=cztvhub-update.service
+
+[Install]
+WantedBy=multi-user.target

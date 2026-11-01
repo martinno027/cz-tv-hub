@@ -1,0 +1,16 @@
+# Template: install.sh replaces @REPO@ (the clone's absolute path) and @OWNER@ (its owner) and installs it as
+# /etc/systemd/system/cztvhub-update.service. Started only by cztvhub-update.path.
+# Runs the fixed script of that clone: git pull --ff-only origin main as @OWNER@, then install.sh as root.
+[Unit]
+Description=cz-tv-hub: update from /admin (git pull --ff-only origin main, install.sh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=CZTVHUB_REPO=@REPO@
+Environment=CZTVHUB_OWNER=@OWNER@
+ExecStart=/bin/bash @REPO@/server/deploy/update.sh
+# update.sh stops its steps after 10 minutes and writes the reason; this is only the backstop
+TimeoutStartSec=15min
+PrivateTmp=true
