@@ -153,6 +153,16 @@ Can go wrong: it is a viewer too — on a channel nobody watches it starts a ses
 </details>
 
 <details>
+<summary><code>sudo kill -USR1 $(systemctl show -p MainPID --value cztvhub)</code> — what a slow gateway is waiting for (T45)</summary>
+
+Prints the stack of every thread of the running service into its log (`journalctl -u cztvhub -n 300`); the service
+goes on. For a gateway that answers slowly: where its threads wait (a lock, TVHeadend, ČT, the disk).
+
+Can go wrong: `kill` without `-USR1` stops the service; the dump is long (one block per thread, ~30 threads).
+
+</details>
+
+<details>
 <summary><code>python3 -m cztvhub dvb-starts --config /etc/cztvhub/cztvhub.conf [--hours 24] [--channel NAME]</code> — real programme starts from the broadcast vs the EPG (T14)</summary>
 
 Run on the Pi (as the `cztvhub` user, `PYTHONPATH=/opt/cztvhub/src`; read-only). The recorder notes every change of

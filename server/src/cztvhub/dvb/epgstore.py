@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import asdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterable
 
@@ -49,7 +49,7 @@ class EpgHistory:
                 if event.start >= now and lo <= event.start < hi and event_id not in ids:
                     del self._events[event_id]
             for event in fetched:
-                self._events[event.event_id] = EpgEvent(**{**asdict(event), "dvr_uuid": "", "dvr_state": ""})
+                self._events[event.event_id] = replace(event, dvr_uuid="", dvr_state="")
             return self._events != before
 
     def prune(self, before: float) -> bool:
@@ -64,8 +64,9 @@ class EpgHistory:
             return [e for e in self._events.values() if e.stop > start and e.start < end]
 
     def save(self) -> None:
+        # vars() instead of asdict(): no deep copy of every event (~5 000 on our Pi, a 3 MB file), the same JSON
         with self._lock:
-            payload = json.dumps([asdict(e) for e in self._events.values()], ensure_ascii=False)
+            payload = json.dumps([vars(e) for e in self._events.values()], ensure_ascii=False)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(payload, encoding="utf-8")

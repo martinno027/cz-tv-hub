@@ -34,6 +34,18 @@ class EpgHistoryTest(unittest.TestCase):
         self.assertEqual(len(again), 2)
         self.assertEqual(json.loads((Path(self.tmp.name) / "epg-history.json").read_text())[0]["title"], "t")
 
+    def test_saved_file_has_every_field_and_no_dvr_link(self):
+        """T45 replaced asdict() by vars(): the file must stay the same shape, and merge still drops the DVR link."""
+        event = EpgEvent("x", CT1, "Titul", "Díl", "Popis", [0x10, 0x14], 100, 200, "dvr-uuid", "completed")
+        self.h.merge([event], now=50, window=(0, 1000))
+        self.h.save()
+        saved = json.loads((Path(self.tmp.name) / "epg-history.json").read_text())
+        self.assertEqual(saved, [{"event_id": "x", "channel": CT1, "title": "Titul", "subtitle": "Díl",
+                                  "description": "Popis", "genre": [0x10, 0x14], "start": 100, "stop": 200,
+                                  "dvr_uuid": "", "dvr_state": ""}])
+        self.assertEqual((event.dvr_uuid, event.dvr_state), ("dvr-uuid", "completed"))  # the caller's untouched
+        self.assertEqual(EpgHistory(Path(self.tmp.name)).between(0, 1000)[0].genre, [0x10, 0x14])
+
     def test_future_part_is_authoritative(self):
         self.h.merge([ev("a", 100, 200), ev("b", 200, 300)], now=0, window=(0, 1000))
         self.h.merge([ev("b2", 200, 320)], now=50, window=(50, 1000))  # "a" cancelled, "b" rescheduled

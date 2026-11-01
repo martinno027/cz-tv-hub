@@ -1,5 +1,6 @@
 """Command line entry point: ``python -m cztvhub {serve,playlist,check,dvb-setup,dvb-diag,dvb-starts,dvb-fake}``."""
 import argparse
+import faulthandler
 import signal
 import sys
 import tempfile
@@ -31,6 +32,13 @@ def _sigterm_as_interrupt():
     signal.signal(signal.SIGTERM, handler)
 
 
+def _stacks_on_sigusr1() -> None:
+    """``kill -USR1 <pid>`` prints every thread's stack to stderr (the journal) and the service goes on: what a
+    slow gateway waits for, without a debugger on the Pi (T45; docs/SCRIPTS.md)."""
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+
+
 def cmd_serve(args):
     cfg = _config(args)
     from .dvb.signinlog import trim_file
@@ -48,6 +56,7 @@ def cmd_serve(args):
 
             admin = AdminSite(cfg, gateway)
     _sigterm_as_interrupt()
+    _stacks_on_sigusr1()
     serve(args.host or cfg.host, args.port or cfg.port, gateway=gateway, admin=admin, web=web)
     return 0
 
