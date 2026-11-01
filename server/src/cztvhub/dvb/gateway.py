@@ -22,6 +22,7 @@ from .. import api as ct_api
 from ..channels import CHANNELS as CT_CHANNELS
 from ..config import Config
 from . import archive_catalog as catalog
+from . import ctweb
 from . import breaks as ads
 from . import details as tmdb
 from . import tmdbstore
@@ -84,6 +85,7 @@ REC_SHOW_ID_RE = re.compile(r"^rec:([a-z0-9]{1,600})$")  # archive_catalog.card_
 SUBGENRE_RE = re.compile(r"^[0-9]{1,8}$")
 SEARCH_MAX = 100
 PAGE_RE = re.compile(r"^[1-9][0-9]{0,2}$")
+CT_WEB_PREFIX = "/dvb/ct/"
 JSON = "application/json; charset=utf-8"
 M3U8 = "application/vnd.apple.mpegurl"
 MEDIA_TYPES = {".m4s": "video/iso.segment", ".mp4": "video/mp4"}
@@ -167,6 +169,7 @@ class DvbGateway:
         self.fetch_schedules = ct_api.fetch_schedules
         self._ct_schedules: dict[tuple[str, date], tuple[float, list[ct_api.Programme]]] = {}
         self._ct_lock = threading.Lock()
+        self.ct_web = ctweb.CtWeb(now=now, log=log)  # /dvb/ct/* for the household web app (spec "Web")
         # the apps' Archiv (spec "Archive"); TMDb only with the key, and then the worker fills the store
         self.catalog = catalog.ArchiveCatalog(catalog.CtArchiveClient(), self._archive_recordings,
                                               store=lambda: self.details.store if self.details else None,
@@ -217,7 +220,7 @@ class DvbGateway:
                 if BREAKS_RE.match(path) and self.ads.enabled:
                     raise HttpError(403, "Bloky reklam ukládá jen pracovník")
                 raise HttpError(405, "Nepodporovaná metoda")
-            return self._route(path, query, headers)
+            return self._route(path, query, headers, client)
         except HttpError as exc:
             return error(exc.status, exc.message)
         except TunerBusy:
@@ -248,7 +251,9 @@ class DvbGateway:
         """The app key: bearer, or the same key as cookie ``cztvhub_key`` (Samsung AVPlay cannot send headers)."""
         return self._role(header, cookie, "") == "app"
 
-    def _route(self, path: str, query: Mapping[str, str], headers: Mapping[str, str]) -> Response:
+    def _route(self, path: str, query: Mapping[str, str], headers: Mapping[str, str], client: str = "") -> Response:
+        if path.startswith(CT_WEB_PREFIX):
+            return self.ct_route(path, query, client)
         if path == "/dvb/status":
             return self.status()
         if path == "/dvb/channels":
@@ -708,6 +713,18 @@ class DvbGateway:
         if found is None:
             raise HttpError(404, "Plakát není k dispozici")
         return Response(200, found[0], found[1], {"Cache-Control": "private, no-store"})
+
+    # -- ČT for the web (ctweb.py) ---------------------------------------------------------
+    def ct_route(self, path: str, query: Mapping[str, str], client: str) -> Response:
+        """``/dvb/ct/live|vod|schedule``: ČT's status and JSON body unchanged; streams only for the home LAN."""
+        try:
+            found = self.ct_web.handle(path, dict(query), client)
+        except ctweb.CtWebError as exc:
+            raise HttpError(exc.status, exc.message)
+        if found is None:
+            raise HttpError(404, "Nenalezeno")
+        status, body = found
+        return Response(status, body, JSON, {"Cache-Control": "no-store"})
 
     # -- archive (archive_catalog.py) ------------------------------------------------------
     def archive_route(self, path: str, query: Mapping[str, str]) -> Response:

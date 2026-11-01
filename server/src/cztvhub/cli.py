@@ -33,17 +33,19 @@ def _sigterm_as_interrupt():
 
 def cmd_serve(args):
     cfg = _config(args)
-    gateway = admin = None
+    gateway = admin = web = None
     if cfg.dvb.enabled:
         from .dvb.gateway import DvbGateway
+        from .dvb.web import WebSite
 
         gateway = DvbGateway(cfg)
+        web = WebSite.from_config(cfg, args.config)  # off with a log line when web_dir overlaps recordings/state
         if cfg.admin.enabled:
             from .dvb.admin import AdminSite
 
             admin = AdminSite(cfg, gateway)
     _sigterm_as_interrupt()
-    serve(args.host or cfg.host, args.port or cfg.port, gateway=gateway, admin=admin)
+    serve(args.host or cfg.host, args.port or cfg.port, gateway=gateway, admin=admin, web=web)
     return 0
 
 

@@ -140,10 +140,14 @@ def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def schedule_request(slugs: list[str], day: date) -> dict:
+    """The GraphQL body of a schedule request (also sent unchanged by the gateway's ``/dvb/ct/schedule``)."""
+    return {"query": SCHEDULE_QUERY, "variables": {"channels": list(slugs), "date": day.strftime("%m.%d.%Y")}}
+
+
 def fetch_schedules(slugs: list[str], day: date, timeout: float = 10.0) -> dict[str, list[Programme]]:
     """Programme of the given broadcast day for channels identified by EPG slug (e.g. "ct1")."""
-    body = {"query": SCHEDULE_QUERY, "variables": {"channels": slugs, "date": day.strftime("%m.%d.%Y")}}
-    data = _request_json(GRAPHQL_URL, timeout, body) or {}
+    data = _request_json(GRAPHQL_URL, timeout, schedule_request(slugs, day)) or {}
     plans = (data.get("data") or {}).get("TVProgramDailyChannelsPlanV2")
     if plans is None:
         raise StreamError(f"schedule query failed: {data.get('errors')}", "Program se nepodařilo načíst")

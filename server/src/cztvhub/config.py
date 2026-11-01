@@ -30,6 +30,7 @@ class DvbConfig:
     hls_dir: Path = Path("/var/lib/cztvhub/hls")
     state_dir: Path = Path("/var/lib/cztvhub")  # settings.json of the /admin page (service StateDirectory)
     buffer_dir: Path = Path("/var/lib/cztvhub/buffer")  # continuous recording; put it on the recordings disk
+    web_dir: Path = Path("/opt/cztvhub/web")  # the household web app at /web/ (install.sh copies it here)
     max_recordings: int = 0  # optional cap on channels recorded at once; 0 = no limit (the household watches the load)
     buffer_on_system_disk: bool = False  # allow recording onto the system disk (SD card); development only
     idle_seconds: int = 30
@@ -122,6 +123,7 @@ def parse_config(text: str) -> Config:
         dvb.hls_dir = Path(section.get("hls_dir", str(dvb.hls_dir)).strip())
         dvb.state_dir = Path(section.get("state_dir", str(dvb.state_dir)).strip())
         dvb.buffer_dir = Path(section.get("buffer_dir", str(dvb.buffer_dir)).strip())
+        dvb.web_dir = Path(section.get("web_dir", str(dvb.web_dir)).strip())
         dvb.max_recordings = max(0, _int(section, "max_recordings", dvb.max_recordings))
         try:
             dvb.buffer_on_system_disk = section.getboolean("buffer_on_system_disk", False)
