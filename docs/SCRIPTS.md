@@ -189,7 +189,10 @@ The older per-programme DVR rules in TVHeadend. Installs that use the gateway's 
 <details>
 <summary><code>journalctl -u cztvhub -f</code> — gateway log</summary>
 
-Includes one line per live start (`dvb: live start …` with the time of each step) and admin actions.
+Includes one line per live start (`dvb: live start: …` with the time of each step, since T37 without the channel:
+to time one channel start only that one) and admin actions. There is no line per request (T37): only failed
+requests (`http: 502 GET /dvb/live/*.m3u8`: the route with ids as `*`, no query string, no address) and exceptions (`http: exception while handling a request` + traceback). Who connected and signed in is on
+`/admin` „Přihlášení", not in the journal.
 
 </details>
 

@@ -63,7 +63,7 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
 - **Storage**: `localStorage` of that browser instead of Tizen's (same keys and shapes as the Samsung app:
   settings, channels, resume, profile session). Each browser is "one TV".
 - **Nastavení → Server**: the address is the page's own origin (no address field, no discovery); the **key** field
-  as on Samsung (masked, "Zobrazit"/"Skrýt", T25), `Uložit a ověřit`. The key goes in `localStorage` and in the
+  as on Samsung (masked, "Zobrazit"/"Skrýt", T25), `Uložit a ověřit`. Below the status the sign-in/connection note of T37. The key goes in `localStorage` and in the
   cookie `cztvhub_key` (`Path=/dvb; SameSite=Strict`, set by the page) for media requests the browser makes
   itself (Safari's native HLS cannot add a header; hls.js sends the `Authorization` header). "Odebrat bránu" deletes
   both. Without a key every tab shows "Zadejte klíč brány v Nastavení → Server." (the archive's no-gateway text
