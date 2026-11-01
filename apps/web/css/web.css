@@ -1,11 +1,27 @@
 /* What only the web adds to the Samsung app's look (spec/web.md "Web layer"); app/css/app.css stays as it is. */
 
 body.web {
-  touch-action: none; /* swipes and long presses are the app's (web-input.js), no browser scroll or zoom */
+  touch-action: pan-x pan-y; /* swipes scroll like a page; no pinch zoom of the scaled TV layout */
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* the TV's virtual lists and the player: the page handles swipes and drags there (web-scroll.js, web-input.js) */
+body.web #grid,
+body.web #ar-grid,
+body.web #ar-side,
+body.web #sh-episodes,
+body.web #player {
+  touch-action: none;
+}
+
+/* Živě and Nastavení scroll like a page (wheel, trackpad, touch); the remote's focus still scrolls them too */
+body.web #screen-live,
+body.web #screen-settings {
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 body.web input {
@@ -23,24 +39,73 @@ body.web input {
   color: #aaa;
 }
 
-/* "‹ Zpět" in its own strip above the 16:9 stage (web-stage.js sizes it): it never covers the TV layout */
-#web-strip {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 90;
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  background: #000;
+/* "‹ Zpět" only inside a screen's own header (a Nastavení section, the player bar), never over content */
+.web-back-link {
+  display: inline-block;
+  font-size: 28px;
+  padding: 10px 0;
+  color: var(--muted);
+  cursor: pointer;
 }
 
-#web-back {
-  font-size: 18px;
-  padding: 6px 18px;
-  margin: 0;
+.set-section > .web-back-link {
+  margin-top: 24px;
+}
+
+body.web #stage.section-open #screen-settings h1.page-title {
+  margin-top: 8px;
+}
+
+/* Fullscreen (⛶): the right end of the tab bar and the player bar; hidden without the Fullscreen API */
+.web-fullscreen {
+  font-size: 34px;
+  line-height: 1;
+  padding: 10px 16px;
+  margin-left: 24px;
+  border-radius: 12px;
+  color: var(--muted);
   cursor: pointer;
+}
+
+.web-osd-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.web-osd-row .web-fullscreen {
+  margin-left: 0;
+}
+
+/* The mouse: hovering only highlights (the remote's focus is hidden while the mouse is used, web-focus.js) */
+body.web .tab:hover,
+body.web .day:hover,
+body.web .button:hover,
+body.web .setting-toggle:hover,
+body.web .ch-name:hover,
+body.web .ch-btn:hover,
+body.web .ar-menu-item:hover,
+body.web .audio-item:hover,
+body.web .web-fullscreen:hover,
+body.web .web-back-link:hover {
+  background: var(--surface-hi);
+  color: var(--text);
+}
+
+body.web .card:hover,
+body.web .choice:hover,
+body.web .ar-card:hover {
+  border-color: var(--focus);
+}
+
+body.web .cell:hover {
+  border-color: var(--focus);
+  opacity: 1;
+}
+
+body.web .sh-ep:hover {
+  background: var(--surface-hi);
 }
 
 /* The tabs stay reachable by mouse and touch: also over an open Nastavení section (the TV hides them there) */
@@ -53,6 +118,7 @@ body.web #stage.section-open main {
   top: 110px;
 }
 
+body.web .web-fullscreen,
 body.web .tab,
 body.web .card,
 body.web .cell,
