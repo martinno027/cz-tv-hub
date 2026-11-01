@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from .. import api as ct_api
 from ..channels import BY_ID, CHANNELS
@@ -161,21 +161,22 @@ class CtWeb:
         body = ct_api.schedule_request(slugs, day)
         return self._cached(self._schedules, (tuple(slugs), day), SCHEDULE_SECONDS,
                             f"schedule {','.join(slugs)} {day.isoformat()}",
-                            lambda: self.fetch(ct_api.GRAPHQL_URL, body))
+                            lambda: self.fetch(ct_api.GRAPHQL_URL, body), keep=_schedule_ok)
 
-    def _cached(self, cache: dict, key, ttl: float, what: str, call: Callable[[], tuple[int, bytes]]):
+    def _cached(self, cache: dict, key, ttl: float, what: str, call: Callable[[], tuple[int, bytes]],
+                keep: Callable[[int, Any], bool] = lambda status, answer: status < 500):
         with self._lock:
             hit = cache.get(key)
             if hit and self.clock() - hit[0] < ttl:
                 return hit[1], hit[2]
         try:
             status, data = call()
-            json.loads(data.decode("utf-8"))  # only JSON is passed on; the bytes stay exactly as ČT sent them
+            answer = json.loads(data.decode("utf-8"))  # only JSON is passed on; the bytes stay as ČT sent them
         except (Unreachable, UnicodeDecodeError, ValueError) as exc:
             reason = str(exc) if isinstance(exc, Unreachable) else "not JSON"
             self.log(f"dvb: ct web: {what}: {reason}")
             raise CtWebError(502, UNREACHABLE) from None
-        if status < 500:  # ČT's answers incl. its 403/404 texts; a server error is asked again next time
+        if keep(status, answer):  # ČT's answers incl. its 403/404 texts; a schedule only with its data (T38)
             with self._lock:
                 now = self.clock()
                 for k in [k for k, v in cache.items() if now - v[0] >= ttl]:
@@ -184,6 +185,13 @@ class CtWeb:
                     del cache[min(cache, key=lambda k: cache[k][0])]
                 cache[key] = (now, status, data)
         return status, data
+
+
+def _schedule_ok(status: int, answer: Any) -> bool:
+    """A schedule answer worth keeping: ČT answers its outages with 200 and ``errors`` (2026-11-01, for hours)."""
+    data = answer.get("data") if isinstance(answer, dict) else None
+    return status == 200 and isinstance(data, dict) and isinstance(data.get("TVProgramDailyChannelsPlanV2"), list) \
+        and not answer.get("errors")
 
 
 def _broadcast_day(now: float) -> date:
