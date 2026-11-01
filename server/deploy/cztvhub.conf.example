@@ -31,6 +31,7 @@ password = @ADMIN_PASSWORD@
 [tmdb]
 ; Podrobnosti pořadů v aplikacích (rok, plakát, hodnocení TMDB). Vlastní bezplatný klíč: účet na themoviedb.org,
 ; Nastavení → API (nekomerční použití); "API Key" i "API Read Access Token" fungují. Prázdné = vypnuto.
+; Klíč jde zadat i v /admin (záložka TMDb); klíč tady má přednost.
 ; Programme details in the apps (year, poster, TMDB rating): your own free key from themoviedb.org, Settings → API.
 ; Empty = off; removing the key deletes the cached details.
 key =

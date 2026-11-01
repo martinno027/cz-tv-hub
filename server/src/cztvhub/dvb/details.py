@@ -1,6 +1,7 @@
 """Programme details from TMDb (spec/dvb-gateway.md "Programme details", approved by the user on 2026-10-24).
 
-Only the gateway talks to TMDb, with the household's own key (``[tmdb] key``; none = off), and only for a programme
+Only the gateway talks to TMDb, with the household's own key (``[tmdb] key`` or one entered on ``/admin``,
+``tmdbkeys.py``; none = off), and only for a programme
 the gateway found in its own EPG or the CT schedule: TMDb gets the cleaned title, nothing else (the year and the
 kind only decide which result is accepted). A result counts only when its title equals ours and its year is within
 ±1 of the one the description states; anything less is "no match" (no rating is better than a wrong one).
@@ -72,6 +73,10 @@ class TmdbError(Exception):
 
 class TmdbBusy(TmdbError):
     user_message = "Příliš mnoho dotazů na TMDB, zkuste to za chvíli"
+
+
+class TmdbRefused(TmdbError):
+    """TMDb answered 401: the key is wrong, revoked or of the wrong kind (viewers see the plain TmdbError text)."""
 
 
 @dataclass(frozen=True)
@@ -347,8 +352,9 @@ class TmdbClient:
                     wait = retry_after(retry)
                     self.limiter.pause(wait)
                     raise TmdbBusy(f"TMDb {what}: HTTP 429, waiting {wait:.0f} s") from None
-                hint = " (the [tmdb] key was refused)" if exc.code == 401 else ""
-                raise TmdbError(f"TMDb {what}: HTTP {exc.code}{hint}") from None
+                if exc.code == 401:
+                    raise TmdbRefused(f"TMDb {what}: HTTP 401 (the key was refused)") from None
+                raise TmdbError(f"TMDb {what}: HTTP {exc.code}") from None
             except urllib.error.URLError as exc:
                 raise TmdbError(self._scrub(f"TMDb {what}: {exc.reason}")) from None
             except (OSError, ValueError) as exc:
@@ -384,6 +390,13 @@ def stored_result(match: dict, data: Any) -> dict:
             else None}
 
 
+def verify(key: str, limiter: Limiter, urlopen: Callable[..., Any] | None = None) -> None:
+    """The key check when a key is saved on ``/admin``: one ``configuration`` request through the shared limiter
+    (it counts toward the per-minute limit like any lookup). Raises ``TmdbRefused`` for a wrong key, ``TmdbBusy``
+    or ``TmdbError`` when TMDb could not tell."""
+    TmdbClient(key, limiter=limiter, urlopen=urlopen).get("configuration", {})
+
+
 def remove_cache(state_dir: Path, log: Callable[[str], None] = print) -> None:
     """``[tmdb] key`` is gone: nothing from TMDb stays on the Pi."""
     tmdbstore.remove_store(state_dir, log)
@@ -415,9 +428,10 @@ class _Posters:
 class Details:
     def __init__(self, key: str, state_dir: Path, now: Callable[[], float] = time.time,
                  log: Callable[[str], None] = print, client: TmdbClient | None = None,
-                 store: TmdbStore | None = None, months: Callable[[], int] = lambda: tmdbstore.DEFAULT_MONTHS):
+                 store: TmdbStore | None = None, months: Callable[[], int] = lambda: tmdbstore.DEFAULT_MONTHS,
+                 limiter: Limiter | None = None):
         self.now, self.log = now, log
-        self.client = client or TmdbClient(key)
+        self.client = client or TmdbClient(key, limiter=limiter)
         self.store = store or TmdbStore(state_dir, months=months, now=now, log=log)
         self._lookup = threading.Lock()  # one page lookup at a time; the second asker then finds it stored
         self._posters = _Posters()

@@ -352,8 +352,11 @@ nechá; **Obnovit výchozí pořadí** v Nastavení → Kanály ji vrátí na v�
 původní pořadí aplikace.
 
 **Podrobnosti pořadů z TMDB** (rok, plakát, hodnocení na stránce pořadu; nepovinné): zaregistrujte si zdarma účet
-na themoviedb.org, v Nastavení → API požádejte o klíč pro nekomerční použití a vložte ho do
-`/etc/cztvhub/cztvhub.conf`:
+na themoviedb.org a v Nastavení → API požádejte o klíč pro nekomerční použití. Pak ho vložte v administraci na
+záložce **TMDb** do pole **API Read Access Token** nebo **API Key** a dejte **Uložit**: Raspberry klíč jednou ověří
+u TMDb, uloží ho jen u sebe a TMDb hned zapne (bez restartu). Na stránce zůstane jen „nastaveno · končí …“ s
+posledními čtyřmi znaky; **Smazat** klíč odebere (když to byl poslední, TMDb se vypne a uložené údaje se smažou).
+Klíč jde zadat i do `/etc/cztvhub/cztvhub.conf`; ten pak má přednost a pole v administraci jsou jen pro čtení:
 
 ```ini
 [tmdb]
