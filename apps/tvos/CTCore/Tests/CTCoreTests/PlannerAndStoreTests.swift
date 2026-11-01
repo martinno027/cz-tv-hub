@@ -238,4 +238,85 @@ final class GuideFillerTests: XCTestCase {
             XCTAssertEqual(GuideFiller.text(source: source, ctScheduleFailed: false), "Mimo vysílání")
         }
     }
+
+    private struct Span: TimedItem { let start: Date; let end: Date }
+
+    // 05:00–05:00 Prague (04:00Z), a programme 10:00–11:00 local; the guide splits gaps at ticks.
+    private let timeline = GuideTimeline(start: utc("2026-11-01T04:00:00Z"), end: utc("2026-11-02T04:00:00Z"),
+                                         pointsPerSecond: 0.21)
+    private func segments(_ items: [Span]) -> [GuideTimeline.Segment<Span>] {
+        timeline.segments(for: items, splitGapsAtTicks: true)
+    }
+    private func index(at date: Date, _ segments: [GuideTimeline.Segment<Span>]) -> Int {
+        timeline.focusableSegment(at: date, in: segments, minGapWidth: 0)!
+    }
+
+    /// T38: a ČT row whose schedule failed on the day containing now: every filler of it plays the channel live.
+    func testFailedCTRowTodayPlaysLiveFromEveryFiller() {
+        let row = segments([])
+        let now = utc("2026-11-01T12:10:00Z")
+        let all = (0..<row.count).filter {
+            GuideFiller.playsLive(source: .ct, ctScheduleFailed: true, segment: $0, in: row, timeline: timeline, now: now)
+        }
+        XCTAssertEqual(all.count, row.count)
+        XCTAssertGreaterThan(row.count, 1)
+        // the same row on another day (now outside the grid): nothing
+        let tomorrow = now.addingTimeInterval(86_400)
+        XCTAssertFalse((0..<row.count).contains {
+            GuideFiller.playsLive(source: .ct, ctScheduleFailed: true, segment: $0, in: row, timeline: timeline, now: tomorrow)
+        })
+        // a failure does not spread to Anténa or Sněmovna rows: only their gap under now
+        let under = index(at: now, row)
+        XCTAssertFalse(GuideFiller.playsLive(source: .dvb, ctScheduleFailed: true, segment: under + 2, in: row,
+                                             timeline: timeline, now: now))
+        XCTAssertFalse(GuideFiller.playsLive(source: .psp, ctScheduleFailed: true, segment: under, in: row,
+                                             timeline: timeline, now: now))
+    }
+
+    /// A loaded ČT row (no failure): only the filler under now.
+    func testLoadedCTRowPlaysLiveOnlyFromTheFillerUnderNow() {
+        let row = segments([])
+        let now = utc("2026-11-01T12:10:00Z")
+        let under = index(at: now, row)
+        XCTAssertTrue(GuideFiller.playsLive(source: .ct, ctScheduleFailed: false, segment: under, in: row, timeline: timeline, now: now))
+        // the fillers before and after it (other half hours) do nothing
+        XCTAssertFalse(GuideFiller.playsLive(source: .ct, ctScheduleFailed: false, segment: under - 1, in: row, timeline: timeline, now: now))
+        XCTAssertFalse(GuideFiller.playsLive(source: .ct, ctScheduleFailed: false, segment: under + 1, in: row, timeline: timeline, now: now))
+        // another day's grid: no filler covers now
+        let tomorrow = now.addingTimeInterval(86_400)
+        XCTAssertFalse((0..<row.count).contains {
+            GuideFiller.playsLive(source: .ct, ctScheduleFailed: false, segment: $0, in: row, timeline: timeline, now: tomorrow)
+        })
+    }
+
+    /// T38: any gap of a ČT or Anténa row at the current time; never a programme cell, never a Sněmovna row.
+    func testGapsAtNowOnCTAndAntennaRows() {
+        let programme = Span(start: utc("2026-11-01T09:00:00Z"), end: utc("2026-11-01T10:00:00Z"))
+        let row = segments([programme])
+        let inGap = utc("2026-11-01T10:20:00Z")
+        let gap = index(at: inGap, row)
+        let cell = index(at: utc("2026-11-01T09:30:00Z"), row)
+        guard case .item = row[cell], case .gap = row[gap] else { return XCTFail("unexpected segments") }
+        for source in [ChannelPrefs.Source.ct, .dvb] {
+            XCTAssertTrue(GuideFiller.playsLive(source: source, ctScheduleFailed: false, segment: gap, in: row, timeline: timeline, now: inGap))
+            XCTAssertFalse(GuideFiller.playsLive(source: source, ctScheduleFailed: false, segment: cell, in: row, timeline: timeline,
+                                                 now: utc("2026-11-01T09:30:00Z")), "a programme opens its page")
+        }
+        XCTAssertFalse(GuideFiller.playsLive(source: .psp, ctScheduleFailed: true, segment: gap, in: row, timeline: timeline, now: inGap))
+        XCTAssertFalse(GuideFiller.playsLive(source: .ct, ctScheduleFailed: false, segment: row.count, in: row, timeline: timeline, now: inGap))
+    }
+
+    /// The gap's span is exact at its edges: it ends where the programme starts.
+    func testGapTimeRangeEdges() {
+        let programme = Span(start: utc("2026-11-01T09:10:00Z"), end: utc("2026-11-01T10:00:00Z"))
+        let row = segments([programme])
+        let before = index(at: utc("2026-11-01T09:05:00Z"), row)
+        let range = timeline.timeRange(ofSegment: before, in: row)!
+        XCTAssertEqual(range.start.timeIntervalSince1970, utc("2026-11-01T09:00:00Z").timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertEqual(range.end.timeIntervalSince1970, programme.start.timeIntervalSince1970, accuracy: 0.001)
+        XCTAssertTrue(GuideFiller.playsLive(source: .dvb, ctScheduleFailed: true, segment: before, in: row, timeline: timeline,
+                                            now: programme.start.addingTimeInterval(-1)))
+        XCTAssertFalse(GuideFiller.playsLive(source: .dvb, ctScheduleFailed: true, segment: before, in: row, timeline: timeline,
+                                             now: programme.start.addingTimeInterval(1)))
+    }
 }

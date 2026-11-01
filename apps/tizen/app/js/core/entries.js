@@ -183,6 +183,17 @@
     },
 
     /**
+     * Selecting an empty guide slot (spec/apps.md, T38) plays that channel live, as its Živě card does: a filler of a
+     * ČT or Anténa row that covers `now`, or any filler of a ČT row whose schedule failed (`ctFailed`) on the day
+     * containing now (`liveDay`; one cell under the now line would be too easy to miss). Any other filler (another
+     * time, another day, a Sněmovna row) does nothing. `slot` = {start, end} of the filler.
+     */
+    fillerPlaysLive: function (source, slot, now, ctFailed, liveDay) {
+      if (source === 'ct' && ctFailed && liveDay) return true;
+      return (source === 'ct' || source === 'dvb') && slot.start <= now && now < slot.end;
+    },
+
+    /**
      * The muted line of a Živě card without a current programme: a ČT card when ČT's schedule failed (and nothing
      * is known) says so; a channel with data but nothing on "Mimo vysílání"; still loading = ''.
      */

@@ -26,13 +26,15 @@ import java.time.Instant
 
 /**
  * A guide row: a CT internet channel, an "Anténa" channel or a Poslanecká sněmovna stream; [filler] is what its
- * empty slots say (spec/apps.md, T36: "Program se nepodařilo načíst" on ČT rows of a day whose schedule failed).
+ * empty slots say (spec/apps.md, T36: "Program se nepodařilo načíst" on ČT rows of a day whose schedule failed);
+ * [live] is what its Živě card plays, for a filler covering now (T38; null for a Poslanecká sněmovna stream).
  */
 data class GuideRow(
     val key: String,
     val name: String,
     val entries: List<Entry>,
     val filler: GuideLayout.Filler = GuideLayout.Filler.OFF_AIR,
+    val live: PlayRequest? = null,
 )
 
 /** What a guide cell shows, whichever source it comes from. */

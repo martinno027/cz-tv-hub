@@ -33,7 +33,7 @@
     this.days = [];
     this.dayFocus = 0;
     this.zone = 'grid'; // 'days' | 'grid'
-    this.rows = []; // [{name, slots: [{start, end, item, el | null}], line | null, range | null}]
+    this.rows = []; // [{name, source, channel, ctFailed, slots: [{start, end, item, el | null}], line | null, range | null}]
     this.axisStart = 0;
     this.axisEnd = 0;
     this.focusRow = 0;
@@ -198,14 +198,14 @@
     var rows = this.app.channelList(dvb ? dvb.channels : []).map(function (item, i) {
       var ch = item.channel;
       if (item.source === 'psp') {
-        return { name: ch.name, number: i + 1, source: 'psp', entries: [self.pspEntry(ch, dayBounds)] };
+        return { name: ch.name, number: i + 1, source: 'psp', channel: ch, entries: [self.pspEntry(ch, dayBounds)] };
       }
       if (item.source === 'dvb') {
         var events = dvb.plan[ch.id] || [];
-        return { name: ch.name, number: i + 1, source: 'dvb', entries: events.map(function (e) { return CT.Entries.dvb(ch, e); }) };
+        return { name: ch.name, number: i + 1, source: 'dvb', channel: ch, entries: events.map(function (e) { return CT.Entries.dvb(ch, e); }) };
       }
       var list = ct.plan ? ct.plan[ch.id] || [] : [];
-      return { name: ch.name, number: i + 1, source: 'ct', entries: list.map(function (p) { return CT.Entries.ct(ch, p); }) };
+      return { name: ch.name, number: i + 1, source: 'ct', channel: ch, entries: list.map(function (p) { return CT.Entries.ct(ch, p); }) };
     });
     var all = [];
     rows.forEach(function (r) { all = all.concat(r.entries); });
@@ -245,8 +245,8 @@
 
     // Only data here: cells get DOM when they come near the screen (see syncWindow).
     this.rows = rows.map(function (row) {
-      return { name: row.name, number: row.number, source: row.source, slots: CT.GuideLayout.row(row.entries, axisStart, axisEnd),
-        filler: CT.Entries.fillerText(row.source, ctFailed), line: null, nameEl: null, nameX: null, range: null };
+      return { name: row.name, number: row.number, source: row.source, channel: row.channel, slots: CT.GuideLayout.row(row.entries, axisStart, axisEnd),
+        filler: CT.Entries.fillerText(row.source, ctFailed), ctFailed: ctFailed, line: null, nameEl: null, nameX: null, range: null };
     });
     var container = $('grid-rows');
     container.innerHTML = '';
@@ -688,9 +688,18 @@
         this.verticalMove = true;
         break;
       }
-      case 'enter':
-        if (slot.item) this.app.select(slot.item, this.day);
+      case 'enter': {
+        if (slot.item) {
+          this.app.select(slot.item, this.day);
+          break;
+        }
+        // A filler covering now, or any filler of a failed ČT row today: that channel live, as its Živě card (T38).
+        var row = this.rows[this.focusRow];
+        if (CT.Entries.fillerPlaysLive(row.source, slot, this.app.now, row.ctFailed, this.isLiveGrid())) {
+          this.app.playItem({ key: row.source + ':' + row.channel.id, source: row.source, channel: row.channel });
+        }
         break;
+      }
       default:
         break;
     }

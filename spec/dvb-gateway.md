@@ -643,7 +643,9 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
   - `GET /dvb/ct/schedule?channels=<slug,…>&date=YYYY-MM-DD` → ČT GraphQL with the **fixed** schedule query of
     `api.py` (`channels` 1–6 of the known GraphQL names, `date` within the guide range of 7 days back and 2 ahead,
     else `400`). Never a client-supplied query.
-  Exactly the request parameters of `api.py` (no client query forwarded, never a DRM variant, `skipIpAddressCheck`
+  Only answers that hold what was asked are cached: a schedule only with `data.TVProgramDailyChannelsPlanV2` and no
+  `errors` (ČT answers its outages with 200 + `errors`; cached, the web showed the outage 10 minutes after it ended,
+  T38); stream answers as before (ČT's 403/404 texts too, not a server error). Exactly the request parameters of `api.py` (no client query forwarded, never a DRM variant, `skipIpAddressCheck`
   untouched); ČT's answer unchanged, including `isBlocked`, `UNSUPPORTED_DRM`, `MISSING_LICENCE_*` (a test shows
   nothing is filtered or rewritten). Stream answers are cached at most 60 s in memory, never written, never logged
   with their URLs; schedules up to 10 min in memory. ČT unreachable → `502 {"error": "iVysílání teď

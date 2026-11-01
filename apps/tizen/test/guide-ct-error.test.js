@@ -177,3 +177,82 @@ test('Živě, ČT failed: ČT cards show the text, the Anténa card does not, no
   const titles = live.cards.map((c) => c.el.find('card-title').map((n) => n.textContent).join(''));
   assert.deepEqual(titles, [FAILED, OFF, FAILED]);
 });
+
+// --- T38: selecting a filler that covers now plays that channel live, as its Živě card does ---
+
+/** Presses OK on the slot of row `name` that `pick(slot)` chooses; returns what the app was asked to do. */
+function pressOk(g, name, pick) {
+  const calls = [];
+  g.app.playItem = (item) => calls.push(['playItem', item.source, item.channel.id, item.key]);
+  g.app.select = (entry) => calls.push(['select', entry.source, entry.channel.id]);
+  g.app.toast = (text) => calls.push(['toast', text]);
+  g.zone = 'grid';
+  g.focusRow = g.rows.findIndex((r) => r.name === name);
+  g.focusSlot = g.rows[g.focusRow].slots.findIndex(pick);
+  assert.ok(g.focusSlot >= 0, 'no such slot in ' + name);
+  assert.equal(g.onKey('enter'), true);
+  return calls;
+}
+const coversNow = (s) => s.start <= NOW && NOW < s.end;
+
+test('Entries.fillerPlaysLive: ČT and Anténa fillers at now only, never Sněmovna', () => {
+  const at = { start: NOW - 60e3, end: NOW + 60e3 };
+  assert.equal(CT.Entries.fillerPlaysLive('ct', at, NOW), true);
+  assert.equal(CT.Entries.fillerPlaysLive('dvb', at, NOW), true);
+  assert.equal(CT.Entries.fillerPlaysLive('psp', at, NOW), false);
+  assert.equal(CT.Entries.fillerPlaysLive('ct', { start: NOW, end: NOW + 60e3 }, NOW), true); // start inclusive
+  assert.equal(CT.Entries.fillerPlaysLive('ct', { start: NOW - 60e3, end: NOW }, NOW), false); // end exclusive
+  assert.equal(CT.Entries.fillerPlaysLive('dvb', { start: NOW + 60e3, end: NOW + 120e3 }, NOW), false);
+  // a failed ČT row on the day containing now: any of its fillers (spec/apps.md, T38 follow-up)
+  const later = { start: NOW + 3600e3, end: NOW + 7200e3 };
+  assert.equal(CT.Entries.fillerPlaysLive('ct', later, NOW, true, true), true);
+  assert.equal(CT.Entries.fillerPlaysLive('ct', later, NOW, false, true), false); // schedule loaded: only now
+  assert.equal(CT.Entries.fillerPlaysLive('ct', later, NOW, true, false), false); // another day
+  assert.equal(CT.Entries.fillerPlaysLive('dvb', later, NOW, true, true), false); // Anténa: only now
+  assert.equal(CT.Entries.fillerPlaysLive('psp', at, NOW, true, true), false);
+});
+
+test('guide, ČT failed: OK on the ČT filler at now plays that ČT channel live (as Živě)', () => {
+  const g = guide(failedCt());
+  assert.deepEqual(pressOk(g, 'ČT24', (s) => !s.item && coversNow(s)), [['playItem', 'ct', 'CH_24', 'ct:CH_24']]);
+});
+
+test('guide: OK on an Anténa gap at now plays that channel live; a gap at another time does nothing', () => {
+  const g = guide(failedCt());
+  assert.deepEqual(pressOk(g, 'Nova Action', (s) => !s.item && coversNow(s)), [['playItem', 'dvb', 'nova-action', 'dvb:nova-action']]);
+  assert.deepEqual(pressOk(g, 'Nova Action', (s) => !s.item && s.end <= NOW), []);
+});
+
+test('guide, ČT loaded: OK on a ČT gap at now plays live; on a programme it still opens the programme', () => {
+  const day = CT.Days.openDay(NOW);
+  const [start] = CT.Days.bounds(day);
+  const p = { idec: 'x1', title: 'Zprávy', start: start + 2 * 3600e3, end: start + 3 * 3600e3, isPlayableNow: true };
+  const g = guide({ plan: { CH_1: [p] } });
+  assert.deepEqual(pressOk(g, 'ČT1', (s) => !s.item && coversNow(s)), [['playItem', 'ct', 'CH_1', 'ct:CH_1']]);
+  assert.deepEqual(pressOk(g, 'ČT1', (s) => !!s.item), [['select', 'ct', 'CH_1']]);
+});
+
+test('guide, ČT failed on another day: its filler does not cover now and does nothing', () => {
+  const day = CT.Days.openDay(NOW - 24 * 3600e3);
+  const g = new CT.GuideScreen(app());
+  g.day = day;
+  g.days = CT.Days.guideDays(CT.Days.today(NOW));
+  g.showDetail = () => {};
+  g.prefetch = () => {};
+  g.build(failedCt(), { channels: [], plan: {} });
+  assert.ok(!g.rows[0].slots.some(coversNow));
+  assert.deepEqual(pressOk(g, 'ČT1', (s) => !s.item), []);
+});
+
+test('guide, ČT failed today: a ČT filler away from now (split by hand: Samsung draws one whole-day filler) also plays live; Anténa away from now does not', () => {
+  const g = guide(failedCt());
+  const row = g.rows.find((r) => r.name === 'ČT1');
+  assert.equal(row.ctFailed, true);
+  // The Samsung layout makes one filler over the whole day; split it so a filler not covering now exists.
+  const whole = row.slots[0];
+  row.slots = [{ start: whole.start, end: NOW - 3600e3, item: null, el: null }, { start: NOW - 3600e3, end: whole.end, item: null, el: null }];
+  g.applyFocus = () => {}; // the drawn cells belong to the original slot; only the OK decision is under test
+  assert.ok(!coversNow(row.slots[0]));
+  assert.deepEqual(pressOk(g, 'ČT1', (s) => s === row.slots[0]), [['playItem', 'ct', 'CH_1', 'ct:CH_1']]);
+  assert.deepEqual(pressOk(g, 'Nova Action', (s) => !s.item && s.end <= NOW), []);
+});

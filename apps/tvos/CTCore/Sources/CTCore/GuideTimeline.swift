@@ -64,6 +64,19 @@ public struct GuideTimeline: Sendable, Equatable {
         return nil
     }
 
+    /// Time span of `segments[index]` (segments start at `start`); nil for an index outside the row.
+    public func timeRange<Item>(ofSegment index: Int, in segments: [Segment<Item>]) -> (start: Date, end: Date)? {
+        guard segments.indices.contains(index) else { return nil }
+        func width(_ segment: Segment<Item>) -> Double {
+            switch segment {
+            case .gap(let w), .item(_, let w): return w
+            }
+        }
+        let from = segments[..<index].reduce(0) { $0 + width($1) }
+        let to = from + width(segments[index])
+        return (start.addingTimeInterval(from / pointsPerSecond), start.addingTimeInterval(to / pointsPerSecond))
+    }
+
     public func x(for date: Date) -> Double {
         min(max(date, start), end).timeIntervalSince(start) * pointsPerSecond
     }

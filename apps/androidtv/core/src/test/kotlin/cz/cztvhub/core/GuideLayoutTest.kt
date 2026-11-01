@@ -130,4 +130,47 @@ class GuideLayoutTest {
         assertEquals(GuideLayout.Filler.OFF_AIR, GuideLayout.filler(ctRow = false, ctScheduleFailed = true))
         assertEquals(GuideLayout.Filler.OFF_AIR, GuideLayout.filler(ctRow = false, ctScheduleFailed = false))
     }
+
+    // T38 (spec/apps.md): a filler covering now plays the row's channel live, as its Živě card does; on a failed ČT
+    // day any of that row's fillers does.
+    @Test fun fillerCoveringNowPlaysTheChannelLive() {
+        val ct = PlayRequest.Live("CH_1", "ČT1")
+        val dvb = PlayRequest.DvbLive("nova", "Nova")
+        val off = GuideLayout.Filler.OFF_AIR
+        val now = t("21:15")
+        fun play(slot: GuideLayout.Slot<Programme>, live: PlayRequest?, at: Instant = now, filler: GuideLayout.Filler = off) =
+            GuideLayout.fillerPlay(slot, live, filler, axisStart, axisEnd, at)
+        val gap = GuideLayout.Slot<Programme>(t("21:00"), t("21:30"), null)
+        // a gap of a ČT or Anténa row at the current time
+        assertEquals(ct, play(gap, ct))
+        assertEquals(dvb, play(gap, dvb))
+        // start inclusive, end exclusive
+        assertEquals(ct, play(gap, ct, t("21:00")))
+        assertNull(play(gap, ct, t("21:30")))
+        // a gap before or after now does nothing
+        assertNull(play(gap, ct, t("20:59")))
+        assertNull(play(gap, ct, t("22:00")))
+        // a programme airing now opens its page instead
+        val airing = GuideLayout.Slot(t("21:00"), t("21:30"), p("a", "21:00", "21:30"))
+        assertNull(play(airing, ct))
+        assertNull(play(airing, ct, filler = GuideLayout.Filler.SCHEDULE_FAILED))
+        // a row without a live request (Poslanecká sněmovna)
+        assertNull(play(gap, null))
+    }
+
+    @Test fun anyFillerOfAFailedCtRowPlaysLiveOnTheDayContainingNow() {
+        val ct = PlayRequest.Live("CH_1", "ČT1")
+        val failed = GuideLayout.Filler.SCHEDULE_FAILED
+        // Android's failed ČT row: one filler over the whole day, under the now line
+        val day = GuideLayout.row(emptyList<Programme>(), axisStart, axisEnd).single()
+        assertEquals(ct, GuideLayout.fillerPlay(day, ct, failed, axisStart, axisEnd, t("21:15")))
+        // a filler of that row away from now (as the other apps cut it) plays live too, unlike an off-air gap
+        val earlier = GuideLayout.Slot<Programme>(t("20:00"), t("20:30"), null)
+        assertEquals(ct, GuideLayout.fillerPlay(earlier, ct, failed, axisStart, axisEnd, t("22:15")))
+        assertNull(GuideLayout.fillerPlay(earlier, ct, GuideLayout.Filler.OFF_AIR, axisStart, axisEnd, t("22:15")))
+        // a failed day that does not contain now (an earlier or a later day) does nothing; the axis end is exclusive
+        assertNull(GuideLayout.fillerPlay(earlier, ct, failed, axisStart, axisEnd, t("23:00")))
+        assertNull(GuideLayout.fillerPlay(earlier, ct, failed, axisStart, axisEnd, t("19:59")))
+        assertEquals(ct, GuideLayout.fillerPlay(earlier, ct, failed, axisStart, axisEnd, axisStart))
+    }
 }

@@ -228,6 +228,7 @@ class CtWebGatewayTest(unittest.TestCase):
         self.assertEqual(self.get("/dvb/ct/schedule", {"channels": all_six, "date": "2026-10-18"}).status, 200)
 
     def test_schedule_cache_10_minutes(self):
+        self.ct.answers = {api.GRAPHQL_URL: fixture("schedule_ct1_ct24.json")}
         query = {"channels": "ct1", "date": "2026-10-18"}
         self.get("/dvb/ct/schedule", query)
         self.clock[0] += 599
@@ -236,6 +237,18 @@ class CtWebGatewayTest(unittest.TestCase):
         self.clock[0] += 1
         self.get("/dvb/ct/schedule", query)
         self.assertEqual(len(self.ct.calls), 2)
+
+    def test_a_schedule_with_errors_is_passed_on_but_not_cached(self):
+        # ČT answered its outage of 2026-11-01 with 200 + errors for hours; cached, the web kept showing it
+        outage = json.dumps({"data": None, "errors": [{"message": "Omlouváme se, došlo k chybě na naší straně."}]})
+        self.ct.answers = {api.API_BASE: (200, outage.encode())}
+        query = {"channels": "ct1", "date": "2026-10-18"}
+        first = self.get("/dvb/ct/schedule", query)
+        self.assertEqual((first.status, first.body), (200, outage.encode()))  # unchanged, the apps show the error
+        self.ct.answers = {}
+        self.clock[0] += 1
+        self.get("/dvb/ct/schedule", query)
+        self.assertEqual(len(self.ct.calls), 2)  # asked again at once, not after 10 minutes
 
     # -- keys --------------------------------------------------------------------------------
     def test_key_rules(self):

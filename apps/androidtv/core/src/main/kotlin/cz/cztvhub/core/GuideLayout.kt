@@ -89,6 +89,27 @@ object GuideLayout {
     fun filler(ctRow: Boolean, ctScheduleFailed: Boolean): Filler =
         if (ctRow && ctScheduleFailed) Filler.SCHEDULE_FAILED else Filler.OFF_AIR
 
+    /**
+     * What selecting [slot] of a row whose channel plays live as [live] does when it is a filler (spec/apps.md, T38):
+     * it plays the channel live, as its Živě card does, when it covers [now] (any gap of a ČT or Anténa row), and any
+     * filler of a row whose [filler] is [Filler.SCHEDULE_FAILED] does so on the day containing now (the guide's
+     * [axisStart, axisEnd)). A filler at another time, a programme slot (it opens its page) or a row without a live
+     * request (Poslanecká sněmovna: its stream is one programme cell) → null. (Android lays a failed ČT row out as one
+     * filler over the whole day, so there both cases meet; the other apps cut gaps every 30 minutes.)
+     */
+    fun fillerPlay(
+        slot: Slot<*>,
+        live: PlayRequest?,
+        filler: Filler,
+        axisStart: Instant,
+        axisEnd: Instant,
+        now: Instant,
+    ): PlayRequest? {
+        if (slot.item != null) return null
+        val today = !now.isBefore(axisStart) && now.isBefore(axisEnd)
+        return live?.takeIf { slot.contains(now) || filler == Filler.SCHEDULE_FAILED && today }
+    }
+
     /** Axis ticks every [step], starting at [axisStart]. */
     fun ticks(axisStart: Instant, axisEnd: Instant, step: Duration = Duration.ofMinutes(30)): List<Instant> =
         generateSequence(axisStart) { it.plus(step) }.takeWhile { !it.isAfter(axisEnd) }.toList()
