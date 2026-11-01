@@ -91,4 +91,40 @@ class ScheduleRepositoryTest {
         assertEquals(null, ct1.current)
         assertEquals("Testovací pořad 5", ct1.next?.title)
     }
+
+    /** Fails the request for the US-format [failing] dates, serves the schedule fixture for the others. */
+    private fun failingOn(vararg failing: String) = HttpTransport { _, body ->
+        Fixtures.response(if (failing.any { body.orEmpty().contains("\"date\":\"$it\"") }) "graphql_error.json" else "schedule_ct1_ct24.json")
+    }
+
+    private fun assertScheduleFailed(block: () -> Unit) {
+        try {
+            block(); throw AssertionError("should fail")
+        } catch (e: CtException) {
+            assertEquals(Messages.SCHEDULE_FAILED, e.userMessage)
+        }
+    }
+
+    // T36: the broadcast day on air failed → Živě's ČT cards say "Program se nepodařilo načíst".
+    @Test fun onAirFailsWhenTheDayOnAirFailed() {
+        now = Instant.parse("2026-10-16T07:10:00Z") // 09:10 Prague: the 16th's broadcast day
+        assertScheduleFailed { repo(failingOn("10.16.2026")).onAir() }
+    }
+
+    @Test fun onAirAfterMidnightFailsWhenThePreviousDateFailed() {
+        now = Instant.parse("2026-10-16T22:30:00Z") // 00:30 on the 17th: still the 16th's broadcast day
+        assertScheduleFailed { repo(failingOn("10.16.2026")).onAir() }
+    }
+
+    @Test fun onAirIgnoresAFailedDayThatIsNotOnAir() {
+        now = Instant.parse("2026-10-16T07:10:00Z")
+        val onAir = repo(failingOn("10.15.2026")).onAir()
+        assertEquals("Testovací pořad 3", onAir.getValue("CH_1").current?.title)
+    }
+
+    @Test fun networkFailureIsAFailedSchedule() {
+        // Offline or a timeout: the schedule's text, not "Stream se nepodařilo načíst".
+        val offline = HttpTransport { _, _ -> throw java.io.IOException("offline") }
+        assertScheduleFailed { repo(offline).day(LocalDate.of(2026, 10, 16)) }
+    }
 }

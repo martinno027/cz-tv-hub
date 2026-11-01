@@ -170,6 +170,25 @@
       var span = item.end - item.start;
       if (span <= 0) return 0;
       return Math.min(1, Math.max(0, (now - item.start) / span));
+    },
+
+    OFF_AIR: 'Mimo vysílání',
+
+    /**
+     * The text of a guide row's filler slots (spec/apps.md, T36): a ČT row of a day whose ČT schedule failed says
+     * "Program se nepodařilo načíst" in the row itself; every other row (Anténa, Sněmovna, ČT with data) "Mimo vysílání".
+     */
+    fillerText: function (source, ctFailed) {
+      return source === 'ct' && ctFailed ? CT.Messages.SCHEDULE_FAILED : Entries.OFF_AIR;
+    },
+
+    /**
+     * The muted line of a Živě card without a current programme: a ČT card when ČT's schedule failed (and nothing
+     * is known) says so; a channel with data but nothing on "Mimo vysílání"; still loading = ''.
+     */
+    offAirText: function (source, info, ctFailed) {
+      if (source === 'ct' && ctFailed && !info) return CT.Messages.SCHEDULE_FAILED;
+      return info ? Entries.OFF_AIR : '';
     }
   };
 

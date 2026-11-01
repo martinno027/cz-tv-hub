@@ -5,7 +5,7 @@ import SwiftUI
 /// order (Nastavení → Kanály: hidden channels and switched-off sources left out). Select → live playback.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
-    @State private var onAir: [String: Programme] = [:]
+    @State private var onAir = ScheduleStore.OnAir()
     @State private var antennaChannels: [DVBChannel] = []
     @State private var antennaOnAir: [String: DVBEvent] = [:]
     @State private var antennaError: String?
@@ -77,7 +77,7 @@ struct LiveView: View {
         .task(id: LoadKey(gateway: model.gateway, reloads: model.gatewayReloads)) {
             // Schedules are cached, so this only hits the network when today's plan is stale.
             while !Task.isCancelled {
-                onAir = await model.schedules.onAir(at: Date())
+                onAir = await model.schedules.onAirNow(at: Date())
                 await loadAntenna()
                 try? await Task.sleep(for: .seconds(60))
             }
@@ -90,9 +90,11 @@ struct LiveView: View {
         } label: {
             switch channel {
             case .ct(let ct):
-                let programme = onAir[ct.slug]
+                let programme = onAir.programmes[ct.slug]
+                // the day's ČT schedule failed: its text instead of a programme (spec/apps.md, T36)
                 ChannelCard(number: number, name: ct.name, source: .ct, title: programme?.title,
-                            start: programme?.start, end: programme?.end, now: now)
+                            start: programme?.start, end: programme?.end, now: now,
+                            placeholder: onAir.failed.contains(ct.slug) ? CTError.scheduleFailed : nil)
             case .antenna(let dvb):
                 let event = antennaOnAir[dvb.id]
                 ChannelCard(number: number, name: dvb.name, source: .dvb, title: event?.title,
@@ -132,6 +134,8 @@ private struct ChannelCard: View {
     let now: Date
     /// Poslanecká sněmovna: whether the stream is on (badge) or not (dimmed card).
     var parliament: PSPLiveState? = nil
+    /// Shown instead of "Živé vysílání" when there is no programme (the ČT schedule failed).
+    var placeholder: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -179,7 +183,7 @@ private struct ChannelCard: View {
                     .tint(.red)
             } else {
                 Spacer(minLength: 0)
-                Text("Živé vysílání")
+                Text(placeholder ?? "Živé vysílání")
                     .font(.headline)
                     .foregroundStyle(.secondary)
             }

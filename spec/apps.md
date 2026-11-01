@@ -135,7 +135,12 @@ query($channels: [String!]!, $date: Date!) {
 ```
 `start`/`end` are ISO-8601 UTC (`2026-10-17T05:00:00.000Z`). One request returns all channels for one broadcast
 day; skip malformed entries; `errors` without `data` → error "Program se nepodařilo načíst". A failing day
-(future days may be unpublished) must not break the other days. Fixtures `schedule_ct1_ct24.json`, `graphql_error.json`.
+(future days may be unpublished) must not break the other days. **In the guide (T36, all apps and the web)**: when a
+day's ČT schedule failed, each ČT row of that day shows **"Program se nepodařilo načíst"** as its filler (where it
+would say "Mimo vysílání"), and nothing is drawn over other rows; Anténa and Sněmovna rows are unaffected. Živě's
+ČT cards show the same text instead of a programme. There is no retry button over the grid any more (it covered the other rows): a failed
+day is fetched again when it is opened again (its chip, crossing into it, reopening the guide); a failure is not
+cached. A later refresh that fails keeps the programmes already shown. Fixtures `schedule_ct1_ct24.json`, `graphql_error.json`.
 Cache schedules in memory per day; refetch today's after ~1 h. Polite: no more than ~10 requests per screen open.
 
 Fixture files wrap responses as `{"status": <http status>, "body": <json>}`; tokens are replaced by `TOKEN`.

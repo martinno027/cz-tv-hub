@@ -85,6 +85,19 @@ test('schedule: ČT GraphQL errors pass through (the shared parser decides)', as
   await assert.rejects(a.schedules(['ct1'], day), (e) => e.userMessage === CT.Messages.SCHEDULE_FAILED);
 });
 
+test('schedule: a gateway refusal (ČT unreachable) is a failed ČT day, said in the guide\'s ČT rows (T36)', async () => {
+  const day = CT.Days.today(Date.parse('2026-10-16T10:00:00Z'));
+  const path = '/dvb/ct/schedule?channels=ct1&date=2026-10-16';
+  const { api: a } = api({ [path]: { status: 502, body: '{"error": "ČT neodpovídá."}' } });
+  let failed = null;
+  await assert.rejects(a.schedules(['ct1'], day), (e) => { failed = e; return true; });
+  // the guide's ČT promise gives build() this error; a ČT row then shows it as its filler, Anténa rows do not
+  const error = failed.userMessage || CT.Messages.SCHEDULE_FAILED;
+  assert.equal(error, CT.Messages.SCHEDULE_FAILED);
+  assert.equal(CT.Entries.fillerText('ct', !!error), 'Program se nepodařilo načíst');
+  assert.equal(CT.Entries.fillerText('dvb', !!error), 'Mimo vysílání');
+});
+
 test('route: only the three CT calls of the apps; anything else is refused and never sent', async () => {
   const R = CT.WebCt.route;
   assert.equal(R({ method: 'GET', url: 'https://api.ceskatelevize.cz/video/v1/playlist-live/v1/stream-data/channel/CH_24?x=1' }), '/dvb/ct/live/CH_24');

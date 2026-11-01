@@ -39,9 +39,12 @@ class ScheduleRepository(
     /**
      * Programme airing now (and the next one) on each channel. Programmes after midnight belong
      * to the previous broadcast day, so yesterday's plan is consulted when today's has nothing on air.
+     * Throws [CtException] when the broadcast day on air (`Days.openDay`) failed: no channel can have a programme
+     * on air then, and Živě's ČT cards say "Program se nepodařilo načíst" (spec/apps.md, T36), not "no programme".
      */
     fun onAir(now: Instant = clock()): Map<String, OnAir> {
         val today = Days.today(now)
+        val onAirDay = Days.openDay(now)
         val result = HashMap<String, OnAir>()
         var lastError: CtException? = null
         for (day in listOf(today, today.minusDays(1))) {
@@ -49,6 +52,7 @@ class ScheduleRepository(
             val plan = try {
                 day(day)
             } catch (e: CtException) {
+                if (day == onAirDay) throw e
                 lastError = e
                 continue
             }

@@ -121,4 +121,13 @@ class GuideLayoutTest {
         val pushed = GuideLayout.Slot(t("20:50"), t("21:30"), p("o", "20:40", "21:30"))
         assertEquals(t("20:45"), GuideLayout.verticalMoment(false, pushed, t("20:45"), cursor))
     }
+
+    // T36 (spec/apps.md): a failed ČT day changes the filler of ČT rows only.
+    @Test fun failedCtScheduleChangesOnlyCtFillers() {
+        assertEquals(GuideLayout.Filler.SCHEDULE_FAILED, GuideLayout.filler(ctRow = true, ctScheduleFailed = true))
+        assertEquals(GuideLayout.Filler.OFF_AIR, GuideLayout.filler(ctRow = true, ctScheduleFailed = false))
+        // Anténa and Poslanecká sněmovna rows
+        assertEquals(GuideLayout.Filler.OFF_AIR, GuideLayout.filler(ctRow = false, ctScheduleFailed = true))
+        assertEquals(GuideLayout.Filler.OFF_AIR, GuideLayout.filler(ctRow = false, ctScheduleFailed = false))
+    }
 }

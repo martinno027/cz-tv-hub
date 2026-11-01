@@ -324,7 +324,9 @@ main {
   overflow: hidden;
 }
 
-/* Over the first row's cells as an opaque band (the channel name stays), so the text never draws over a cell (T29) */
+/* Over the first row's cells as an opaque band (the channel name stays), so the text never draws over a cell (T29).
+   Only while loading, with every channel hidden (no rows) and for a day without any programme; a failed ČT day is
+   said in the ČT rows themselves (T36), since after scrolling the first visible row is another channel's. */
 #grid-message {
   position: absolute;
   top: 40px;

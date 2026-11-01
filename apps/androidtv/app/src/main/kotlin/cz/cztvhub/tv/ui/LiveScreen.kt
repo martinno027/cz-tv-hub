@@ -56,6 +56,9 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val dvb by viewModel.dvb.collectAsStateWithLifecycle()
     val current = (onAir as? Load.Ready)?.value.orEmpty()
     val loading = onAir is Load.Loading
+    // The broadcast day on air failed (and no earlier answer to keep): "Program se nepodařilo načíst" on the ČT
+    // cards instead of a programme (spec/apps.md, T36).
+    val failed = (onAir as? Load.Failed)?.message
     val firstCard = remember { FocusRequester() }
     val antenna = dvb
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
@@ -113,7 +116,7 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
                             source = ChannelSource.CT,
                             current = info?.current?.let { CardItem(it.title, it) },
                             next = info?.next?.let { CardItem(it.title, it) },
-                            emptyText = stringResource(if (loading) R.string.loading else R.string.no_programme_info),
+                            emptyText = failed ?: stringResource(if (loading) R.string.loading else R.string.no_programme_info),
                             now = now,
                             modifier = modifier,
                             onClick = { onPlay(PlayRequest.Live(ct.id, ct.name)) },

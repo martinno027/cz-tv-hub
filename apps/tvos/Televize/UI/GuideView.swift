@@ -145,6 +145,8 @@ private struct GuideRow: Identifiable {
     let name: String
     let source: ChannelPrefs.Source
     let entries: [GuideEntry]
+    /// Text of the row's focusable gaps: "Mimo vysílání", on ČT rows of a failed day "Program se nepodařilo načíst".
+    let filler: String
 }
 
 /// Rows, time axis and cell segments, computed once per data change (not on every focus move:
@@ -155,7 +157,7 @@ private struct GuideLayout {
     var timeline = GuideTimeline(start: .distantPast, end: .distantPast, pointsPerSecond: GuideView.pointsPerSecond)
     var segments: [[GuideTimeline.Segment<GuideEntry>]] = []
     var entries: [String: GuideEntry] = [:]
-    /// Row index of every focusable cell id (programmes and "Mimo vysílání" gaps).
+    /// Row index of every focusable cell id (programmes and filler gaps, "Mimo vysílání").
     var rowOf: [String: Int] = [:]
     /// Segment index of every focusable cell id within its row.
     var segmentOf: [String: Int] = [:]
@@ -258,7 +260,9 @@ struct GuideView: View {
     @State private var schedule: ScheduleStore.Schedule = [:]
     @State private var antennaChannels: [DVBChannel] = []
     @State private var antennaEPG: AntennaStore.EPG = [:]
-    @State private var loadError: String?
+    /// The day's ČT schedule failed: ČT rows say "Program se nepodařilo načíst" in their gaps (spec/apps.md, T36);
+    /// the other rows stay as they are. Retried on the next open of the guide.
+    @State private var ctFailed = false
     @State private var layout = GuideLayout()
     @State private var window = Window()
     @State private var focusedEntry: GuideEntry?
@@ -356,17 +360,23 @@ struct GuideView: View {
 
     private func buildRows() -> [GuideRow] {
         let bounds = Self.bounds(of: day)
+        let ctFailed = ctFailed
+        func filler(_ source: ChannelPrefs.Source) -> String {
+            GuideFiller.text(source: source, ctScheduleFailed: ctFailed)
+        }
         return model.channelPrefs.channels(antenna: antennaChannels).visible.map { channel in
             switch channel {
             case .ct(let ct):
                 return GuideRow(id: ct.slug, name: ct.name, source: .ct,
-                                entries: (schedule[ct.slug] ?? []).map(GuideEntry.ct))
+                                entries: (schedule[ct.slug] ?? []).map(GuideEntry.ct), filler: filler(.ct))
             case .antenna(let dvb):
                 return GuideRow(id: "dvb|\(dvb.id)", name: dvb.name, source: .dvb,
-                                entries: (antennaEPG[dvb.id] ?? []).map { GuideEntry.antenna($0, dvb) })
+                                entries: (antennaEPG[dvb.id] ?? []).map { GuideEntry.antenna($0, dvb) },
+                                filler: filler(.dvb))
             case .parliament(let stream):
                 return GuideRow(id: stream.key, name: stream.name, source: .psp,
-                                entries: [.parliament(stream, start: bounds.start, end: bounds.end)])
+                                entries: [.parliament(stream, start: bounds.start, end: bounds.end)],
+                                filler: filler(.psp))
             }
         }
     }
@@ -416,13 +426,7 @@ struct GuideView: View {
 
     private func grid(now: Date, today: BroadcastDay) -> some View {
         Group {
-            if let loadError {
-                VStack(spacing: 24) {
-                    Text(loadError).font(.headline)
-                    Button("Zkusit znovu") { Task { await load() } }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if layout.version > 0, layout.rows.isEmpty,
+            if layout.version > 0, layout.rows.isEmpty,
                       model.antenna == nil || !antennaChannels.isEmpty || !model.channelPrefs.prefs.isOn(.dvb) {
                 // every channel hidden in Nastavení → Kanály
                 Text(ChannelPrefsUI.allHiddenMessage)
@@ -480,23 +484,20 @@ struct GuideView: View {
 
     private func load() async {
         let now = Date()
-        loadError = nil
         await loadAntenna()
         await model.images.refreshStatus()  // at most every 5 min
         do {
-            let loaded = try await model.schedules.schedule(for: day)
-            schedule = loaded
-            rebuildLayout()
-            positionAtAnchor(now: now)
+            schedule = try await model.schedules.schedule(for: day)
+            ctFailed = false
         } catch is CancellationError {
             return
         } catch {
+            // The grid stays: Anténa and Sněmovna rows as usual, ČT rows with the failure as their filler.
             schedule = [:]
-            dayAnchor = nil
-            selection = nil
-            rebuildLayout()
-            loadError = AppModel.message(for: error)
+            ctFailed = true
         }
+        rebuildLayout()
+        positionAtAnchor(now: now)
     }
 
     /// Anténa rows; a day outside the gateway's range (or an unreachable gateway) just leaves them empty.
@@ -514,11 +515,14 @@ struct GuideView: View {
     /// focus on the programme airing now in the first row.
     private func reopen() {
         model.images.guideOpened()
+        let retry = ctFailed  // a failed ČT schedule is not cached: the open asks again
         dayAnchor = nil
         selection = Selection(anchor: .now, moveFocus: false)
         let target = GuideDays.openDay(now: Date())
         if target != day {
             day = target  // loads it, then positions
+        } else if retry {
+            Task { await load() }  // positions once loaded
         } else if layout.version > 0 {
             positionAtAnchor(now: Date())
         }
@@ -842,7 +846,7 @@ private struct GuideGrid: View, Equatable {
                 case .gap(let width):
                     // Focusable filler, so up/down never gets stuck on a row with a long gap.
                     Button {} label: {
-                        Text("Mimo vysílání")
+                        Text(row.filler)
                             .font(.system(size: 22))
                             .lineLimit(1)
                             .padding(.horizontal, 12)

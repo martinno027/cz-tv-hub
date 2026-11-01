@@ -80,7 +80,8 @@ cd ../.. && python3 -m http.server 8000    # z kořene repozitáře
 
 Ukázkový režim (`?demo`) odpovídá na všechny požadavky z testovacích fixtur (`spec/fixtures`) posunutých na
 zvolený den; nic se nepřehrává. Přenosy Poslanecké sněmovny jsou v ukázce vymyšlené (vysílá jen Stream 1,
-`?demo&psp=13` = vysílají 1 a 3), na CDN sněmovny se ukázka nikdy neptá. Ovládání: šipky, Enter, Esc/Backspace = Zpět, PageUp/PageDown = o stránku řádků.
+`?demo&psp=13` = vysílají 1 a 3), na CDN sněmovny se ukázka nikdy neptá. `?demo&ct=down` = program ČT se
+nenačte pro žádný den: řádky ČT v průvodci a karty ČT na Živě říkají „Program se nepodařilo načíst“. Ovládání: šipky, Enter, Esc/Backspace = Zpět, PageUp/PageDown = o stránku řádků.
 `?demo&timeline` rovnou otevře lištu anténní nahrávky nad `spec/fixtures/dvb/dvb_timeline.json` (přehrávání jen
 simulované, poloha běží s hodinami), `?demo&timeline=growing` totéž pro ještě rostoucí okno („Teď“).
 Nastavení → Profil mluví v ukázce s vymyšlenou bránou v paměti (profil **Demo**, heslo **1234**); po obnovení

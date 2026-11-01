@@ -48,7 +48,7 @@ enum ProgrammeState {
         case .archive: return "Přehrát ze záznamu"
         case .unavailable: return "Ze záznamu zřejmě nedostupné"
         case .future: return "Ještě nezačalo"
-        case .offAir: return "Mimo vysílání"
+        case .offAir: return GuideFiller.offAir
         }
     }
 
