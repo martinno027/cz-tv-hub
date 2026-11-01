@@ -272,3 +272,18 @@ test('audio tracks: hls.js renditions (LANGUAGE) and the browser\'s own audioTra
   assert.equal(native.b.selectAudio(1), true);
   assert.deepEqual(list.map((t) => t.enabled), [false, true]);
 });
+
+test('hls.js: never X-Cztvhub-Client (T37) — not to the gateway\'s media, not to a CDN (no custom header, no CORS preflight)', () => {
+  const Hls = fakeHls();
+  const { b } = backend(fakeVideo({}), Hls);
+  b.open({ url: 'https://ctcdn.example.invalid/hls/master.m3u8', kind: 'vod' }, 0);
+  const setup = Hls.instances[0].config.xhrSetup;
+  const gateway = xhr();
+  setup(gateway, ORIGIN + '/dvb/live/ch1.m3u8');
+  assert.deepEqual(Object.keys(gateway.headers), ['Authorization']);
+  for (const url of ['https://ctcdn.example.invalid/hls/master.m3u8', 'https://psp.example.invalid/live/index.m3u8']) {
+    const x = xhr();
+    setup(x, url);
+    assert.deepEqual(x.headers, {}, url); // a CDN request stays a "simple" one
+  }
+});

@@ -144,3 +144,21 @@ test('the CT transport of the web wraps the app\'s (and the demo\'s) transport',
   await t({ method: 'GET', url: CT.WebCt.API + '/video/v1/playlist-live/v1/stream-data/channel/CH_1?x', headers: {} });
   assert.deepEqual(seen, ['http://192.168.1.20:8098/dvb/ct/live/CH_1']);
 });
+
+test('X-Cztvhub-Client on the web: "web/<version> (<build>)" on GET /dvb/status and the profile calls only (T37)', async () => {
+  const seen = [];
+  const transport = (q) => { seen.push(q); return Promise.resolve({ status: 200, body: '{"token": "t", "name": "a", "settings": {"v": 1}}' }); };
+  const config = new CT.DvbConfig('http://192.168.1.20:8098', KEY);
+  assert.equal(CT.ClientHeader.current(), 'web'); // no build-info.js: a development page
+  global.CT_BUILD_INFO = { version: '1.0.0', build: '412' };
+  try {
+    const client = new CT.DvbClient(config, transport);
+    await client.status().catch(() => {});
+    await client.channels().catch(() => {});
+    await new CT.Profile.ProfileClient(config, transport).login('a', 'heslo1234').catch(() => {});
+  } finally {
+    delete global.CT_BUILD_INFO;
+  }
+  assert.deepEqual(seen.map((q) => [q.url.replace('http://192.168.1.20:8098', ''), q.headers['X-Cztvhub-Client']]), [
+    ['/dvb/status', 'web/1.0.0 (412)'], ['/dvb/channels', undefined], ['/dvb/profiles/login', 'web/1.0.0 (412)']]);
+});

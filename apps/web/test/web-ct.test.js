@@ -161,3 +161,25 @@ test('demo: the web demo turns the gateway routes back into the CT requests the 
   assert.equal(r.status, 403);
   assert.equal(JSON.parse(r.body).error, CT.WebCt.HOME_ONLY);
 });
+
+test('ČT through the gateway never carries X-Cztvhub-Client (T37: only /dvb/status and the profile routes)', async () => {
+  global.CT_BUILD_INFO = { version: '1.0.0', build: '412' };
+  const saved = CT.Platform;
+  CT.Platform = { name: 'web' };
+  try {
+    assert.equal(CT.ClientHeader.current(), 'web/1.0.0 (412)'); // would be sent if the rule let it
+    const { g, api: a } = api({
+      '/dvb/ct/live/CH_1': response('live_CH_1.json'),
+      '/dvb/ct/vod/1': response('vod_ok.json')
+    });
+    await a.liveStreams('CH_1').catch(() => {});
+    await a.vodUrl('1').catch(() => {});
+    await a.schedules(['ct1', 'ct24'], '2026-11-01').catch(() => {});
+    assert.equal(g.seen.length, 3);
+    assert.ok(g.seen.every((q) => /\/dvb\/ct\//.test(q.url)));
+    g.seen.forEach((q) => assert.equal(q.headers['X-Cztvhub-Client'], undefined, q.url));
+  } finally {
+    CT.Platform = saved;
+    delete global.CT_BUILD_INFO;
+  }
+});

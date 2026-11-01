@@ -178,6 +178,7 @@
   DvbClient.prototype.get = function (path) {
     var headers = this.config.authHeaders();
     headers.Accept = 'application/json';
+    CT.ClientHeader.add(headers, 'GET', path); // only on GET /dvb/status (sign-in log, T37)
     return this.transport({ method: 'GET', url: this.config.url(path), headers: headers, body: null })
       .catch(function (e) {
         throw new CT.CtError('gateway ' + path + ' failed: ' + e, DM.UNREACHABLE);

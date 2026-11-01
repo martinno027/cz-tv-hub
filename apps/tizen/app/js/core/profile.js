@@ -164,6 +164,7 @@
     headers.Accept = 'application/json';
     if (token) headers[TOKEN_HEADER] = token;
     if (payload !== undefined) headers['Content-Type'] = 'application/json';
+    CT.ClientHeader.add(headers, method, path); // which app signs in (sign-in log, T37)
     var request = { method: method, url: this.config.url(path), headers: headers,
       body: payload !== undefined ? JSON.stringify(payload) : null };
     return this.transport(request).then(function (r) {
