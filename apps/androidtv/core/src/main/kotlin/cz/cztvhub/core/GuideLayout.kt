@@ -74,6 +74,21 @@ object GuideLayout {
         return if (live || airing) now else cursor
     }
 
+    /** What a guide row's filler slots say. */
+    enum class Filler {
+        /** "Mimo vysílání": nothing is scheduled there. */
+        OFF_AIR,
+        /** "Program se nepodařilo načíst" ([Messages.SCHEDULE_FAILED]): the day's ČT schedule failed. */
+        SCHEDULE_FAILED,
+    }
+
+    /**
+     * The filler of a row (spec/apps.md, T36): a ČT row of a day whose ČT schedule failed says the schedule could
+     * not be loaded; Anténa and Poslanecká sněmovna rows are unaffected by it.
+     */
+    fun filler(ctRow: Boolean, ctScheduleFailed: Boolean): Filler =
+        if (ctRow && ctScheduleFailed) Filler.SCHEDULE_FAILED else Filler.OFF_AIR
+
     /** Axis ticks every [step], starting at [axisStart]. */
     fun ticks(axisStart: Instant, axisEnd: Instant, step: Duration = Duration.ofMinutes(30)): List<Instant> =
         generateSequence(axisStart) { it.plus(step) }.takeWhile { !it.isAfter(axisEnd) }.toList()

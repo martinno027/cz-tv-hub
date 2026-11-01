@@ -80,6 +80,7 @@ import cz.cztvhub.core.GuideLayout
 import cz.cztvhub.core.GuideWindow
 import cz.cztvhub.core.ImagePrefetch
 import cz.cztvhub.core.ImageRequest
+import cz.cztvhub.core.Messages
 import cz.cztvhub.core.Decisions
 import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.ResumeCard
@@ -295,21 +296,22 @@ fun GuideScreen(
         if (notice != null) Text(notice, color = Palette.textDim)
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
-            is Load.Failed -> CenteredMessage(plan.message) {
-                Button(onClick = { viewModel.selectDay(day, force = true) }) { Text(stringResource(R.string.retry)) }
-            }
-            is Load.Ready -> {
+            // A failed ČT day keeps the grid (spec/apps.md, T36): its ČT rows say "Program se nepodařilo načíst",
+            // Anténa and Poslanecká sněmovna rows stay as they are. Picking the day again retries it.
+            is Load.Failed, is Load.Ready -> {
+                val ctPlan = (plan as? Load.Ready)?.value.orEmpty()
+                val ctFailed = plan is Load.Failed
                 val dvbChannels = dvb?.channels.orEmpty()
                 val dvbPlan = dvbPlans[day].orEmpty()
-                val rows = remember(plan.value, dvbChannels, dvbPlan, prefs) {
-                    guideRows(plan.value, ChannelOrder.visible(prefs, dvbChannels), dvbPlan, day)
+                val rows = remember(ctPlan, ctFailed, dvbChannels, dvbPlan, prefs) {
+                    guideRows(ctPlan, ctFailed, ChannelOrder.visible(prefs, dvbChannels), dvbPlan, day)
                 }
                 // Anténa on but its channels not loaded yet: not "everything hidden".
                 val antennaPending = connecting || dvb != null && prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) &&
                     dvbChannels.isEmpty() && dvb?.error == null
                 if (rows.isEmpty() && !antennaPending) {
                     CenteredMessage(stringResource(R.string.channels_all_hidden))
-                } else if (rows.all { it.entries.isEmpty() }) {
+                } else if (rows.all { it.entries.isEmpty() && it.filler == GuideLayout.Filler.OFF_AIR }) {
                     CenteredMessage(stringResource(R.string.empty_day))
                 } else {
                     // "Image prefetch": a new window when the focus moved more than 1 h or 3 rows from the last one.
@@ -556,10 +558,12 @@ internal fun stateLabel(entry: Entry, now: Instant, psp: PspState): String = whe
 
 /**
  * One row per channel "Kanály" shows, CT internet, Anténa and Poslanecká sněmovna mixed in its order ([channels]
- * already arranged); empty rows show as "Mimo vysílání", a stream's row is one cell over the whole [day].
+ * already arranged); empty rows show as "Mimo vysílání" (ČT rows "Program se nepodařilo načíst" when [ctFailed]),
+ * a stream's row is one cell over the whole [day].
  */
 private fun guideRows(
     plan: DayPlan,
+    ctFailed: Boolean,
     channels: List<ListedChannel>,
     dvbPlan: Map<String, List<DvbEvent>>,
     day: LocalDate,
@@ -570,7 +574,10 @@ private fun guideRows(
         val ch = listed.dvb
         val stream = listed.psp
         when {
-            ct != null -> GuideRow(ct.id, ct.name, plan[ct.id].orEmpty().map { CtEntry(ct, it) })
+            ct != null -> GuideRow(
+                ct.id, ct.name, plan[ct.id].orEmpty().map { CtEntry(ct, it) },
+                GuideLayout.filler(ctRow = true, ctScheduleFailed = ctFailed),
+            )
             ch != null -> GuideRow("dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) })
             stream != null -> GuideRow(stream.key, stream.name, listOf(PspEntry(stream, axisStart, axisEnd)))
             else -> null
@@ -791,7 +798,11 @@ private fun EpgGrid(
                     Column(Modifier.width(totalWidth)) {
                         TimeHeader(axisStart, axisEnd, visibleStartPx = { scroll.value.toFloat() }, viewportPx = viewportPx)
                         val shown = window
-                        cellRows.forEachIndexed { rowIndex, (_, cells) ->
+                        cellRows.forEachIndexed { rowIndex, (row, cells) ->
+                            val fillerText = when (row.filler) {
+                                GuideLayout.Filler.OFF_AIR -> stringResource(R.string.off_air)
+                                GuideLayout.Filler.SCHEDULE_FAILED -> Messages.SCHEDULE_FAILED
+                            }
                             Box(Modifier.height(rowHeight).fillMaxWidth()) {
                                 if (rowIndex in shown.rows) cells.forEachIndexed { cellIndex, cell ->
                                     if (shown.overlaps(cell.fromMin, cell.toMin)) key(cell) {
@@ -806,6 +817,7 @@ private fun EpgGrid(
                                         .focusRequester(cell.requester)
                                     ProgrammeCell(
                                         p = p,
+                                        fillerText = fillerText,
                                         startLabel = cell.startLabel,
                                         now = now,
                                         stickyShiftPx = {
@@ -882,6 +894,8 @@ private fun TimeHeader(axisStart: Instant, axisEnd: Instant, visibleStartPx: () 
 @Composable
 private fun ProgrammeCell(
     p: Entry?,
+    /** What a filler ([p] null) says: "Mimo vysílání", or the failed ČT schedule's text. */
+    fillerText: String,
     startLabel: String,
     now: Instant,
     stickyShiftPx: () -> Float,
@@ -928,7 +942,7 @@ private fun ProgrammeCell(
             ) {
                 Text(
                     when (p) {
-                        null -> stringResource(R.string.off_air)
+                        null -> fillerText
                         is PspEntry -> p.cellTitle(now, psp)
                         else -> p.title
                     },

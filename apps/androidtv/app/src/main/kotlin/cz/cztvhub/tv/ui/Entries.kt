@@ -3,6 +3,7 @@ package cz.cztvhub.tv.ui
 import cz.cztvhub.core.Action
 import cz.cztvhub.core.Channel
 import cz.cztvhub.core.Decisions
+import cz.cztvhub.core.GuideLayout
 import cz.cztvhub.core.PageButton
 import cz.cztvhub.core.PageSource
 import cz.cztvhub.core.PageState
@@ -23,8 +24,16 @@ import cz.cztvhub.core.dvb.DvbEvent
 import java.time.Duration
 import java.time.Instant
 
-/** A guide row: a CT internet channel, an "Anténa" channel or a Poslanecká sněmovna stream. */
-data class GuideRow(val key: String, val name: String, val entries: List<Entry>)
+/**
+ * A guide row: a CT internet channel, an "Anténa" channel or a Poslanecká sněmovna stream; [filler] is what its
+ * empty slots say (spec/apps.md, T36: "Program se nepodařilo načíst" on ČT rows of a day whose schedule failed).
+ */
+data class GuideRow(
+    val key: String,
+    val name: String,
+    val entries: List<Entry>,
+    val filler: GuideLayout.Filler = GuideLayout.Filler.OFF_AIR,
+)
 
 /** What a guide cell shows, whichever source it comes from. */
 sealed interface Entry : Timed {

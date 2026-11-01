@@ -41,7 +41,13 @@ class CtApi(private val transport: HttpTransport = UrlConnectionTransport()) {
             ),
         )
         val body = JsonObject(mapOf("query" to JsonPrimitive(SCHEDULE_QUERY), "variables" to variables))
-        val response = call(GRAPHQL_URL, body.toString())
+        // A network failure is a failed schedule too: the guide and Živě say "Program se nepodařilo načíst" (T36),
+        // not the stream text.
+        val response = try {
+            call(GRAPHQL_URL, body.toString())
+        } catch (e: CtException) {
+            throw CtException(e.message ?: "schedule request failed", Messages.SCHEDULE_FAILED)
+        }
         return CtParser.parseSchedule(response.status, response.body)
     }
 
