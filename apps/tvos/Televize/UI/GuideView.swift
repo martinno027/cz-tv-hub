@@ -147,6 +147,8 @@ private struct GuideRow: Identifiable {
     let entries: [GuideEntry]
     /// Text of the row's focusable gaps: "Mimo vysílání", on ČT rows of a failed day "Program se nepodařilo načíst".
     let filler: String
+    /// What a filler under now plays live (T38).
+    let channel: MixedChannel
 }
 
 /// Rows, time axis and cell segments, computed once per data change (not on every focus move:
@@ -368,15 +370,15 @@ struct GuideView: View {
             switch channel {
             case .ct(let ct):
                 return GuideRow(id: ct.slug, name: ct.name, source: .ct,
-                                entries: (schedule[ct.slug] ?? []).map(GuideEntry.ct), filler: filler(.ct))
+                                entries: (schedule[ct.slug] ?? []).map(GuideEntry.ct), filler: filler(.ct), channel: channel)
             case .antenna(let dvb):
                 return GuideRow(id: "dvb|\(dvb.id)", name: dvb.name, source: .dvb,
                                 entries: (antennaEPG[dvb.id] ?? []).map { GuideEntry.antenna($0, dvb) },
-                                filler: filler(.dvb))
+                                filler: filler(.dvb), channel: channel)
             case .parliament(let stream):
                 return GuideRow(id: stream.key, name: stream.name, source: .psp,
                                 entries: [.parliament(stream, start: bounds.start, end: bounds.end)],
-                                filler: filler(.psp))
+                                filler: filler(.psp), channel: channel)
             }
         }
     }
@@ -438,7 +440,8 @@ struct GuideView: View {
                 GuideGrid(layout: layout, window: window, now: now, parliament: model.parliament.states,
                           focusedID: $focusedID, defaultFocusID: defaultFocusID,
                           scrollRequest: scrollRequest, previousDay: edgeLabel(next: false, today: today),
-                          nextDay: edgeLabel(next: true, today: today), select: select)
+                          nextDay: edgeLabel(next: true, today: today), select: select,
+                          selectFiller: selectFiller)
                     .equatable()
             }
         }
@@ -706,6 +709,16 @@ struct GuideView: View {
         }
     }
 
+    /// A filler (gap) of a ČT or Anténa row that covers now, or any filler of a failed ČT row today, plays that
+    /// channel live, as its Živě card does (T38: a ČT row whose schedule failed could be played only from Živě).
+    private func selectFiller(row: Int, segment: Int) {
+        guard layout.rows.indices.contains(row) else { return }
+        let guideRow = layout.rows[row]
+        guard GuideFiller.playsLive(source: guideRow.source, ctScheduleFailed: ctFailed, segment: segment, in: layout.segments[row],
+                                    timeline: layout.timeline, now: Date()) else { return }
+        model.playLive(guideRow.channel)
+    }
+
     /// A programme opens its page (every state); a Poslanecká sněmovna stream plays live at once.
     private func select(_ entry: GuideEntry) {
         switch entry {
@@ -737,6 +750,8 @@ private struct GuideGrid: View, Equatable {
     let previousDay: String?
     let nextDay: String?
     let select: (GuideEntry) -> Void
+    /// A filler cell (row, segment index) was selected.
+    let selectFiller: (Int, Int) -> Void
 
     nonisolated static func == (lhs: GuideGrid, rhs: GuideGrid) -> Bool {
         lhs.layout.version == rhs.layout.version && lhs.window == rhs.window && lhs.now == rhs.now
@@ -844,8 +859,11 @@ private struct GuideGrid: View, Equatable {
                 case .gap(let width) where width < GuideView.minFocusableGap:
                     Color.clear.frame(width: width)
                 case .gap(let width):
-                    // Focusable filler, so up/down never gets stuck on a row with a long gap.
-                    Button {} label: {
+                    // Focusable filler, so up/down never gets stuck on a row with a long gap; under now it
+                    // plays the channel live (T38).
+                    Button {
+                        selectFiller(rowIndex, index)
+                    } label: {
                         Text(row.filler)
                             .font(.system(size: 22))
                             .lineLimit(1)
