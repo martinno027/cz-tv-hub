@@ -67,6 +67,44 @@ class StoreTest(unittest.TestCase):
         store.delete_block(CH, "20261018T0530")  # nothing there; order checked again
         self.assertEqual([s.n for s in store.between(CH, T0 + 0.5, T0 + 1.5)], [0, 5])
 
+    def test_a_clock_jump_keeps_range_lookups_bisected(self):
+        """T45: on the Pi three channels had a few starts out of order, and every guide request then scanned
+        ~18 000 segments per programme under the store lock (/dvb/epg took 55 s). Same data with and without
+        one step back must answer in comparable time, and the same as a brute-force scan."""
+        import random
+        import time
+        from cztvhub.dvb.buffer import Segment, _Channel
+
+        def channel(back):
+            chan = _Channel()
+            segs = [Segment(CH, "1792300800-ab12", n, n, T0 + n * 2.0, 2.0, block_name(T0 + n * 2.0))
+                    for n in range(20000)]
+            if back:
+                segs.insert(10000, Segment(CH, "1792300800-ab12", 20000, 20000, T0 + 5.0, 2.0, block_name(T0)))
+            store = BufferStore(self.root)
+            for seg in segs:
+                store._channels.setdefault(CH, chan)
+                store._insert(chan, seg)
+            return store
+
+        ordered, jumped = channel(False), channel(True)
+        self.assertFalse(jumped._channels[CH].ordered)
+        rng = random.Random(45)
+        ranges = [(T0 + a, T0 + a + rng.choice([2, 60, 1800])) for a in (rng.uniform(0, 40000) for _ in range(400))]
+
+        def timed(store):
+            began = time.perf_counter()
+            for lo, hi in ranges:
+                store.between(CH, lo, hi)
+            return time.perf_counter() - began
+
+        self.assertLess(timed(jumped), 20 * timed(ordered) + 0.01)
+        everything = jumped._channels[CH].segments
+        for lo, hi in ranges[:50] + [(T0 + 4.5, T0 + 5.5)]:
+            brute = [s for s in everything if s.end > lo and s.start < hi]
+            self.assertEqual(jumped.between(CH, lo, hi), sorted(brute, key=lambda s: s.g))
+        self.assertEqual([s.g for s in jumped.between(CH, T0 + 4.5, T0 + 5.5)], [2, 20000])
+
     def test_gaps_delete_and_runs(self):
         store = BufferStore(self.root)
         add(store, self.work, CH, "1792300800-ab12", 0, T0)
@@ -333,6 +371,26 @@ class GuardTest(unittest.TestCase):
             archive.settings.update(recordChannels=[f"c{i}" for i in range(6)])
             archive.sync()
             self.assertEqual(sorted(started), ["c0", "c1", "c2"])
+
+    def test_recording_ffmpeg_runs_at_lower_priority(self):
+        import os
+        import subprocess
+        import sys
+        from cztvhub.dvb.recorder import RECORDER_NICE, lower_priority
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        logs = []
+        own = os.getpriority(os.PRIO_PROCESS, 0)
+        lower_priority(child, logs.append)
+        self.assertEqual(os.getpriority(os.PRIO_PROCESS, child.pid), RECORDER_NICE)
+        self.assertEqual(os.getpriority(os.PRIO_PROCESS, 0), own)  # only the child, never the gateway itself
+        lower_priority(object(), logs.append)  # a fake without a pid: nothing to do
+        child.kill()
+        child.wait()
+        lower_priority(child, logs.append)  # gone already: logged, never raised
+        self.assertEqual(len(logs), 1)
+        self.assertIn("cannot lower ffmpeg priority", logs[0])
 
     def test_cheap_audio_conversion(self):
         cmd = " ".join(build_command(Path("/w"), [{"type": "video", "codec": "hevc"},

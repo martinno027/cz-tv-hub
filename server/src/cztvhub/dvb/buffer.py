@@ -75,14 +75,22 @@ class _Channel:
     segments: list[Segment] = field(default_factory=list)  # sorted by g (= by time within a run)
     next_g: int = 0
     sizes: dict[str, int] = field(default_factory=dict)  # block → bytes
-    # starts in time order too (the normal case), so ranges are found by bisection; a clock that jumped back
-    # (a Pi without a real-time clock before NTP) only makes the lookups linear again
+    # starts in time order too (the normal case), so ranges are found by bisection in ``segments``. A start that
+    # went back (a Pi without a real-time clock before NTP; on our Pi a few per channel, 2026-11-01) keeps a
+    # second list sorted by start, so lookups stay bisected: a linear scan of ~18 000 segments per programme under
+    # the store lock made /dvb/epg take 55 s on a loaded Pi (T45).
     ordered: bool = True
+    by_start: list[Segment] | None = None  # only while not ordered
     longest: float = 0.0  # longest segment, how far before a range a segment overlapping it can start
 
     def reindex(self) -> None:
         self.ordered = all(a.start <= b.start for a, b in zip(self.segments, self.segments[1:]))
+        self.by_start = None if self.ordered else sorted(self.segments, key=_start)
         self.longest = max((s.duration for s in self.segments), default=0.0)
+
+
+def _start(seg: Segment) -> float:
+    return seg.start
 
 
 def _device(path: Path) -> int | None:
@@ -214,12 +222,20 @@ class BufferStore:
             with open(bdir / INDEX, "a", encoding="utf-8") as f:
                 f.write(json.dumps({"r": run, "n": n, "g": seg.g, "t": round(start, 3),
                                     "d": round(duration, 3)}) + "\n")
-            if chan.segments and start < chan.segments[-1].start:
-                chan.ordered = False
-            chan.longest = max(chan.longest, duration)
-            chan.segments.append(seg)
+            self._insert(chan, seg)
             chan.sizes[block] = chan.sizes.get(block, 0) + size
         return seg
+
+    @staticmethod
+    def _insert(chan: _Channel, seg: Segment) -> None:
+        """Append a new segment (the caller holds the lock)."""
+        if chan.ordered and chan.segments and seg.start < chan.segments[-1].start:
+            chan.ordered = False
+            chan.by_start = sorted(chan.segments, key=_start)
+        chan.longest = max(chan.longest, seg.duration)
+        chan.segments.append(seg)
+        if chan.by_start is not None:
+            bisect.insort(chan.by_start, seg, key=_start)
 
     # -- reading ---------------------------------------------------------------------------
     def channels(self) -> list[str]:
@@ -232,12 +248,13 @@ class BufferStore:
             chan = self._channels.get(channel)
             if not chan:
                 return []
-            segments = chan.segments
-            if chan.ordered:
-                lo = bisect.bisect_left(segments, start - chan.longest, key=lambda s: s.start)
-                hi = bisect.bisect_left(segments, end, lo, key=lambda s: s.start)
-                segments = segments[lo:hi]
-            return [s for s in segments if s.end > start and s.start < end]
+            segments = chan.segments if chan.ordered else chan.by_start
+            if segments is None:  # not ordered and no index (cannot happen; stay correct anyway)
+                return [s for s in chan.segments if s.end > start and s.start < end]
+            lo = bisect.bisect_left(segments, start - chan.longest, key=_start)
+            hi = bisect.bisect_left(segments, end, lo, key=_start)
+            found = [s for s in segments[lo:hi] if s.end > start and s.start < end]
+            return found if chan.ordered else sorted(found, key=lambda s: s.g)
 
     def by_g(self, channel: str, g: int) -> Segment | None:
         with self._lock:

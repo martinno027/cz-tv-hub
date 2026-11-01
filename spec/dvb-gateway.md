@@ -130,7 +130,11 @@ Approved by the user on 2026-10-23 (CLAUDE.md hard rules, `docs/legal-notes.md`;
   YYYYMMDDTHHMM>/`, `index.jsonl`); segments are numbered per channel. When the source or ffmpeg ends, a new run
   starts after 10 s (60 s while no tuner is free). DVB-T2 audio is HE-AAC in LATM (`aac_latm`, seen 2026-10-23 on
   Nova: two Czech tracks, HE-AAC and HE-AACv2), which MP4 cannot carry, so it is re-encoded (`-aac_coder fast`,
-  128 kbit/s, one ffmpeg thread per recorder). Ten recorded channels overloaded a Pi 4 (load 29, TVHeadend stopped
+  128 kbit/s, one ffmpeg thread per recorder). Recorder ffmpegs run at **nice 10** (T45): with 11 channels the Pi 4
+  was at 100 % CPU and the gateway's answers waited for the CPU (`/dvb/epg` 55 s, ~1 s of work measured in a separate
+  process on the same Pi), so the apps reported the gateway unreachable; playback remuxes and thumbnails keep normal
+  priority. Range lookups in the recording stay bisected when a segment start went back (a second list sorted by
+  start). Ten recorded channels overloaded a Pi 4 (load 29, TVHeadend stopped
   answering); after the cheaper encoding one channel costs ~20 % of a core. An optional cap `[dvb] max_recordings`
   (default 0 = none, the household watches the load) limits channels recorded at once and `/admin` refuses more; and
   recording is refused while `buffer_dir` is on the system disk (SD card) unless `buffer_on_system_disk = true` (dev). Subtitles are not recorded yet (teletext → WebVTT needs a check of

@@ -2,6 +2,7 @@
 one rendition per track, live window and a thumbnail (spec/dvb-gateway.md "Continuous recording").
 Runs only when ffmpeg/ffprobe are on PATH."""
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from cztvhub.dvb.archive import Archive, ArchiveError, recording_id
 from cztvhub.dvb.buffer import BufferStore
-from cztvhub.dvb.recorder import ChannelRecorder, RecorderManager
+from cztvhub.dvb.recorder import RECORDER_NICE, ChannelRecorder, RecorderManager
 from cztvhub.dvb.thumbs import Settings, Thumbnails
 
 CH = "9f8e7d6c5b4a39281706f5e4d3c2b1a0"
@@ -80,6 +81,8 @@ class RecordingEndToEndTest(unittest.TestCase):
             time.sleep(0.5)
         segments = self.store.between(CH, 0, 1e12)
         self.assertGreaterEqual(len(segments), 5, self.logs)
+        # T45: the recording ffmpeg yields the CPU to the gateway's answers
+        self.assertEqual(os.getpriority(os.PRIO_PROCESS, rec._process.pid), RECORDER_NICE)
         meta = self.store.run_meta(CH, segments[0].run)
         self.assertEqual([(a["codec"], a["language"], a["label"]) for a in meta["audio"]],
                          [("mp2", "ces", "Čeština"), ("ac3", "eng", "Angličtina (Dolby)")])

@@ -10,6 +10,7 @@ ffmpeg the pump shows each chunk to an EIT sniffer (eit.py, T14: real programme 
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -138,6 +139,21 @@ def segment_number(name: str) -> int | None:
     return None
 
 
+RECORDER_NICE = 10  # T45: recording yields the CPU to answers for the apps and to playback
+
+
+def lower_priority(process: Any, log: Callable[[str], None] = print) -> None:
+    """Run a recording ffmpeg at nice ``RECORDER_NICE``: on a loaded Pi (11 channels, 2026-11-01) the gateway's
+    answers waited behind the recorders. Playback remuxes (hls.py) and thumbnails keep normal priority."""
+    pid = getattr(process, "pid", None)
+    if not isinstance(pid, int) or not hasattr(os, "setpriority"):
+        return
+    try:
+        os.setpriority(os.PRIO_PROCESS, pid, RECORDER_NICE)
+    except OSError as exc:  # gone already, or not allowed: recording goes on at normal priority
+        log(f"dvb: recorder: cannot lower ffmpeg priority: {exc}")
+
+
 class ChannelRecorder:
     """Records one channel until stopped; each source/ffmpeg session is one run."""
 
@@ -244,6 +260,7 @@ class ChannelRecorder:
                            "impaired": s["impaired"]} for i, s in enumerate(audio)]}
         self._process = self.popen(build_command(work, streams, self.ffmpeg), stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL)
+        lower_priority(self._process, self.log)
         self.run, self.started_at, self.state = run, time.time(), "nahrává"
         sniffer = EitSniffer(self._eit) if self._eit is not None else None
         pump = threading.Thread(target=self._pump, args=(source, read, bytes(head), sniffer), daemon=True,
