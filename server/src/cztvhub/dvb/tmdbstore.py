@@ -3,7 +3,8 @@ CLAUDE.md, approved by the user on 2026-10-24 and extended for the archive on 20
 
 ``<state dir>/tmdb.sqlite`` (0600) keeps per programme key (kind + year + cleaned title) only what the rule lists:
 match or no match, TMDb id (with the kind it belongs to), rating, genres (ids and names), year, poster path and
-when it was fetched. Nothing else from TMDb goes to disk. An entry is refreshed (by the worker, while the archive
+when it was fetched, plus the version of our matching rules it was found with (``RULES``). Nothing else from TMDb
+goes to disk. An entry is refreshed (by the worker, while the archive
 lists its title) once it is nearly N months old and deleted at N months (N = ``/admin`` setting, default 5),
 checked on every read and at start. Without ``[tmdb] key`` the file is deleted. It replaces ``tmdb-cache.json``
 (T15), migrated once and then deleted.
@@ -32,6 +33,10 @@ DEFAULT_MONTHS = 5
 LICENCE_MONTHS = 6  # TMDb terms 1.C (checked 2026-10-24); /admin warns above this
 MAX_MONTHS = 999_999_999  # "any positive number" (owner, 2026-10-25); only keeps the arithmetic finite
 SETTING = "tmdbRefreshMonths"
+# The version of details.py's matching rules an entry was looked up with: 1 = before T44, 2 = T44 (series: episode,
+# a series' start year, ČT's original title). A no match of older rules is looked up again at once (page and
+# worker); a match stays until its normal refresh. Raise it whenever the rules can turn a no match into a match.
+RULES = 2
 REFRESH_LEAD = 7 * 86400  # refreshed this long before the deletion date, so a listed title never goes blank
 FAILED_WAIT = 3600.0  # a title whose lookup failed is not asked again for this long
 WORKER_IDLE = 300.0  # between worker rounds
@@ -55,12 +60,13 @@ CREATE TABLE IF NOT EXISTS entries (
   genre_names TEXT NOT NULL DEFAULT '[]',
   match_year INTEGER,
   poster TEXT,
-  fetched_at REAL NOT NULL
+  fetched_at REAL NOT NULL,
+  rules INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS entries_fetched ON entries (fetched_at);
 """
 COLUMNS = ("key, kind, year, title, matched, match_kind, tmdb_id, rating_value, rating_votes, genre_ids, "
-           "genre_names, match_year, poster, fetched_at")
+           "genre_names, match_year, poster, fetched_at, rules")
 
 
 def clamp_months(value: Any) -> int:
@@ -89,6 +95,12 @@ class Entry:
     match_year: int | None = None
     poster: str | None = None  # TMDb's file name ("abc.jpg"), served through /dvb/details/image/w342/
     fetched_at: float = 0.0
+    rules: int = 1  # RULES of the lookup; 1 = from before the store knew the version
+
+    @property
+    def outdated(self) -> bool:
+        """A no match of older matching rules: looked up again before it is served or kept."""
+        return not self.matched and self.rules < RULES
 
 
 class Query(Protocol):
@@ -112,6 +124,9 @@ class TmdbStore:
         try:
             with self._conn() as db:
                 db.executescript(SCHEMA)
+                columns = {row[1] for row in db.execute("PRAGMA table_info(entries)")}
+                if "rules" not in columns:  # a store from before T44: its rows count as rules 1
+                    db.execute("ALTER TABLE entries ADD COLUMN rules INTEGER NOT NULL DEFAULT 1")
                 db.execute("SELECT count(*) FROM entries").fetchone()
         except sqlite3.DatabaseError as exc:
             self.log(f"dvb: tmdb: {self.path.name} unreadable ({exc}); starting empty")
@@ -176,9 +191,9 @@ class TmdbStore:
         return out
 
     def due(self, key: str) -> bool:
-        """No entry, or one old enough to be refreshed."""
+        """No entry, one old enough to be refreshed, or a no match of older matching rules."""
         entry = self.get(key)
-        return entry is None or not 0 <= self.now() - entry.fetched_at < self.refresh_age
+        return entry is None or entry.outdated or not 0 <= self.now() - entry.fetched_at < self.refresh_age
 
     def __len__(self) -> int:
         with self._lock, self._conn() as db:
@@ -206,7 +221,7 @@ class TmdbStore:
         "year", "poster"}`` (poster = TMDb's file name or None)."""
         entry = entry_from(key, kind, year, title, result, self.now())
         with self._lock, self._conn() as db:
-            db.execute(f"INSERT OR REPLACE INTO entries ({COLUMNS}) VALUES ({','.join('?' * 14)})",
+            db.execute(f"INSERT OR REPLACE INTO entries ({COLUMNS}) VALUES ({','.join('?' * 15)})",
                              _row(entry))
         return entry
 
@@ -253,7 +268,7 @@ class TmdbStore:
         with self._lock, self._conn() as db:
             for row in rows:
                 moved += db.execute(f"INSERT OR IGNORE INTO entries ({COLUMNS}) VALUES "
-                                          f"({','.join('?' * 14)})", row).rowcount
+                                          f"({','.join('?' * 15)})", row).rowcount
         for item in (old, old.with_name(old.name + ".tmp")):
             try:
                 item.unlink()
@@ -267,28 +282,29 @@ class TmdbStore:
 
 def entry_from(key: str, kind: str, year: int | None, title: str, result: dict | None, now: float) -> Entry:
     if result is None:
-        return Entry(key, kind, year, title, False, fetched_at=now)
+        return Entry(key, kind, year, title, False, fetched_at=now, rules=RULES)
     rating = result.get("rating")
     return Entry(key, kind, year, title, True, result.get("kind"), result.get("tmdbId"),
                  {"value": float(rating["value"]), "votes": int(rating["votes"])} if rating else None,
                  tuple(result.get("genreIds") or ()), tuple(result.get("genres") or ()), result.get("year"),
-                 result.get("poster"), now)
+                 result.get("poster"), now, RULES)
 
 
 def _row(e: Entry) -> tuple:
     return (e.key, e.kind, e.year, e.title, 1 if e.matched else 0, e.match_kind, e.tmdb_id,
             e.rating["value"] if e.rating else None, e.rating["votes"] if e.rating else None,
             json.dumps(list(e.genre_ids)), json.dumps(list(e.genres), ensure_ascii=False), e.match_year, e.poster,
-            float(e.fetched_at))
+            float(e.fetched_at), int(e.rules))
 
 
 def _entry(row: tuple) -> Entry:
     (key, kind, year, title, matched, match_kind, tmdb_id, value, votes, genre_ids, genre_names, match_year,
-     poster, fetched_at) = row
+     poster, fetched_at, rules) = row
     return Entry(key, kind, year, title, bool(matched), match_kind, tmdb_id,
                  {"value": value, "votes": votes} if value is not None and votes is not None else None,
                  tuple(i for i in _json_list(genre_ids) if isinstance(i, int) and not isinstance(i, bool)),
-                 tuple(n for n in _json_list(genre_names) if isinstance(n, str)), match_year, poster, fetched_at)
+                 tuple(n for n in _json_list(genre_names) if isinstance(n, str)), match_year, poster, fetched_at,
+                 rules if isinstance(rules, int) and not isinstance(rules, bool) else 1)
 
 
 def _json_list(text: Any) -> list:

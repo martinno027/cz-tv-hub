@@ -75,6 +75,10 @@ DETAILS_IMAGE_RE = re.compile(rf"^/dvb/details/image/w342/({tmdb.POSTER_FILE})$"
 EVENT_ID_RE = re.compile(r"^[A-Za-z0-9:_-]{1,128}$")  # TVHeadend event ids, "dvr:<uuid>"
 IDEC_RE = re.compile(r"^[A-Za-z0-9]{1,32}$")
 CT_SCHEDULE_SECONDS = 600.0  # the CT schedule of a day, for /dvb/details?source=ct
+# Ask ČT's schedule for originalTitle and search TMDb by it first (spec "Programme details", T44). Off until
+# checked on the real schedule: ČT accepted the field on 2026-11-01 but was down, so no value has been seen yet
+# (which programmes carry one, whether a Czech one repeats the title). Tests turn it on with fixtures.
+CT_ORIGINAL_TITLE = False
 CT_DAYS_BACK, CT_DAYS_AHEAD = 7, 2  # the apps' guide range (spec/apps.md "TV průvodce")
 POSTER_RETRY_AFTER = 5
 ARCHIVE_PATH = "/dvb/archive"
@@ -718,7 +722,8 @@ class DvbGateway:
         found = next((p for p in self._ct_schedule(slug, day) if p.idec == idec), None)
         if found is None:
             raise HttpError(404, "Pořad nenalezen")
-        return tmdb.Programme(found.title, episode=found.episode, description=found.description, genre=found.genre)
+        return tmdb.Programme(found.title, episode=found.episode, description=found.description, genre=found.genre,
+                              original_title=found.original_title)
 
     def _ct_schedule(self, slug: str, day: date) -> list[ct_api.Programme]:
         """One CT channel's day, cached 10 min (the same API call as the add-on's guide)."""
@@ -727,7 +732,10 @@ class DvbGateway:
             if hit and time.monotonic() - hit[0] < CT_SCHEDULE_SECONDS:
                 return hit[1]
         try:
-            programmes = self.fetch_schedules([slug], day).get(slug, [])
+            if CT_ORIGINAL_TITLE:
+                programmes = self.fetch_schedules([slug], day, original_title=True).get(slug, [])
+            else:
+                programmes = self.fetch_schedules([slug], day).get(slug, [])
         except ct_api.StreamError as exc:
             self.log(f"dvb: details: CT schedule: {exc}")  # not which programme was opened
             raise HttpError(502, "Program ČT se nepodařilo načíst")

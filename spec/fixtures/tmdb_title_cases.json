@@ -1,0 +1,166 @@
+{
+ "about": "T44 golden cases for the gateway's TMDb lookup (spec/dvb-gateway.md \"Programme details\", details.py searches/pick). A programme (EPG or ČT schedule fields) -> the query (cleaned title, description year, guessed kind, original title kept only when it differs from the title) -> the TMDb searches in the order they are sent, [kind, text], stopping at the first match, at most 4 -> which result matches (or null). `results` holds synthetic TMDb search results by \"kind|text\" (no real TMDb data); a search not listed answers no results. A match is followed by one `movie|tv/{id}` details request, not counted as a search. thisYear is the clock's year.",
+ "thisYear": 2026,
+ "cases": [
+  {
+   "name": "series: episode (owner's example) - the part before ': ' found as a series that started 2021",
+   "programme": {"title": "Detektiv Grace: Hodinky smrti", "description": "Detektiv Roy Grace vyšetřuje … Britský krimifilm (2024). Hrají …"},
+   "query": {"title": "Detektiv Grace: Hodinky smrti", "year": 2024, "kind": "movie", "original": ""},
+   "results": {"tv|Detektiv Grace": [{"id": 90001, "name": "Detektiv Grace", "original_name": "Grace", "first_air_date": "2021-03-14"}]},
+   "searches": [["movie", "Detektiv Grace: Hodinky smrti"], ["tv", "Detektiv Grace: Hodinky smrti"], ["tv", "Detektiv Grace"]],
+   "match": {"kind": "tv", "tmdbId": 90001}
+  },
+  {
+   "name": "series: episode, nothing anywhere - all four searches, no match",
+   "programme": {"title": "Detektiv Grace: Hodinky smrti", "description": "Britský krimifilm (2024)."},
+   "query": {"title": "Detektiv Grace: Hodinky smrti", "year": 2024, "kind": "movie", "original": ""},
+   "results": {},
+   "searches": [["movie", "Detektiv Grace: Hodinky smrti"], ["tv", "Detektiv Grace: Hodinky smrti"], ["tv", "Detektiv Grace"], ["movie", "Detektiv Grace"]],
+   "match": null
+  },
+  {
+   "name": "the part as a film keeps +-1 (a film of that name from 2010 is not the 2024 programme)",
+   "programme": {"title": "Detektiv Grace: Hodinky smrti", "description": "Britský krimifilm (2024)."},
+   "query": {"title": "Detektiv Grace: Hodinky smrti", "year": 2024, "kind": "movie", "original": ""},
+   "results": {"movie|Detektiv Grace": [{"id": 90002, "title": "Detektiv Grace", "original_title": "Grace", "release_date": "2010-05-01"}]},
+   "searches": [["movie", "Detektiv Grace: Hodinky smrti"], ["tv", "Detektiv Grace: Hodinky smrti"], ["tv", "Detektiv Grace"], ["movie", "Detektiv Grace"]],
+   "match": null
+  },
+  {
+   "name": "a film within +-1 (EPG 2013, TMDb 2012)",
+   "programme": {"title": "Film: Hněv Titánů", "description": "Akční film (USA, 2013)"},
+   "query": {"title": "Hněv Titánů", "year": 2013, "kind": "movie", "original": ""},
+   "results": {"movie|Hněv Titánů": [{"id": 4401, "title": "Hněv Titánů", "original_title": "Wrath of the Titans", "release_date": "2012-03-27"}]},
+   "searches": [["movie", "Hněv Titánů"]],
+   "match": {"kind": "movie", "tmdbId": 4401}
+  },
+  {
+   "name": "a film two years off is no match, and a title without a separator stops after both kinds",
+   "programme": {"title": "Film: Hněv Titánů", "description": "Akční film (USA, 2010)"},
+   "query": {"title": "Hněv Titánů", "year": 2010, "kind": "movie", "original": ""},
+   "results": {"movie|Hněv Titánů": [{"id": 4401, "title": "Hněv Titánů", "original_title": "Wrath of the Titans", "release_date": "2012-03-27"}]},
+   "searches": [["movie", "Hněv Titánů"], ["tv", "Hněv Titánů"]],
+   "match": null
+  },
+  {
+   "name": "a series that started 2021 for a 2024 episode (outside +-1, still the series)",
+   "programme": {"title": "Případy inspektora Kolomazníka (3)", "description": "Krimiseriál (Velká Británie, 2024)"},
+   "query": {"title": "Případy inspektora Kolomazníka", "year": 2024, "kind": "tv", "original": ""},
+   "results": {"tv|Případy inspektora Kolomazníka": [{"id": 90010, "name": "Případy inspektora Kolomazníka", "original_name": "Inspector Kolomaznik", "first_air_date": "2021-01-05"}]},
+   "searches": [["tv", "Případy inspektora Kolomazníka"]],
+   "match": {"kind": "tv", "tmdbId": 90010}
+  },
+  {
+   "name": "a series starting the year after the episode's year still counts (year + 1)",
+   "programme": {"title": "Případy inspektora Kolomazníka (1)", "description": "Krimiseriál (Velká Británie, 2024)"},
+   "query": {"title": "Případy inspektora Kolomazníka", "year": 2024, "kind": "tv", "original": ""},
+   "results": {"tv|Případy inspektora Kolomazníka": [{"id": 90011, "name": "Případy inspektora Kolomazníka", "first_air_date": "2025-01-05"}]},
+   "searches": [["tv", "Případy inspektora Kolomazníka"]],
+   "match": {"kind": "tv", "tmdbId": 90011}
+  },
+  {
+   "name": "a series starting two years after the episode's year does not",
+   "programme": {"title": "Případy inspektora Kolomazníka (1)", "description": "Krimiseriál (Velká Británie, 2024)"},
+   "query": {"title": "Případy inspektora Kolomazníka", "year": 2024, "kind": "tv", "original": ""},
+   "results": {"tv|Případy inspektora Kolomazníka": [{"id": 90012, "name": "Případy inspektora Kolomazníka", "first_air_date": "2026-01-05"}]},
+   "searches": [["tv", "Případy inspektora Kolomazníka"], ["movie", "Případy inspektora Kolomazníka"]],
+   "match": null
+  },
+  {
+   "name": "two series of the same name that started the same year: no match",
+   "programme": {"title": "Ulice", "description": "Seriál (2024)", "dvbGenres": [21]},
+   "query": {"title": "Ulice", "year": 2024, "kind": "tv", "original": ""},
+   "results": {"tv|Ulice": [{"id": 90020, "name": "Ulice", "first_air_date": "2005-09-05"}, {"id": 90021, "name": "Ulice", "original_name": "The Street", "first_air_date": "2005-01-10"}]},
+   "searches": [["tv", "Ulice"], ["movie", "Ulice"]],
+   "match": null
+  },
+  {
+   "name": "two series of the same name: the latest that started by then wins",
+   "programme": {"title": "Ulice", "description": "Seriál (2024)", "dvbGenres": [21]},
+   "query": {"title": "Ulice", "year": 2024, "kind": "tv", "original": ""},
+   "results": {"tv|Ulice": [{"id": 90022, "name": "Ulice", "first_air_date": "1995-09-05"}, {"id": 90023, "name": "Ulice", "first_air_date": "2019-01-10"}, {"id": 90024, "name": "Ulice", "first_air_date": "2027-01-10"}]},
+   "searches": [["tv", "Ulice"]],
+   "match": {"kind": "tv", "tmdbId": 90023}
+  },
+  {
+   "name": "a plain film is unaffected: one search",
+   "programme": {"title": "Pelíšky", "description": "Komedie (Česko, 1999)"},
+   "query": {"title": "Pelíšky", "year": 1999, "kind": "movie", "original": ""},
+   "results": {"movie|Pelíšky": [{"id": 90030, "title": "Pelíšky", "original_title": "Pelíšky", "release_date": "1999-02-04"}]},
+   "searches": [["movie", "Pelíšky"]],
+   "match": {"kind": "movie", "tmdbId": 90030}
+  },
+  {
+   "name": "a whole title with ': ' that matches is never split",
+   "programme": {"title": "Hvězdná brána: Návrat", "description": "Sci-fi (USA, 2008)"},
+   "query": {"title": "Hvězdná brána: Návrat", "year": 2008, "kind": "movie", "original": ""},
+   "results": {"movie|Hvězdná brána: Návrat": [{"id": 90040, "title": "Hvězdná brána: Návrat", "original_title": "Stargate: The Return", "release_date": "2008-03-11"}], "tv|Hvězdná brána": [{"id": 90041, "name": "Hvězdná brána", "first_air_date": "1997-07-27"}]},
+   "searches": [["movie", "Hvězdná brána: Návrat"]],
+   "match": {"kind": "movie", "tmdbId": 90040}
+  },
+  {
+   "name": "' – ' separates too; the part is cleaned for a series (roman season number)",
+   "programme": {"title": "Kobra 11 IV – Pomsta (5)"},
+   "query": {"title": "Kobra 11 IV – Pomsta", "year": null, "kind": "tv", "original": ""},
+   "results": {"tv|Kobra 11": [{"id": 90050, "name": "Kobra 11", "original_name": "Alarm für Cobra 11", "first_air_date": "1996-03-12"}]},
+   "searches": [["tv", "Kobra 11 IV – Pomsta"], ["movie", "Kobra 11 IV – Pomsta"], ["tv", "Kobra 11"]],
+   "match": {"kind": "tv", "tmdbId": 90050}
+  },
+  {
+   "name": "' - ' separates too; a ČT series genre puts tv first",
+   "programme": {"title": "Doktor Martin - Nový začátek", "genre": "Seriály"},
+   "query": {"title": "Doktor Martin - Nový začátek", "year": null, "kind": "tv", "original": ""},
+   "results": {"tv|Doktor Martin": [{"id": 90060, "name": "Doktor Martin", "original_name": "Doc Martin", "first_air_date": "2004-09-02"}]},
+   "searches": [["tv", "Doktor Martin - Nový začátek"], ["movie", "Doktor Martin - Nový začátek"], ["tv", "Doktor Martin"]],
+   "match": {"kind": "tv", "tmdbId": 90060}
+  },
+  {
+   "name": "a hyphen inside a word is no separator",
+   "programme": {"title": "Spider-Man", "description": "(USA, 2002)"},
+   "query": {"title": "Spider-Man", "year": 2002, "kind": "movie", "original": ""},
+   "results": {},
+   "searches": [["movie", "Spider-Man"], ["tv", "Spider-Man"]],
+   "match": null
+  },
+  {
+   "name": "a cut-off title ('…' after the separator) is not asked twice as its own part",
+   "programme": {"title": "Detektiv Grace: …", "description": "Britský krimifilm (2024)."},
+   "query": {"title": "Detektiv Grace: …", "year": 2024, "kind": "movie", "original": ""},
+   "results": {},
+   "searches": [["movie", "Detektiv Grace: …"], ["tv", "Detektiv Grace: …"]],
+   "match": null
+  },
+  {
+   "name": "ČT original title of a foreign programme is searched first",
+   "programme": {"title": "Neviditelný host", "originalTitle": "The Unseen Guest", "description": "Thriller (USA, 2020)"},
+   "query": {"title": "Neviditelný host", "year": 2020, "kind": "movie", "original": "The Unseen Guest"},
+   "results": {"movie|The Unseen Guest": [{"id": 90070, "title": "Neviditelný", "original_title": "The Unseen Guest", "release_date": "2020-02-27"}]},
+   "searches": [["movie", "The Unseen Guest"]],
+   "match": {"kind": "movie", "tmdbId": 90070}
+  },
+  {
+   "name": "ČT original title found nothing: then the Czech title",
+   "programme": {"title": "Neviditelný host", "originalTitle": "The Unseen Guest", "description": "Thriller (USA, 2020)"},
+   "query": {"title": "Neviditelný host", "year": 2020, "kind": "movie", "original": "The Unseen Guest"},
+   "results": {"movie|Neviditelný host": [{"id": 90071, "title": "Neviditelný host", "release_date": "2020-02-27"}]},
+   "searches": [["movie", "The Unseen Guest"], ["tv", "The Unseen Guest"], ["movie", "Neviditelný host"]],
+   "match": {"kind": "movie", "tmdbId": 90071}
+  },
+  {
+   "name": "an original title equal to the title (a Czech programme) is not used",
+   "programme": {"title": "Pelíšky", "originalTitle": "PELÍŠKY", "description": "Komedie (Česko, 1999)"},
+   "query": {"title": "Pelíšky", "year": 1999, "kind": "movie", "original": ""},
+   "results": {"movie|Pelíšky": [{"id": 90030, "title": "Pelíšky", "original_title": "Pelíšky", "release_date": "1999-02-04"}]},
+   "searches": [["movie", "Pelíšky"]],
+   "match": {"kind": "movie", "tmdbId": 90030}
+  },
+  {
+   "name": "an original title and a 'series: episode' title: the four searches end before the part",
+   "programme": {"title": "Detektiv Grace: Hodinky smrti", "originalTitle": "Grace: The Unseen Watch", "description": "Britský krimifilm (2024)."},
+   "query": {"title": "Detektiv Grace: Hodinky smrti", "year": 2024, "kind": "movie", "original": "Grace: The Unseen Watch"},
+   "results": {"tv|Detektiv Grace": [{"id": 90001, "name": "Detektiv Grace", "original_name": "Grace", "first_air_date": "2021-03-14"}]},
+   "searches": [["movie", "Grace: The Unseen Watch"], ["tv", "Grace: The Unseen Watch"], ["movie", "Detektiv Grace: Hodinky smrti"], ["tv", "Detektiv Grace: Hodinky smrti"]],
+   "match": null
+  }
+ ]
+}
