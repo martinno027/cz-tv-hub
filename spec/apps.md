@@ -28,6 +28,8 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    **Today follows the clock**: "today" for labels and the day strip is the calendar day (Prague) of now, recomputed at
    least every minute while the app runs (after midnight "Dnes" moves on by itself, and a programme airing at 0:10
    says "Dnes 0:10", never "Zítra").
+   **Order on the screen (all apps, T31)**: the tab bar, the **detail** of the focused programme, the **day strip**,
+   then the grid (Apple TV and Android TV had it; Samsung and the web had the strip above the detail).
    **Fixed detail layout**: the detail area has a constant height and every element a constant place whatever the
    programme, so nothing moves while the viewer clicks through cells: image (fixed size), title (one line,
    truncated), **episode line always reserved** (empty when there is none), meta line (channel · day time · genre),

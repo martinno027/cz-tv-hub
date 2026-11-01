@@ -318,7 +318,7 @@
     var rows = Math.ceil(g.items.length / GRID_COLS);
     if (!g.lines) {
       track.innerHTML = '';
-      g.lines = new Cards.Lines(track, rows, GRID_STEP_Y, GRID_VISIBLE, function (r) {
+      g.lines = new Cards.Lines(track, rows, GRID_STEP_Y, Cards.Lines.fitting(view, GRID_STEP_Y, GRID_VISIBLE), function (r) {
         var line = el('div', 'ar-grid-row');
         for (var c = 0; c < GRID_COLS; c++) {
           var i = r * GRID_COLS + c;
@@ -396,7 +396,8 @@
     var g = this.grid;
     if (this.isContinue()) return []; // this TV's own entries: no TMDb data
     var top = g.lines ? g.lines.top : 0;
-    return g.items.slice(top * GRID_COLS, (top + GRID_VISIBLE + 1) * GRID_COLS);
+    var visible = g.lines ? g.lines.visible : GRID_VISIBLE;
+    return g.items.slice(top * GRID_COLS, (top + visible + 1) * GRID_COLS);
   };
 
   /**

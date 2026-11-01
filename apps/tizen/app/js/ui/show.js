@@ -293,9 +293,10 @@
     }
     if (this.list) this.list.clear();
     var track = $('sh-episodes').firstChild;
-    var visible = this.periods() ? EP_VISIBLE_PERIODS : EP_VISIBLE;
-    this.list = new Cards.Lines(track, lines.length, EP_STEP, visible, function (i) { return self.lineElement(i); });
-    $('sh-episodes').classList.toggle('hidden', !lines.length);
+    var visible = this.periods() ? EP_VISIBLE_PERIODS : EP_VISIBLE; // the year and month chips take a line (T32)
+    $('sh-episodes').classList.toggle('hidden', !lines.length); // shown first: its height counts the lines (T31)
+    this.list = new Cards.Lines(track, lines.length, EP_STEP, Cards.Lines.fitting($('sh-episodes'), EP_STEP, visible),
+      function (i) { return self.lineElement(i); });
   };
 
   ShowPage.prototype.lineElement = function (i) {

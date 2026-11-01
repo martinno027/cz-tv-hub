@@ -1,7 +1,7 @@
 /*
- * The web page's own controls and wiring (spec/web.md "Input (T29)", "Fullscreen"): a "‹ Zpět" link inside the
- * headers that need one on touch (a Nastavení section, the player bar; the programme and show pages have their own
- * Zpět button), the fullscreen button at the right end of the tab bar and in the player bar, and the input, history
+ * The web page's own controls and wiring (spec/web.md "Input (T29)", "Layout (T31)", "Fullscreen"): a "‹ Zpět"
+ * link inside the headers that need one (a Nastavení section, the Archiv show page, the player bar; the programme page
+ * has its own Zpět button, the Archiv sub-menu its "‹ <category>" item), the fullscreen button at the right end of the tab bar and in the player bar, and the input, history
  * and fullscreen glue. No strip or overlay over the TV layout.
  */
 (function (root) {
@@ -50,6 +50,9 @@
     Array.prototype.forEach.call(doc.querySelectorAll('.set-section'), function (section) {
       section.insertBefore(el(doc, 'div', 'web-back-link', BACK), section.firstChild);
     });
+    // the Archiv show page has no Zpět button of its own (the programme page has one among its buttons)
+    var show = doc.getElementById('show');
+    show.insertBefore(el(doc, 'div', 'web-back-link', BACK), show.firstChild);
     var top = doc.getElementById('top');
     top.appendChild(el(doc, 'div', 'web-fullscreen web-fullscreen-top'));
     var osd = doc.getElementById('osd');
@@ -76,6 +79,7 @@
         tracker.sync();
       }, 0);
     };
+    CT.WebDnd.install(doc, app); // Kanály: drag and drop (T31)
     var input = CT.WebInput.install(doc, app, {
       history: win.history,
       scale: function () { return CT.WebStage.last ? CT.WebStage.last.scale : 1; },
@@ -104,9 +108,56 @@
       doc.addEventListener(name, function () {
         renderFullscreen(doc);
         app.fitStage();
+        relayout(doc, app);
       });
     });
+    // the stage's height follows the window (T31): the guide and the lists count their rows again
+    win.addEventListener('resize', function () { relayout(doc, app); });
+    // the show page's buttons come with its data: the header link only without a Zpět button among them
+    var showBack = doc.querySelector('#show > .web-back-link');
+    var syncShowBack = function () {
+      showBack.classList.toggle('hidden', !needsBackLink(app.screens.archive.page.buttons));
+    };
+    syncShowBack();
+    if (win.MutationObserver) new win.MutationObserver(syncShowBack).observe(doc.getElementById('sh-buttons'), { childList: true });
+    // capture: also the first key, which only shows the focus (web-input.js stops it before the app)
+    doc.addEventListener('keydown', function () { setTimeout(function () { revealFocus(doc, app); }, 0); }, true);
     return { tracker: tracker, input: input };
+  }
+
+  /**
+   * After the window (and so the stage's height) changed: the guide's visible rows and width, the Archiv grid's and
+   * a show's visible lines, at the same scroll position (the TV never changes size, so the screens count once).
+   */
+  function relayout(doc, app) {
+    var guide = app.screens.guide;
+    if (guide && guide.rows && guide.rows.length) {
+      guide.viewRows = guide.visibleRows();
+      guide.viewPx = guide.viewWidth();
+      guide.applyScroll();
+    }
+    var Lines = CT.ArchiveCards.Lines;
+    var archive = app.screens.archive;
+    var lists = [[archive && archive.grid && archive.grid.lines, 'ar-grid', 350, 2],
+      [archive && archive.page && archive.page.list, 'sh-episodes', 76, 5]];
+    lists.forEach(function (l) {
+      if (!l[0]) return;
+      l[0].visible = Lines.fitting(doc.getElementById(l[1]), l[2], l[3]);
+      l[0].sync(null);
+    });
+  }
+
+  /** The show page's header link only when the page has no Zpět button of its own (series; a film page has one). */
+  function needsBackLink(buttons) {
+    return !(buttons || []).some(function (b) { return b.id === 'back'; });
+  }
+
+  /** Keyboard focus inside a page taller than the window: scroll it into view (the page scrolls on the web). */
+  function revealFocus(doc, app) {
+    var page = app.programme && app.programme.isOpen() ? doc.getElementById('programme')
+      : app.screens.archive.page.isOpen() ? doc.getElementById('show') : null;
+    var focused = page ? page.querySelector('.focused') : null;
+    if (focused) CT.scrollIntoView(focused);
   }
 
   /** Forward in the history: open the entry again. */
@@ -122,5 +173,5 @@
     }
   }
 
-  CT.WebPage = { BACK: BACK, adapt: adapt, wire: wire, reopen: reopen, hint: hint, playerHint: playerHint };
+  CT.WebPage = { BACK: BACK, adapt: adapt, wire: wire, reopen: reopen, relayout: relayout, needsBackLink: needsBackLink, hint: hint, playerHint: playerHint };
 })(typeof window !== 'undefined' ? window : global);
