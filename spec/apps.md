@@ -138,7 +138,10 @@ day; skip malformed entries; `errors` without `data` → error "Program se nepod
 (future days may be unpublished) must not break the other days. **In the guide (T36, all apps and the web)**: when a
 day's ČT schedule failed, each ČT row of that day shows **"Program se nepodařilo načíst"** as its filler (where it
 would say "Mimo vysílání"), and nothing is drawn over other rows; Anténa and Sněmovna rows are unaffected. Živě's
-ČT cards show the same text instead of a programme. There is no retry button over the grid any more (it covered the other rows): a failed
+ČT cards show the same text instead of a programme. **Selecting a filler that covers now** (any gap of a ČT or Anténa row at the current time), or **any
+filler of a ČT row whose schedule failed on the day that contains now** (Apple TV cuts gaps every 30 minutes, so
+one cell under the now line would be too easy to miss; Android, Samsung and the web draw one filler per day), plays that channel live, as its Živě card does (T38: without a schedule ČT
+could be played only from Živě). There is no retry button over the grid any more (it covered the other rows): a failed
 day is fetched again when it is opened again (its chip, crossing into it, reopening the guide); a failure is not
 cached. A later refresh that fails keeps the programmes already shown. Fixtures `schedule_ct1_ct24.json`, `graphql_error.json`.
 Cache schedules in memory per day; refetch today's after ~1 h. Polite: no more than ~10 requests per screen open.
