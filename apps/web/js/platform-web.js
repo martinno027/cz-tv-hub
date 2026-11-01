@@ -79,6 +79,8 @@
     doc.body.classList.toggle('web-nokey', !config);
     if (!demo()) CT.WebGateway.syncCookie(doc, config, root.location.protocol === 'https:');
   };
+  /** A hidden tab or a minimised window keeps playing; nothing re-resolves on return (spec/web.md T41). */
+  P.backgroundPlayback = true;
   P.versionSuffix = ' (web)';
 
   function el(tag, id, cls, text) {

@@ -60,6 +60,11 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
   buttons do (the same prefs, profile sync, numbers renumbered). ▲▼ and the keyboard keep working.
 - **No download**: no download button, no saving or export anywhere in the web layer; media only through the
   gateway's existing HLS routes.
+- **Background (T41, owner 2026-11-01: „když přepnu na jinou záložku, tak přestane hrát, to by nemělo“)**: the
+  player keeps playing when the browser tab is hidden or the window is minimised (the Samsung app stops when the TV
+  app goes to the background; the web does not). Nothing re-resolves on return; a ČT URL that expired meanwhile is
+  handled by the player's normal error/retry. Clocks and guide refreshes may run less often while hidden (browsers
+  throttle timers); they catch up when the tab is visible again.
 - **Storage**: `localStorage` of that browser instead of Tizen's (same keys and shapes as the Samsung app:
   settings, channels, resume, profile session). Each browser is "one TV".
 - **Nastavení → Server**: the address is the page's own origin (no address field, no discovery); the **key** field
