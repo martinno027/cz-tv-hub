@@ -23,14 +23,17 @@ PREFIX = "/web/"
 # - its variant playlists and segments are on numbered edges ivys-stNN-N.o2-tv.cz (another domain: o2-tv.cz);
 # - programme images (guide, archive cards) and subtitle files are on ctfs.ceskatelevize.cz; the app loads images
 #   as blobs (XHR) and falls back to an <img>, so it is in connect-src and img-src, never media-src.
-# ČT's API (api.ceskatelevize.cz) is not here: the page asks the gateway (/dvb/ct/*). The Chamber of Deputies' CDN
-# is not here either: the web leaves that source out until the owner approves it (spec/web.md).
+# ČT's API (api.ceskatelevize.cz) is not here: the page asks the gateway (/dvb/ct/*).
+# The Chamber of Deputies' live streams (approved for the web by the owner on 2026-11-01, T28) come straight from
+# its CDN: the playlist URL of psp.js; it answers any origin (Access-Control-Allow-Origin: *, checked 2026-11-01
+# outside a broadcast). Variant playlists and segments are taken to be on the same host; check during a broadcast.
 CT_STREAM_HOSTS = ("https://ivys-nw-cdn.o2tv.cz", "https://*.o2-tv.cz")
 CT_IMAGE_HOSTS = ("https://ctfs.ceskatelevize.cz",)
+CHAMBER_STREAM_HOSTS = ("https://pspcr-ott-live.ssl.cdn.cra.cz",)
 
 
 def _csp() -> str:
-    streams = " ".join(CT_STREAM_HOSTS)
+    streams = " ".join(CT_STREAM_HOSTS + CHAMBER_STREAM_HOSTS)
     images = " ".join(CT_IMAGE_HOSTS)
     return "; ".join([
         "default-src 'self'",

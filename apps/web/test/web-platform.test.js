@@ -92,22 +92,18 @@ test('cookie: Secure over https; a key that cannot be a cookie value is not set 
   assert.equal(doc.last, 'cztvhub_key=; Path=/dvb; SameSite=Strict; Max-Age=0');
 });
 
-test('Poslanecká sněmovna is off on the web whatever the prefs say (approved for the apps only)', () => {
+test('Poslanecká sněmovna is on the web as on Samsung (owner 2026-11-01, T28)', () => {
   const App = CT.App;
   App.channelPrefs = CT.ChannelPrefs.empty();
   App.dvbConfig = null;
   const sources = () => App.channelList([]).map((i) => i.source);
-  assert.equal(App.sourceOn('psp'), false);
-  assert.ok(!sources().includes('psp'));
+  assert.equal(App.sourceOn('psp'), true);
+  assert.ok(sources().includes('psp'));
   assert.ok(sources().includes('ct'));
-  // the same app with the Samsung rule lists them: the web rule is what removes them
-  const web = P.sourceAllowed;
-  P.sourceAllowed = samsung.sourceAllowed;
-  try {
-    assert.ok(sources().includes('psp'));
-  } finally {
-    P.sourceAllowed = web;
-  }
+  // its own switch still turns it off, as on the TV
+  App.channelPrefs = CT.ChannelPrefs.setSource(CT.ChannelPrefs.empty(), 'psp', false);
+  assert.ok(!sources().includes('psp'));
+  App.channelPrefs = CT.ChannelPrefs.empty();
 });
 
 test('errors: ČT requests get "Otevřít v iVysílání" (iVysílání in a new tab, nothing sent along); others none', () => {

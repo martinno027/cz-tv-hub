@@ -70,11 +70,10 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
   opens `https://www.ceskatelevize.cz/ivysilani/` in a new tab (the apps open the iVysílání app's start, too).
 
 ## Poslanecká sněmovna on the web
-**Needs the owner's dated approval first** (the T06 rule names the apps only; wording proposed by legal-guard in
-`notes/TASKS.md` T27). If approved: played straight from the Chamber's CDN as in the apps (no proxy, live only,
-the same live-check limits as the shared code); if not, the web leaves the source out. Where the browser refuses it (the
-CDN's CORS headers for hls.js: to be checked when building; Safari's native HLS does not need them), the player says
-"Přenos Sněmovny tento prohlížeč nepřehraje. Zkuste Safari nebo psp.cz." Never a workaround through the gateway.
+**Approved by the owner on 2026-11-01 (T28)**: played straight from the Chamber's CDN as in the apps (no proxy,
+live only, the same live-check limits as the shared code; the source and its switch as on Samsung). The CDN answers
+any origin (`Access-Control-Allow-Origin: *`, checked 2026-11-01), so hls.js can play it; its host is in the
+gateway's CSP. Never a workaround through the gateway.
 
 ## Security (walk `docs/SECURITY-REVIEW.md` as part of "done")
 - The cookie `cztvhub_key` becomes a browser-wide credential for `/dvb/*`: state-changing `/dvb/*` routes keep

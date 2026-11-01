@@ -65,9 +65,9 @@
   P.gatewayAddress = function () {
     return CT.WebGateway.address(root.location);
   };
-  /** Poslanecká sněmovna is approved for the apps only (T06): off on the web, its switch hidden. */
-  P.sourceAllowed = function (source) {
-    return source !== 'psp';
+  /** Every source as on Samsung; Poslanecká sněmovna approved for the web by the owner on 2026-11-01 (T28). */
+  P.sourceAllowed = function () {
+    return true;
   };
   P.fitStage = function (stage) {
     CT.WebStage.apply(stage, $('web-rotate'), root, $('web-strip'));
@@ -109,7 +109,8 @@
     var about = server.querySelector('p.hint.small');
     if (about) {
       about.textContent = 'Neoficiální projekt, není spojen s Českou televizí ani s Poslaneckou sněmovnou PČR. ' +
-        'Stránka přehrává jen oficiální streamy ČT a vlastní anténu, nic nenahrává, nestahuje ani neobchází DRM.';
+        'Stránka přehrává jen oficiální streamy ČT, veřejné přímé přenosy Poslanecké sněmovny a vlastní anténu, ' +
+        'nic nenahrává, nestahuje ani neobchází DRM.';
       about.parentNode.insertBefore(el('p', 'web-third-party', 'hint small', thirdPartyLine()), about.nextSibling);
     }
     var video = $('html5player');
