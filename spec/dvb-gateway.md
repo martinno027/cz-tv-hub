@@ -541,8 +541,9 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
   scripts, `frame-ancestors 'none'`, and `img-src`/`media-src`/`connect-src` limited to `'self'`, `blob:` and **only
   the hosts the web needs**, measured 2026-11-01 and listed in `web.py` (a test checks the header; the source
   rule enforced in code): ČT's stream CDN `ivys-nw-cdn.o2tv.cz` (master playlist) and `*.o2-tv.cz` (variant
-  playlists, segments), ČT's images and subtitles `ctfs.ceskatelevize.cz` (img/connect only); the Chamber's CDN
-  only once the Chamber on the web is approved (not now: a test asserts it is absent). Behind a reverse proxy
+  playlists, segments), ČT's images and subtitles `ctfs.ceskatelevize.cz` (img/connect only); the Chamber's live
+  CDN `pspcr-ott-live.ssl.cdn.cra.cz` (media/connect; approved for the web 2026-11-01, T28; variant playlists and
+  segments taken to be on the same host — check during a broadcast, O008). Behind a reverse proxy
   (`tailscale serve`, nginx) every request would look like loopback = home: not supported (SECURITY-REVIEW), `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: no-referrer`. `/web` redirects to `/web/`.
 - **ČT for the web** (app key as for every `/dvb/*`, worker key `403`): the gateway calls the same ČT API the apps

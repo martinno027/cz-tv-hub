@@ -19,8 +19,9 @@ INDEX = b"<!DOCTYPE html><title>Televize</title><script src=\"app/js/core/models
 EXPECTED_CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; "
     "img-src 'self' blob: https://ctfs.ceskatelevize.cz; "
-    "media-src 'self' blob: https://ivys-nw-cdn.o2tv.cz https://*.o2-tv.cz; "
-    "connect-src 'self' https://ivys-nw-cdn.o2tv.cz https://*.o2-tv.cz https://ctfs.ceskatelevize.cz; "
+    "media-src 'self' blob: https://ivys-nw-cdn.o2tv.cz https://*.o2-tv.cz https://pspcr-ott-live.ssl.cdn.cra.cz; "
+    "connect-src 'self' https://ivys-nw-cdn.o2tv.cz https://*.o2-tv.cz https://pspcr-ott-live.ssl.cdn.cra.cz "
+    "https://ctfs.ceskatelevize.cz; "
     "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
 
@@ -94,8 +95,9 @@ class WebSiteTest(unittest.TestCase):
         self.assertNotIn("data:", web.CSP)
         self.assertNotIn(" * ", web.CSP + " ")
         hosts = {t for t in web.CSP.replace(";", " ").split() if t.startswith("https://")}
-        self.assertEqual(hosts, {"https://ivys-nw-cdn.o2tv.cz", "https://*.o2-tv.cz", "https://ctfs.ceskatelevize.cz"})
-        self.assertNotIn("cra.cz", web.CSP)  # the Chamber is not on the web (not approved)
+        self.assertEqual(hosts, {"https://ivys-nw-cdn.o2tv.cz", "https://*.o2-tv.cz", "https://ctfs.ceskatelevize.cz",
+                                 "https://pspcr-ott-live.ssl.cdn.cra.cz"})  # the Chamber: T28, owner 2026-11-01
+        self.assertNotIn("*.cra.cz", web.CSP)  # only the Chamber's own live CDN host, not the provider's domain
         self.assertNotIn("api.ceskatelevize.cz", web.CSP)  # the page asks the gateway, never ČT's API
 
     def test_redirect(self):

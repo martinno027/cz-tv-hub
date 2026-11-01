@@ -4,10 +4,12 @@ cz-tv-hub is an unofficial personal project. It is not affiliated with, endorsed
 or Poslanecká sněmovna Parlamentu ČR.
 "ČT", "ČT1", "ČT2", "ČT24", "ČT sport", "ČT :D", "ČT art" and "iVysílání" are trademarks of Česká televize.
 
-## Live streams of the Chamber of Deputies (approved by the user on 2026-10-24)
+## Live streams of the Chamber of Deputies (approved by the user on 2026-10-24; the web app on 2026-11-01)
 - Only the public live streams that Poslanecká sněmovna Parlamentu ČR publishes for everyone on psp.cz ("Živé
-  vysílání", Stream 1–5: sessions, press conferences, committees and seminars). The viewer's TV app plays them directly
-  from the Chamber's CDN; there is no proxy, no server, no playlist or Kodi export.
+  vysílání", Stream 1–5: sessions, press conferences, committees and seminars). The viewer's TV app, or the household
+  web app in a browser (added by the user on 2026-11-01, T28: „schvaluju snemovnu na webu"), plays them directly from
+  the Chamber's CDN; the gateway only serves the app's files and never the stream; there is no proxy, no playlist or
+  Kodi export.
 - Play only, live only: no recording, download, caching or timeshift, now or later. They are never fed into TVHeadend.
 - No circumvention: the apps request the published URL without extra or faked headers. If the streams start to need a
   token, login, referer or geo check, the apps show an error and the source is removed.
