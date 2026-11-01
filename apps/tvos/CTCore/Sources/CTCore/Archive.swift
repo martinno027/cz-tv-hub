@@ -191,6 +191,8 @@ public struct ArchiveEpisodeGroup: Sendable, Hashable {
     public let season: String?
     public let episodes: [ArchiveEpisode]
     public let nextPage: Int?
+    /// The year/month chips (T32): only when ČT's list has more than 100 episodes; the episodes are then that month's.
+    public var periods: ArchivePeriods? = nil
 
     /// The group of our recorded episodes ("Nahráno z antény"): every episode is a recording.
     public var isRecordings: Bool {
@@ -211,10 +213,12 @@ public struct ArchiveShow: Sendable, Equatable {
     public let error: String?
 }
 
-/// The episodes of one season (`?season=<id>&page=<n>`).
+/// The episodes of one season and/or month (`?season=<id>&year=&month=&page=<n>`).
 public struct ArchiveEpisodePage: Sendable, Equatable {
     public let episodes: [ArchiveEpisode]
     public let nextPage: Int?
+    /// The year/month the episodes belong to (T32); nil = no chips.
+    public var periods: ArchivePeriods? = nil
 }
 
 public enum ArchiveSort: String, Sendable, CaseIterable {
@@ -414,7 +418,7 @@ public enum ArchiveParser {
             let episodes = episodes(item["episodes"])
             guard !episodes.isEmpty else { return nil }
             return ArchiveEpisodeGroup(title: text(item["title"]) ?? "", season: text(item["season"]), episodes: episodes,
-                                       nextPage: page(item["nextPage"]))
+                                       nextPage: page(item["nextPage"]), periods: periods(item["periods"]))
         }
         return ArchiveShow(card: card, description: text(root["description"]) ?? "", creators: texts(root["creators"]),
                            countries: texts(root["countries"]), seasons: array(root["seasons"]).compactMap(genre),
@@ -425,13 +429,15 @@ public enum ArchiveParser {
     public static func episodePage(status: Int, body: Data) throws -> ArchiveEpisodePage {
         let root = try object(status: status, body: body)
         if root["episodes"] != nil {
-            return ArchiveEpisodePage(episodes: episodes(root["episodes"]), nextPage: page(root["nextPage"]))
+            return ArchiveEpisodePage(episodes: episodes(root["episodes"]), nextPage: page(root["nextPage"]),
+                                      periods: periods(root["periods"]))
         }
         let group = array(root["groups"]).first { !episodes($0["episodes"]).isEmpty && !(episodes($0["episodes"]).allSatisfy {
             if case .rec = $0.source { return true } else { return false }
         }) }
         return ArchiveEpisodePage(episodes: episodes(group?["episodes"]),
-                                  nextPage: page(group?["nextPage"]) ?? page(root["nextPage"]))
+                                  nextPage: page(group?["nextPage"]) ?? page(root["nextPage"]),
+                                  periods: periods(group?["periods"]))
     }
 
     static func card(_ item: [String: Any]) -> ArchiveCard? {
@@ -491,6 +497,25 @@ public enum ArchiveParser {
         guard let title = text(item["title"]) else { return nil }
         let id = text(item["id"]) ?? number(item["id"]).map { String(Int($0)) }
         return id.map { ArchiveGenre(id: $0, title: title) }
+    }
+
+    /// `{"years", "year", "months", "month"}` (T32): years 1900–2999 and months 1–12, each once, the gateway's
+    /// order kept; the chosen year must be in the list, else no chips (the episodes still show). A month that is
+    /// missing or not listed falls back to the year's newest (`ArchivePeriodRules.selectYear`, spec/apps.md).
+    static func periods(_ value: Any?) -> ArchivePeriods? {
+        guard let item = value as? [String: Any] else { return nil }
+        func ints(_ value: Any?, _ range: ClosedRange<Int>) -> [Int] {
+            var seen = Set<Int>()
+            return (value as? [Any] ?? []).compactMap { number($0) }
+                .compactMap { $0.rounded() == $0 && range.contains(Int($0)) ? Int($0) : nil }
+                .filter { seen.insert($0).inserted }
+        }
+        let years = ints(item["years"], ArchivePeriods.yearRange)
+        let months = ints(item["months"], 1...12)
+        guard let year = number(item["year"]).map({ Int($0) }), years.contains(year),
+              let month = number(item["month"]).map({ Int($0) }).flatMap({ months.contains($0) ? $0 : nil })
+                ?? ArchivePeriodRules.selectYear(months: months) else { return nil }
+        return ArchivePeriods(years: years, year: year, months: months, month: month)
     }
 
     private static func attribution(_ root: [String: Any]) -> String {
@@ -566,9 +591,13 @@ extension DVBClient {
     }
 
     public func archiveSeason(show id: String, season: String, page: Int) async throws -> ArchiveEpisodePage {
-        let response = try await get(Self.path("/dvb/archive/show/\(escape(id))", [
-            URLQueryItem(name: "season", value: season), URLQueryItem(name: "page", value: String(page)),
-        ]))
+        try await archiveEpisodes(show: id, query: ArchiveEpisodeQuery(season: season), page: page)
+    }
+
+    /// A page of the show's ČT episodes for a season and/or year and month (T32):
+    /// `?season=&year=YYYY&month=M&page=n`, each only when set.
+    public func archiveEpisodes(show id: String, query: ArchiveEpisodeQuery, page: Int) async throws -> ArchiveEpisodePage {
+        let response = try await get(Self.path("/dvb/archive/show/\(escape(id))", query.queryItems(page: page)))
         return try ArchiveParser.episodePage(status: response.status, body: response.body)
     }
 
