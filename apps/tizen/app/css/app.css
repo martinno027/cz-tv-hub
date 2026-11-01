@@ -324,13 +324,24 @@ main {
   overflow: hidden;
 }
 
+/* Over the first row's cells as an opaque band (the channel name stays), so the text never draws over a cell (T29) */
 #grid-message {
   position: absolute;
-  top: 60px;
-  left: 240px;
+  top: 40px;
+  left: 220px;
+  right: 0;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  padding-left: 20px;
+  background: var(--bg);
   font-size: 28px;
   color: var(--muted);
   z-index: 3;
+}
+
+#grid-message:empty {
+  display: none;
 }
 
 #grid-header {

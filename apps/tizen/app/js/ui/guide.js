@@ -491,6 +491,27 @@
     var visible = this.viewRows;
     if (this.focusRow < this.scrollRow) this.scrollRow = this.focusRow;
     if (this.focusRow >= this.scrollRow + visible) this.scrollRow = this.focusRow - visible + 1;
+    this.applyScroll();
+  };
+
+  /**
+   * The web (spec/web.md "Input (T29)"): the wheel / a swipe moves the view by `dxPx` (grid px) and `dRows`, the
+   * focus stays where it is. Within the day; returns whether the view moved. Not used on the TV.
+   */
+  GuideScreen.prototype.scrollView = function (dxPx, dRows) {
+    if (!this.rows.length) return false;
+    var total = px(this.axisEnd - this.axisStart);
+    var x = Math.max(0, Math.min(this.scrollX + dxPx, Math.max(0, total - this.viewPx + 20)));
+    var row = Math.max(0, Math.min(this.scrollRow + dRows, Math.max(0, this.rows.length - this.viewRows)));
+    if (x === this.scrollX && row === this.scrollRow) return false;
+    this.scrollX = x;
+    this.scrollRow = row;
+    this.applyScroll();
+    return true;
+  };
+
+  /** Draws the view at scrollX / scrollRow: the cells near it get DOM, the rows and ticks move. */
+  GuideScreen.prototype.applyScroll = function () {
     this.syncWindow();
 
     var tx = 'translate(' + (-this.scrollX) + 'px, ' + (-this.scrollRow * ROW_HEIGHT) + 'px)';
