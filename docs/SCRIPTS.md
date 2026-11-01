@@ -114,11 +114,23 @@ runs on the Pi on the next press, exactly as with a manual pull.
 </details>
 
 <details>
+<summary><code>python3 apps/web/tools/make_icons.py</code> — the web app's icons for its manifest (T35)</summary>
+
+Draws `apps/web/icons/` (192 and 512 px, a maskable 512 px with the drawing at 80 %, the 180 px apple-touch icon)
+from the same neutral drawing as the Samsung icon (`apps/tizen/tools/make_icon.py`), standard library only (PNG via
+zlib); two runs give byte-identical files. Run it only when the drawing changes and commit the PNGs.
+
+Can go wrong: the Samsung drawing script moved or renamed its `pixel()` function — the script stops with an import
+error; `apps/web/test/install.test.js` checks the sizes the PNG headers say.
+
+</details>
+
+<details>
 <summary><code>python3 server/deploy/stage_web.py TARGET</code> — stage the household web app (T27)</summary>
 
 Fills `TARGET` afresh with what `/web/` serves: `apps/web/` at the top, the Samsung app's `index.html` (markup that
 `apps/web/js/boot.js` loads), `js/`, `css/`, `img/` under `app/`, and `js/build-info.js` (version from the Samsung
-`config.xml`, build number, commit, time) for "Verze … (web)". Only regular files of the served types plus `LICENSE`/`NOTICE`; never
+`config.xml`, build number, commit, time) for "Verze … (web)", and the web app manifest with `icons/` (T35). Only regular files of the served types plus `LICENSE`/`NOTICE`; never
 symlinks, dot files, `local-config.js` (a Samsung build's key preset), `test`/`tests`/`fixtures` directories.
 `install.sh` runs it as the normal user (git) into a temporary directory and swaps the result into
 `/opt/cztvhub/web`. Exit code 3 = no `apps/web/index.html`. Tests: `server/tests/test_deploy_web.py`.

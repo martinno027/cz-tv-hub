@@ -22,7 +22,7 @@ EXPECTED_CSP = (
     "media-src 'self' blob: https://ivys-nw-cdn.o2tv.cz https://*.o2-tv.cz https://pspcr-ott-live.ssl.cdn.cra.cz; "
     "connect-src 'self' https://ivys-nw-cdn.o2tv.cz https://*.o2-tv.cz https://pspcr-ott-live.ssl.cdn.cra.cz "
     "https://ctfs.ceskatelevize.cz; "
-    "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+    "worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
 
 def make_tree(root: Path) -> Path:
@@ -39,6 +39,7 @@ def make_tree(root: Path) -> Path:
     (site / "logo.png").write_bytes(b"\x89PNG")
     (site / "font.woff2").write_bytes(b"wOF2")
     (site / "icon.svg").write_text("<svg/>", encoding="utf-8")
+    (site / "manifest.webmanifest").write_text('{"name": "Televize"}', encoding="utf-8")
     (site / ".hidden.js").write_text("secret", encoding="utf-8")
     (site / "folder.js").mkdir()  # a directory with a served suffix
     (site / "notes.txt").write_text("not a served type", encoding="utf-8")
@@ -72,6 +73,7 @@ class WebSiteTest(unittest.TestCase):
                  "/web/logo.png": ("image/png", b"\x89PNG"), "/web/font.woff2": ("font/woff2", b"wOF2"),
                  "/web/icon.svg": ("image/svg+xml", b"<svg/>"), "/web/page.HTML": ("text/html; charset=utf-8",
                                                                                   b"upper case"),
+                 "/web/manifest.webmanifest": ("application/manifest+json; charset=utf-8", b'{"name": "Televize"}'),
                  "/web/inside.js": ("text/javascript; charset=utf-8", b"var CT = {};\n"),
                  "/web/app/js/core/%6dodels.js": ("text/javascript; charset=utf-8", b"var CT = {};\n")}
         for path, (content_type, body) in cases.items():
@@ -99,6 +101,7 @@ class WebSiteTest(unittest.TestCase):
                                  "https://pspcr-ott-live.ssl.cdn.cra.cz"})  # the Chamber: T28, owner 2026-11-01
         self.assertNotIn("*.cra.cz", web.CSP)  # only the Chamber's own live CDN host, not the provider's domain
         self.assertNotIn("api.ceskatelevize.cz", web.CSP)  # the page asks the gateway, never ČT's API
+        self.assertIn("manifest-src 'self';", web.CSP)  # own window (T35): the manifest only from the gateway
 
     def test_redirect(self):
         resp = self.get("/web")

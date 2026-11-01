@@ -16,9 +16,13 @@ s aplikací Tailscale v tom zařízení.
   na šířku.“, klíč v `localStorage` a v cookie `cztvhub_key` (`Path=/dvb; SameSite=Strict`).
 - **Rozdíly proti Samsungu**: v Nastavení → Server není adresa (je to adresa stránky), tlačítka „Uložit a
   ověřit“ a „Odebrat bránu“; bez klíče všechny záložky říkají „Zadejte klíč brány v Nastavení → Server.“;
-  na stránce pořadu ČT je „Otevřít v iVysílání“; Poslanecká sněmovna na webu není (schválená jen pro aplikace,
-  T06); anténa (H.265) jen v prohlížečích, které HEVC umí, jinak to přehrávač řekne česky. ČT jde přehrát jen
+  na stránce pořadu ČT je „Otevřít v iVysílání“; Poslanecká sněmovna je na webu stejně jako na Samsungu (schváleno
+  1. 11. 2026, T28); anténa (H.265) jen v prohlížečích, které HEVC umí, jinak to přehrávač řekne česky. ČT jde přehrát jen
   doma (to hlídá brána; mimo domov text a „Otevřít v iVysílání“).
+- **Vlastní okno** (T35): `manifest.webmanifest` a značky pro Safari v `index.html`, takže Chrome/Edge („Otevřít
+  jako okno“) i Safari („Přidat do Docku“) otevřou Televizi bez adresního řádku. Žádný service worker ani offline
+  mezipaměť. Ikony v `icons/` kreslí `python3 apps/web/tools/make_icons.py` (jen standardní knihovna) ze stejné
+  kresby jako ikona Samsungu (`apps/tizen/tools/make_icon.py`); maskovatelná je zmenšená na 80 % do bezpečné zóny.
 - Nic se nestahuje ani neexportuje, žádné CDN ani analytika; vše jen z brány.
 
 ## Testy a vývoj

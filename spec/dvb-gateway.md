@@ -620,7 +620,7 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
   or the state directory: one config mistake must not publish recordings without a key. Nothing but the built web
   app goes there (no keys, config or real data; demo fixtures only the synthetic `spec/fixtures`). `web_dir` has a
   default in code, so it is not in the config template;
-  methods other than GET/HEAD `405`. Content types by extension (`.html .js .css .svg .png .woff2 .json`), `Cache-
+  methods other than GET/HEAD `405`. Content types by extension (`.html .js .css .svg .png .woff2 .json .webmanifest`; `manifest-src 'self'` in the CSP, T35), `Cache-
   Control: no-cache` + `ETag`. Every answer carries `Content-Security-Policy` with `default-src 'self'`, no inline
   scripts, `frame-ancestors 'none'`, and `img-src`/`media-src`/`connect-src` limited to `'self'`, `blob:` and **only
   the hosts the web needs**, measured 2026-11-01 and listed in `web.py` (a test checks the header; the source

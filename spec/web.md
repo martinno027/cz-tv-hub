@@ -70,6 +70,19 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
   pattern).
 - **Version line**: "Verze … (web)" from the build info the gateway install writes.
 
+## Install as an app (T35, owner 2026-11-01: „zobrazí jen tu zobrazovací část … a tlačítko zase přejít na klasické
+zobrazení")
+- **Full screen** (⛶, T29) is the in-page answer: it hides the browser's bars, ⛶ / Esc / F bring them back.
+- **Own window**: a web app manifest (`manifest.webmanifest`: name „Televize", short name, `start_url` `/web/`,
+  `display: standalone`, dark theme colour, icons 192/512 px and a maskable one, from the app's icon) and
+  `<meta name="apple-mobile-web-app-capable">` + `apple-touch-icon`, so Chrome/Edge "Vytvořit zástupce → Otevřít jako
+  okno" and Safari "Přidat do Docku" (macOS) / "Přidat na plochu" (iOS) open Televize in its own window without the
+  address bar. Over plain HTTP (the Pi on the LAN or the tailnet) browsers do not offer a real "install"; no
+  service worker, no offline cache (nothing to cache; video never cached). Nastavení → Server gets one line on how
+  ("Vlastní okno bez lišty: v Chrome ⋮ → Uložit a sdílet → Vytvořit zástupce → Otevřít jako okno; v Safari Soubor →
+  Přidat do Docku."). In such a window, the app's own ⛶ still toggles full screen; leaving the window = closing it.
+- The manifest and icons are static files under `/web/` (CSP: `manifest-src 'self'`).
+
 ## ČT (internet channels) on the web
 - The browser cannot ask ČT itself: ČT's API answers browsers only for pages from `ceskatelevize.cz` (CORS,
   checked 2026-11-01: no `Access-Control-Allow-Origin` for any other origin). So the web asks **the gateway**, which
