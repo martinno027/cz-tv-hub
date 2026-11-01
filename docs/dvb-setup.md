@@ -326,6 +326,41 @@ fungují, jen bez těchto údajů; smazáním klíče se smažou i uložené vý
 hledání podle názvu a řada „Pokračovat ve sledování". Skládá ho Raspberry z veřejného API ČT a z vašich nahrávek;
 televize bez nastaveného serveru archiv neukáže.
 
+## 6a. Televize v prohlížeči (web)
+
+Stejná aplikace jako na Samsungu, jen v prohlížeči na počítači, tabletu nebo telefonu. Běží na Raspberry, kde je
+zapnutá Anténa (`[dvb]`); `install.sh` ji nainstaluje do `/opt/cztvhub/web`.
+
+1. Otevřete `http://<jméno-raspberry>:8098/web/`:
+   - **doma** v domácí síti, např. `http://raspberrypi.local:8098/web/`,
+   - **mimo domov** nejdřív na tom počítači nebo telefonu spusťte **aplikaci Tailscale** (přihlášenou účtem, kterému
+     jste v kapitole 5 povolili přístup) a otevřete adresu se jménem z Tailscale, např. `http://raspberrypi:8098/web/`.
+     Web sám Tailscale neumí, na rozdíl od aplikací pro Apple TV a Android TV.
+2. V **Nastavení → Server** zadejte **Klíč** (stejný jako v televizi, `sudo grep ^key /etc/cztvhub/cztvhub.conf`)
+   a dejte **Uložit a ověřit**. Adresa se nezadává: je to adresa stránky. Klíč si pamatuje jen tento prohlížeč;
+   **Odebrat bránu** ho z prohlížeče smaže. Bez klíče web na každé záložce napíše „Zadejte klíč brány
+   v Nastavení → Server.“
+3. Ovládání myší nebo prstem (klepnutí = OK, dlouhé podržení = dlouhé OK, tlačítko **‹ Zpět** vlevo nahoře)
+   i klávesnicí (šipky, Enter = OK, Esc nebo Backspace = Zpět, číslice = číslo kanálu, mezerník = pauza).
+   Telefon otočte na šířku.
+
+**ČT jde v prohlížeči přehrát jen doma.** TV průvodce ČT funguje všude, ale živé vysílání i archiv ČT web přehraje
+jen na zařízení připojeném do domácí sítě. Přes Tailscale (i doma, když stránku otevřete adresou z Tailscale
+`100.…`) ukáže „ČT jde v prohlížeči přehrát jen doma. Mimo domov použijte aplikaci Televize nebo iVysílání.“
+a tlačítko **Otevřít v iVysílání**. Důvod: odkaz na vysílání ČT vydá ČT pro adresu, ze které se Raspberry ptá,
+a brána ho dává jen zařízením z domácí sítě; video ČT přes Raspberry nikdy neposílá.
+
+**Anténa je v kódování H.265 (HEVC).** Přehraje ji Safari (Mac, iPhone, iPad) a Chrome nebo Edge na počítači, který
+HEVC umí (většina novějších). Kde to prohlížeč neumí (často Firefox), web místo černého obrazu napíše „Tento
+prohlížeč neumí přehrát vysílání z antény (H.265). …“. ČT se to netýká.
+
+Prohlížeče: aktuální Safari, Chrome a Edge. Poslanecká sněmovna na webu není (jen v aplikacích Televize).
+
+Když se `/web/` nenačte („not found“ / „web is off“): `journalctl -u cztvhub | grep "web:"` ukáže důvod, např.
+`web: off (no index.html in /opt/cztvhub/web …)` (spusťte znovu `bash server/deploy/install.sh`) nebo
+`web: off (web_dir … overlaps …)`: složka webu nesmí být ve složce nahrávek ani stavu (`web_dir` v konfiguraci
+nechte výchozí).
+
 ## Řešení potíží
 
 - `curl -H "Authorization: Bearer <klíč>" http://127.0.0.1:8098/dvb/status` na Raspberry ukáže tunery,

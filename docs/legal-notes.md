@@ -31,6 +31,14 @@ or Poslanecká sněmovna Parlamentu ČR.
   everyone. This is decided by time only, never as a reaction to an archive error.
 - CT's API is not documented for third parties; it can change or be restricted at any time. Respect CT's terms of use
   and keep requests polite (signed URLs are cached for at most 60 s).
+- The household web app in a browser (`/web/`, approved by the user on 2026-11-01, T27): a page from the household's
+  gateway cannot ask CT's API itself (CT allows its API only for its own web pages), so the gateway asks the same API
+  the apps use, with the same fixed request and the project's honest user agent, and hands CT's answer to the page
+  unchanged, including CT's DRM, licence and blocking answers. Stream links go only to browsers on the home network,
+  never over the tailnet or to anyone else; the browser then plays straight from CT's CDN, and video never passes
+  through the gateway. The links stay at most 60 s in the gateway's memory and are never written or logged. Away from
+  home the web shows the programme and a link to iVysílání instead. The gateway is not a Tailscale exit node for CT
+  (that would route CT's video through the household's line and lift CT's Czech-only limit abroad).
 
 ## DVB-T2 (antenna)
 - Only free-to-air channels received by your own tuner at home. Encrypted multiplexes are never decrypted

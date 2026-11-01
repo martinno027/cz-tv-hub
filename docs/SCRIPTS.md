@@ -35,10 +35,13 @@ another port and point a copy of `deploy/cztvhub-dev.conf` at it.
 <summary><code>PYTHONPATH=src python3 -m cztvhub serve [--config FILE] [--host H] [--port P]</code> — the server</summary>
 
 Without `--config` the CT-only server (playlist + redirects). With a config with `[dvb] enabled = true` also the
-DVB-T2 gateway (`/dvb/*`) and, with `[admin] password`, the admin page `/admin`. For development:
-`--config deploy/cztvhub-dev.conf` against the fake TVHeadend.
+DVB-T2 gateway (`/dvb/*`), the household web app `/web/` (files from `[dvb] web_dir`) and, with
+`[admin] password`, the admin page `/admin`. For development: `--config deploy/cztvhub-dev.conf` against the fake
+TVHeadend; for `/web/` there, stage the web app first (`python3 deploy/stage_web.py /tmp/cztvhub-web`, below).
 
-Can go wrong: two servers on one port; a dev config pointing at a real TVHeadend.
+Can go wrong: two servers on one port; a dev config pointing at a real TVHeadend; the log line `web: off (…)` at
+start: `web_dir` has no `index.html` (not staged) or overlaps `hls_dir`, `buffer_dir`, `state_dir`, `breaks_dir`
+or the config's directory (the web stays off rather than publish recordings or state without a key).
 
 </details>
 
@@ -64,7 +67,8 @@ Prints the playlist the server would serve, for checking the channel list.
 <details>
 <summary><code>bash server/deploy/install.sh</code> / <code>bash server/deploy/install-dvb.sh</code> — install or update</summary>
 
-`install.sh` copies the code to `/opt/cztvhub`, installs the systemd unit and restarts the service; an existing
+`install.sh` copies the code to `/opt/cztvhub` and the household web app to `/opt/cztvhub/web`
+(`deploy/stage_web.py`, below), installs the systemd unit and restarts the service; an existing
 `/etc/cztvhub/cztvhub.conf` is kept. `install-dvb.sh` also installs TVHeadend (project repository), ffmpeg and
 avahi and creates the config with DVB enabled. Update: `cd ~/cz-tv-hub && git pull && bash server/deploy/install.sh`.
 
@@ -75,7 +79,23 @@ Tests: `bash server/deploy/health.test.sh` (fake curl/systemctl, no Pi).
 
 Can go wrong: `install-dvb.sh` asks for a TVHeadend admin name and password (interactive); TVHeadend must listen on
 127.0.0.1 only — the script checks it and warns. Before T07 the check waited only 1 s and reported `curl: (7) Failed
-to connect` for a service that was fine a moment later.
+to connect` for a service that was fine a moment later. "web: not installed" means `apps/web/index.html` is missing in
+the clone (or staging failed, its reason is printed above); the old `/opt/cztvhub/web` then stays.
+
+</details>
+
+<details>
+<summary><code>python3 server/deploy/stage_web.py TARGET</code> — stage the household web app (T27)</summary>
+
+Fills `TARGET` afresh with what `/web/` serves: `apps/web/` at the top, the Samsung app's `index.html` (markup that
+`apps/web/js/boot.js` loads), `js/`, `css/`, `img/` under `app/`, and `js/build-info.js` (version from the Samsung
+`config.xml`, build number, commit, time) for "Verze … (web)". Only regular files of the served types plus `LICENSE`/`NOTICE`; never
+symlinks, dot files, `local-config.js` (a Samsung build's key preset), `test`/`tests`/`fixtures` directories.
+`install.sh` runs it as the normal user (git) into a temporary directory and swaps the result into
+`/opt/cztvhub/web`. Exit code 3 = no `apps/web/index.html`. Tests: `server/tests/test_deploy_web.py`.
+
+Can go wrong: run under `sudo` in the user's clone, git refuses the repository ("dubious ownership") and the version
+line shows `?`.
 
 </details>
 
