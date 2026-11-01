@@ -12,6 +12,9 @@
   var IVYSILANI_URL = 'https://www.ceskatelevize.cz/ivysilani/';
   var HLS_JS = { name: 'hls.js', version: '1.7.4', licence: 'Apache-2.0' }; // vendor/hls.min.js, apps/web/README.md
   var CT_REQUESTS = { live: true, startover: true, programme: true, archive: true };
+  // Nastavení → Server: how to open the page in its own window (spec/web.md "Install as an app", T35)
+  var INSTALL_HINT = 'Vlastní okno bez lišty: v Chrome ⋮ → Uložit a sdílet → Vytvořit zástupce → Otevřít jako ' +
+    'okno; v Safari Soubor → Přidat do Docku.';
 
   function $(id) {
     return doc.getElementById(id);
@@ -103,6 +106,8 @@
     $('set-clear').textContent = 'Odebrat bránu';
     var choice = doc.querySelector('#set-choice .choice[data-section="server"] .choice-detail');
     if (choice) choice.textContent = 'Klíč brány Anténa (DVB-T2) na Raspberry Pi';
+    var aboutTitle = server.querySelector('h2.about');
+    if (aboutTitle) server.insertBefore(el('p', 'web-install', 'hint', INSTALL_HINT), aboutTitle);
     var about = server.querySelector('p.hint.small');
     if (about) {
       about.textContent = 'Neoficiální projekt, není spojen s Českou televizí ani s Poslaneckou sněmovnou PČR. ' +
@@ -124,5 +129,5 @@
     root.addEventListener('orientationchange', function () { CT.App.fitStage(); });
   }
 
-  CT.Web = { IVYSILANI_URL: IVYSILANI_URL, HLS_JS: HLS_JS, thirdPartyLine: thirdPartyLine, ready: ready };
+  CT.Web = { IVYSILANI_URL: IVYSILANI_URL, HLS_JS: HLS_JS, INSTALL_HINT: INSTALL_HINT, thirdPartyLine: thirdPartyLine, ready: ready };
 })(window);

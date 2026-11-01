@@ -3,7 +3,8 @@
 Called by ``install.sh`` as the normal user (git works there), which then copies TARGET to ``/opt/cztvhub/web``.
 
 Mapping (the web page references the shared files as relative URLs ``app/js/core/x.js``):
-- ``apps/web/``                → ``TARGET/``  (``index.html``, ``js/``, ``css/``, ``vendor/`` with hls.js + LICENSE)
+- ``apps/web/``                → ``TARGET/``  (``index.html``, ``manifest.webmanifest``, ``icons/``, ``js/``, ``css/``,
+                                  ``vendor/`` with hls.js + LICENSE; not ``tools/``: only served types are copied)
 - ``apps/tizen/app/index.html`` → ``TARGET/app/index.html`` (the Samsung markup; ``apps/web/js/boot.js`` reads it
                                   and loads its scripts in order)
 - ``apps/tizen/app/js|css|img`` → ``TARGET/app/js|css|img`` (the Samsung app's code, shared 1:1)
@@ -25,7 +26,7 @@ import shutil
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-SERVED = {".html", ".js", ".css", ".svg", ".png", ".woff2", ".json"}  # = dvb/web.py CONTENT_TYPES
+SERVED = {".html", ".js", ".css", ".svg", ".png", ".woff2", ".json", ".webmanifest"}  # = dvb/web.py CONTENT_TYPES
 LEGAL = ("LICENSE", "NOTICE")
 SKIP_DIRS = {"test", "tests", "fixtures", "node_modules", "dist"}
 SKIP_FILES = {"local-config.js", "build-info.js"}

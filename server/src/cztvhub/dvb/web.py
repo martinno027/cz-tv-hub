@@ -43,6 +43,7 @@ def _csp() -> str:
         f"media-src 'self' blob: {streams}",
         f"connect-src 'self' {streams} {images}",
         "worker-src 'self' blob:",  # hls.js runs its demuxer in a worker made from a blob URL
+        "manifest-src 'self'",  # manifest.webmanifest: own window (T35); default-src covers it, explicit on purpose
         "object-src 'none'",
         "base-uri 'none'",
         "form-action 'none'",
@@ -64,6 +65,7 @@ CONTENT_TYPES = {
     ".png": "image/png",
     ".woff2": "font/woff2",
     ".json": "application/json; charset=utf-8",
+    ".webmanifest": "application/manifest+json; charset=utf-8",  # the web app manifest (spec/web.md T35)
 }
 TEXT = "text/plain; charset=utf-8"
 

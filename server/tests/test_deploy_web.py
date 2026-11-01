@@ -31,6 +31,9 @@ class StageWebTest(unittest.TestCase):
         write(web / "vendor" / "hls.min.js")
         write(web / "vendor" / "LICENSE", "Apache")
         write(web / "README.md", "pins")
+        write(web / "manifest.webmanifest", '{"name": "Televize"}')
+        write(web / "icons" / "icon-192.png", "png")
+        write(web / "tools" / "make_icons.py", "print()")
         write(web / "test" / "player.test.js")
         write(web / ".eslintrc.json")
         write(app / "index.html", "<samsung>")
@@ -58,9 +61,9 @@ class StageWebTest(unittest.TestCase):
         count = stage_web.stage(self.target, self.repo, INFO)
         self.assertEqual(self.files(), [
             "app/css/app.css", "app/img/tmdb-logo-short.svg", "app/index.html", "app/js/core/models.js",
-            "app/js/ui/app.js", "css/web.css", "index.html", "js/build-info.js", "js/web-player.js",
-            "vendor/LICENSE", "vendor/hls.min.js"])
-        self.assertEqual(count, 11)
+            "app/js/ui/app.js", "css/web.css", "icons/icon-192.png", "index.html", "js/build-info.js",
+            "js/web-player.js", "manifest.webmanifest", "vendor/LICENSE", "vendor/hls.min.js"])
+        self.assertEqual(count, 13)
         self.assertEqual((self.target / "index.html").read_text(), "<html>")  # the web page at the top
         self.assertEqual((self.target / "app" / "index.html").read_text(), "<samsung>")  # boot.js reads it
 
@@ -96,6 +99,19 @@ class StageWebTest(unittest.TestCase):
     def test_served_types_match_the_gateway(self):
         from cztvhub.dvb import web
         self.assertEqual(stage_web.SERVED, set(web.CONTENT_TYPES))
+
+    def test_the_real_tree_stages_the_manifest_and_its_icons(self):
+        """T35: what index.html and the manifest reference is in the staged web app (else a 404 in the browser)."""
+        stage_web.stage(self.target, stage_web.ROOT, INFO)
+        manifest = json.loads((self.target / "manifest.webmanifest").read_text(encoding="utf-8"))
+        icons = [icon["src"] for icon in manifest["icons"]]
+        self.assertTrue(icons)
+        index = (self.target / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<link rel="manifest" href="manifest.webmanifest">', index)
+        for src in icons + ["icons/apple-touch-icon.png"]:
+            self.assertIn(src.split("/")[0], ("icons",), src)
+            self.assertTrue((self.target / src).is_file(), src)
+        self.assertFalse((self.target / "tools").exists())  # the icon generator is not served
 
     def test_build_info_from_the_samsung_build(self):
         info = stage_web.build_info(stage_web.ROOT)
