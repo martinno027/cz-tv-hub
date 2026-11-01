@@ -324,7 +324,8 @@ fungují, jen bez těchto údajů; smazáním klíče se smažou i uložené vý
 
 **Archiv** (záložka v aplikacích): pořady iVysílání a vaše nahrávky v kategoriích (Filmy, Seriály, Dokumenty…),
 hledání podle názvu a řada „Pokračovat ve sledování". Skládá ho Raspberry z veřejného API ČT a z vašich nahrávek;
-televize bez nastaveného serveru archiv neukáže.
+televize bez nastaveného serveru archiv neukáže. Pořady s více než 100 díly (třeba Události) se otevřou výběrem roku
+a měsíce, díly od nejnovějších; první otevření staršího roku trvá několik sekund, Raspberry se ČT ptá postupně.
 
 ## 6a. Televize v prohlížeči (web)
 

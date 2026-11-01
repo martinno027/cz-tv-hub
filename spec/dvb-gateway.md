@@ -457,10 +457,50 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     "countries"? [names], "seasons": [{"id","title"}], "groups": [{"title", "episodes": [episode…]}],
     "attribution"?, "error"?}`. The show page's `card` always has the show's own `kind` and `year` (from ČT's
     `showType`/`year`), also when the card in a list came from a search without them.
+  - **ČT's window**: an episodes request with offset + limit over 10 000 is an error at ČT (measured 2026-11-01:
+    offset 9909 limit 100 fails, 9900 gives the last 70), so chunks are cut to the window; in a list longer than
+    10 000 the oldest episodes past it cannot be read newest-first (Události: 9970, just inside).
+  - **Seasons** are only ČT's real seasons (`season:…`); ČT's groups of other versions of the same episodes
+    (`group:…`, e.g. Události's "Znakový jazyk a skryté titulky", 2026-11-01) are left out, so such a show lists
+    all its episodes (T32: taken as a season, Události showed only its signed versions since 2021).
   - **Season page** `GET /dvb/archive/show/<id>?season=<id>&page=<n>` answers the same show object; its ČT group
     (`groups[0]`) holds that season's page `n` and `nextPage` (`null` = no more); "Nahráno z antény" stays as it
     is. The apps replace the ČT group's episodes on page 1 and append them on later pages. Sample:
     `spec/fixtures/dvb/dvb_archive_show_season_page.json`.
+  - **Year and month (T32, owner 2026-11-01: "když je u pořadu hodně dílů, udělat předvýběr rok/měsíc a pak řadit
+    od nejnovějších po nejstarší")**: when the ČT episode list (the show without seasons, or the chosen season) has
+    **more than 100** playable episodes, the ČT group gets `"periods": {"years": [YYYY, …] (newest first), "year":
+    YYYY, "months": [1..12, …] (of that year, newest first, only months with an episode), "month": M}` and holds the
+    episodes of that **month, newest first**, paged as today (`nextPage`). Default: the newest year and its newest
+    month. `GET /dvb/archive/show/<id>?season=&year=YYYY&month=M&page=n` picks another (a year alone = its newest
+    month; a year outside the range or a month the year does not have `400` "Pořad nemá díly z tohoto roku nebo
+    měsíce"; `month` without `year`, or not 1–12, `400`; `year`/`month` on a `rec:` show or on a list of up to 100
+    episodes `400`). Up to 100 episodes nothing changes (season order as today, the same requests as before).
+    A month is the **Prague calendar month** of the episode's `aired` (`Europe/Prague`, summer time included;
+    00:30 on 1 January is January of the new year; not the guide's 05:00 broadcast day). Episodes without a date
+    are in no month.
+    **Empty years** (lead's decision 2026-11-01): `years` starts as every year from the newest to the oldest
+    episode's (finding the empty ones up front would cost a bisection per year). A year found to have no episode
+    is dropped from the cached list (with every newer year up to the episode just before where it would start) and
+    the answer moves to the next **older** year with episodes (repeated; none older → the next newer). The answer's
+    `years` holds only years not yet known to be empty, and the selected year always has `months` (never `[]`,
+    `month` never `null`). `?year=` of a year already known to be empty (a stale chip) answers for the nearest
+    year with episodes the same way, its `month` dropped (that year's newest), not `400`.
+    ČT's API has no date filter (checked 2026-11-01: `year`, `dateFrom`, `month` … are validation errors; `limit`
+    at most 100), but its list is ordered by date. The newest year comes from the first chunk (`orderBy: newest`,
+    `offset: 0`, `limit: 100`, also the newest year's first chunk); the oldest from `orderBy: oldest`, `limit: 10`
+    (still one request, in case the oldest has no date; used only for the range, offsets are always those of the
+    newest-first list). Where a year starts is found by bisection over `offset` with `limit: 1`, bounded by every
+    episode already seen, so only a **jump** bisects (at most ⌈log2 n⌉, 14 for the 9970 of "Události"); the year
+    is then read in chunks of 100 from there until an older episode shows up, so the year below the one just read
+    needs no bisection. Limits: at most **30 chunks (3000 episodes) a year**, at most **32 lists** in memory, a
+    month with more than **200** episodes shows its newest 200 (pages 1–10). Everything in memory with the show
+    TTL (a list's whole index expires together). There is no time-based pacing: requests to ČT go **one at a
+    time** through the same slot as the other archive calls. Measured on a fake list the size of "Události"
+    (`test_dvb_archive_periods.py`): opening the show 7 requests (show, page 1, oldest, 4 chunks), the year below
+    5, a jump to 2005 18 (13 bisection + 5 chunks), 2005 directly on a cold cache 22.
+    Sample: `spec/fixtures/dvb/dvb_archive_show_periods.json`. Golden cases: `archive_cases.json` "periods" (Czech
+    month names, the chips' order and labels, what a year alone selects).
   - **card** `{"id", "source": "ct"|"rec"|"both", "title", "kind": "movie"|"series"|null, "year"?, "image"
     (ČT image URL, or a gateway path `/dvb/details/image/…` / thumbnail for recordings) | null, "rating":
     {"value","votes"} | null, "genres": [..], "episodeCount"?, "durationMinutes"?, "tmdb": bool}`; **episode**
