@@ -608,6 +608,27 @@ Catalogue (`spec/fixtures/psp_cases.json` "streams", the same in every app; no o
 - Golden cases `psp_cases.json`: "streams" (catalogue), "live" (status/body → on or not), "arrange" (default order
   with three sources and `sourcesOff` containing `psp`). Tests never contact psp.cz or its CDN.
 
+## Mute (T34, owner 2026-11-01: „tlačítko vypnout zvuk")
+- In every player (Živě, programmes, Anténa timeline, archive, Poslanecká sněmovna) on all three apps and the web: a
+  **mute** control. Apple TV: an action **„Vypnout zvuk" / „Zapnout zvuk"** in the player's transport bar (as the
+  audio choice); Android TV: the same button in the player controls, and the remote's MUTE key toggles it too;
+  Samsung: an OSD button (and the remote's MUTE key, where the TV gives it to the app); web: a 🔇/🔊 button in the
+  player bar, the key **M**.
+- **Samsung details** (decided 2026-11-01): AVPlay has no mute, so the app uses the TV's audio control
+  (`tizen.tvaudiocontrol`, privilege `tv.audio`) while a player is open, restoring the TV's own state when it closes
+  or the app goes to the background; the OSD shows „🔇 Vypnout zvuk" / „🔊 Zapnout zvuk" with a yellow label and the
+  **yellow key** toggles it (nothing in the OSD takes focus); the remote's MUTE key stays the TV's (the app follows
+  it). Web: a 🔇/🔊 button in the player bar before ⛶, key M (not while typing, not with Ctrl/Cmd/Alt).
+- **Anténa timeline player** (own bar, no buttons): „Vypnout zvuk"/„Zapnout zvuk" is an item of its "Zvuk" choice
+  (long OK / the audio key), which now opens also with one audio track ("Pořad má jen jednu zvukovou stopu" + the mute
+  item). Apple TV has no mute key on the Siri Remote (the bar action only); Android's MUTE may be taken by the system
+  (HDMI-CEC) before the app sees it. The button may be an icon (crossed speaker) with the text as its label.
+- Muted, a small crossed-speaker icon stays in the top right corner (above the channel-number entry when both show) of the picture (also with the bar hidden). The state holds for every
+  player until the app is closed (zapping and a new programme stay muted); it is not stored and not in profiles.
+- The app mutes its own player only (AVPlayer `isMuted`, ExoPlayer volume 0, AVPlay/`<video>` muted); Samsung uses
+  the player's own mute where AVPlay has one, else the TV's audio control while the player is open, restored when it
+  closes. Golden: none (no shared rule); a unit test per app for "the state carries to the next programme".
+
 ## Clock (T22)
 Živě, TV průvodce, Archiv and Nastavení (the choice and its full-screen sections) show the **current time top right**, in the
 row of the tab bar (on a screen without one, at the same place): Prague time `H:MM`, 24 h, no leading zero on the
