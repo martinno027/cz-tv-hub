@@ -331,6 +331,7 @@ fun GuideScreen(
                     key(day, generation) {
                         EpgGrid(
                             rows = rows, day = day, now = now, appButton = appButton, onFocus = onFocus, onSelect = onSelect,
+                            onPlayLive = { currentOnPlay(it) },
                             anchorAt = anchorAt, startAt = edge, onStarted = { edge = null }, onEdge = onEdge,
                             onFocusAt = onFocusAt, focusOnOpen = focusPicked, onFocusedOnOpen = { focusPicked = false },
                         )
@@ -561,7 +562,7 @@ internal fun stateLabel(entry: Entry, now: Instant, psp: PspState): String = whe
  * already arranged); empty rows show as "Mimo vysílání" (ČT rows "Program se nepodařilo načíst" when [ctFailed]),
  * a stream's row is one cell over the whole [day].
  */
-private fun guideRows(
+internal fun guideRows(
     plan: DayPlan,
     ctFailed: Boolean,
     channels: List<ListedChannel>,
@@ -577,8 +578,12 @@ private fun guideRows(
             ct != null -> GuideRow(
                 ct.id, ct.name, plan[ct.id].orEmpty().map { CtEntry(ct, it) },
                 GuideLayout.filler(ctRow = true, ctScheduleFailed = ctFailed),
+                live = PlayRequest.Live(ct.id, ct.name),
             )
-            ch != null -> GuideRow("dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) })
+            ch != null -> GuideRow(
+                "dvb:${ch.id}", ch.name, dvbPlan[ch.id].orEmpty().map { DvbEntry(ch, it) },
+                live = PlayRequest.DvbLive(ch.id, ch.name),
+            )
             stream != null -> GuideRow(stream.key, stream.name, listOf(PspEntry(stream, axisStart, axisEnd)))
             else -> null
         }
@@ -594,6 +599,8 @@ private fun EpgGrid(
     appButton: AppButtonLink,
     onFocus: (entry: Entry?, start: Instant) -> Unit,
     onSelect: (Entry) -> Unit,
+    /** A filler covering now plays its row's channel live (T38). */
+    onPlayLive: (PlayRequest) -> Unit,
     anchorAt: Instant? = null,
     startAt: DayEdge? = null,
     onStarted: () -> Unit = {},
@@ -843,7 +850,14 @@ private fun EpgGrid(
                                             val at = nav.cursor
                                             focusAt(rowIndex, if (at in cell.slot.start..cell.slot.end) at else cell.slot.start)
                                         },
-                                        onClick = { if (p != null) onSelect(p) },
+                                        onClick = {
+                                            if (p != null) {
+                                                onSelect(p)
+                                            } else {
+                                                GuideLayout.fillerPlay(cell.slot, row.live, row.filler, axisStart, axisEnd, Instant.now())
+                                                    ?.let(onPlayLive)
+                                            }
+                                        },
                                     )
                                     }
                                 }
