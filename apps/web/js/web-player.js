@@ -1,7 +1,8 @@
 /*
  * The web's player backend (spec/web.md "Player"): an HTML5 <video> instead of Samsung's AVPlay, with the same API
  * the shared Player and TimelineController use (open, close, togglePause, paused, position, duration, seekTo,
- * seekBy, audioTracks, currentAudio, selectAudio) and the same callbacks (onReady, onError, onEnded, onBuffering).
+ * seekBy, audioTracks, currentAudio, selectAudio, audioOutput) and the same callbacks (onReady, onError, onEnded,
+ * onBuffering).
  *
  * HLS natively where the browser has it together with an audio track API (Safari), else hls.js (vendor/hls.min.js).
  * hls.js adds the gateway key as `Authorization` only to the gateway's own /dvb/ URLs (never to ČT's CDN); a browser's
@@ -74,6 +75,7 @@
     this.session = 0; // events of a closed session are ignored
     this.opened = false;
     this.started = false; // playing was asked for (AVPlay: PLAYING/PAUSED, not NONE/IDLE)
+    this.audio = new CT.Mute.ElementAudio(this.video); // spec/apps.md "Mute (T34)": the <video>'s own muted
     var v = this.video;
     v.addEventListener('playing', function () { if (self.opened) cb.onBuffering(false); });
     v.addEventListener('waiting', function () { if (self.opened) cb.onBuffering(true); });
@@ -83,6 +85,10 @@
       if (self.opened && !self.hls && v.getAttribute('src')) cb.onError('video error');
     });
   }
+
+  WebBackend.prototype.audioOutput = function () {
+    return this.audio;
+  };
 
   WebBackend.prototype.mode = function () {
     return mode(this.video, this.Hls);

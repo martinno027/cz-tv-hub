@@ -110,5 +110,8 @@
     <string name="audio_title">Zvuk</string>
     <string name="audio_single">Pořad má jen jednu zvukovou stopu</string>
     <string name="audio_track">Stopa %1$d</string>
+    <string name="mute_on">Vypnout zvuk</string>
+    <string name="mute_off">Zapnout zvuk</string>
+    <string name="muted_indicator">Zvuk je vypnutý</string>
     <string name="disclaimer">Neoficiální projekt, není spojen s Českou televizí ani s Poslaneckou sněmovnou PČR. ČT, ČT1 … a iVysílání jsou ochranné známky České televize.</string>
 </resources>

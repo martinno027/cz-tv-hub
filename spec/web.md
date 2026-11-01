@@ -43,6 +43,7 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
   In the guide the detail panel shows the programme under the mouse pointer once it rests there ~0.2 s (no focus
   change, no scrolling); when the pointer leaves the grid it shows the focused (last clicked) programme again; not
   on touch (no hover).
+- **Mute (T34)**: a 🔇/🔊 button in the player bar before ⛶ and the key M (spec/apps.md "Mute").
 - **Fullscreen**: a **"Celá obrazovka"** button (icon ⛶) at the right end of the tab bar and in the player bar,
   the key **F**, and a double click on the video; uses the browser's Fullscreen API on the whole page (the player
   keeps its bar); "Ukončit celou obrazovku" / Esc leaves it. Hidden where the browser has no Fullscreen API (iPhone).

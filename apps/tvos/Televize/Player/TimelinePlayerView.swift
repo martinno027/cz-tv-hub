@@ -25,7 +25,7 @@ private final class FocusableView: UIView {
 
 /// Keys of the timeline player (spec/apps.md "Anténa timeline player"): OK and play/pause pause, ← / → step
 /// 10 s or scrub while held, a horizontal swipe scrubs, ▲ / ▼ jump between programmes, a long OK press opens the
-/// audio list, Back closes the player. While the bar is hidden the first key only shows it, except play/pause,
+/// audio list (with „Vypnout zvuk“ / „Zapnout zvuk“), Back closes the player. While the bar is hidden the first key only shows it, except play/pause,
 /// Back, the long OK and OK while "Přeskočit reklamu" is shown.
 final class TimelineHostViewController: UIViewController {
     let player = AVPlayerViewController()
@@ -236,6 +236,12 @@ final class TimelineHostViewController: UIViewController {
             }
             sheet.addAction(action)
             if option == selected { sheet.preferredAction = action }
+        }
+        // No transport bar here: the mute action sits with the audio choice (spec/apps.md "Mute (T34)").
+        if let mute = controller.mute {
+            sheet.addAction(UIAlertAction(title: mute.actionTitle, style: .default) { [weak self] _ in
+                self?.controller.toggleMute()
+            })
         }
         sheet.addAction(UIAlertAction(title: options.isEmpty ? "OK" : "Zrušit", style: .cancel))
         present(sheet, animated: true)

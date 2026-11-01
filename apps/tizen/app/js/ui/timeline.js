@@ -48,7 +48,7 @@
     this.ended = false;
     this.breaks = {}; // programme id → {at, list}
     this.refreshedAt = 0;
-    this.audioList = null; // {tracks, focus}
+    this.audioList = null; // {tracks, items, note, focus} (CT.Mute.choice)
     this.timer = setInterval(function () { self.tick(); }, TICK_MS);
   }
 
@@ -142,7 +142,7 @@
     this.swallow = null;
     var visible = $('osd').classList.contains('visible');
     var always = key === 'playpause' || key === 'play' || key === 'pause' || key === 'back' || key === 'stop' ||
-      key === 'audio' || (key === 'enter' && this.player.skipTo !== null);
+      key === 'audio' || key === 'mute' || (key === 'enter' && this.player.skipTo !== null);
     if (!visible && !always && !this.hold && !this.ok) {
       this.swallow = { key: key, at: now };
       this.showBar();
@@ -176,7 +176,10 @@
         this.togglePause();
         break;
       case 'audio':
-        this.player.nextAudio();
+        this.openAudioList(); // the "Zvuk" choice with the mute item (spec/apps.md "Mute (T34)")
+        break;
+      case 'mute':
+        this.player.toggleMute();
         break;
       default:
         break; // no zapping, no number entry in this player
@@ -345,16 +348,12 @@
 
   // -- audio list (long OK) ------------------------------------------------------------------------------------
 
+  /** The "Zvuk" choice: the tracks (several only) and „Vypnout zvuk"/„Zapnout zvuk" (spec/apps.md "Mute (T34)"). */
   TimelineController.prototype.openAudioList = function () {
     var tracks = this.backend().audioTracks();
-    if (tracks.length < 2) {
-      $('osd-state').textContent = 'Jen jedna zvuková stopa';
-      return;
-    }
     var current = this.backend().currentAudio();
-    var focus = 0;
-    tracks.forEach(function (t, i) { if (t.index === current) focus = i; });
-    this.audioList = { tracks: tracks, focus: focus, current: current };
+    var choice = CT.Mute.choice(tracks, current, this.player.mute.muted);
+    this.audioList = { tracks: tracks, items: choice.items, note: choice.note, focus: choice.focus };
     this.renderAudioList();
     $('audio-list').classList.add('visible');
   };
@@ -367,11 +366,15 @@
   TimelineController.prototype.renderAudioList = function () {
     var list = this.audioList;
     var box = $('audio-list-items');
+    var note = $('audio-list-note');
+    note.textContent = list.note;
+    note.style.display = list.note ? 'block' : 'none';
     box.innerHTML = '';
-    list.tracks.forEach(function (t, i) {
+    list.items.forEach(function (item, i) {
       var el = document.createElement('div');
-      el.className = 'audio-item' + (i === list.focus ? ' focused' : '') + (t.index === list.current ? ' current' : '');
-      el.textContent = CT.AudioTracks.label(t, i);
+      el.className = 'audio-item' + (i === list.focus ? ' focused' : '') + (item.current ? ' current' : '') +
+        (item.kind === 'mute' && list.items.length > 1 ? ' mute-item' : '');
+      el.textContent = item.label;
       box.appendChild(el);
     });
   };
@@ -383,12 +386,15 @@
         list.focus = Math.max(0, list.focus - 1);
         break;
       case 'down':
-        list.focus = Math.min(list.tracks.length - 1, list.focus + 1);
+        list.focus = Math.min(list.items.length - 1, list.focus + 1);
         break;
       case 'enter':
         if (this.ok) return; // still the long press that opened the list
-        if (this.backend().selectAudio(list.tracks[list.focus].index)) {
-          $('osd-state').textContent = CT.AudioTracks.osd(list.tracks, list.focus);
+        var item = list.items[list.focus];
+        if (item.kind === 'mute') {
+          this.player.toggleMute();
+        } else if (this.backend().selectAudio(list.tracks[item.position].index)) {
+          $('osd-state').textContent = CT.AudioTracks.osd(list.tracks, item.position);
         }
         this.closeAudioList();
         return;
@@ -396,6 +402,10 @@
       case 'stop':
         this.closeAudioList();
         return;
+      case 'mute': // the yellow key / M with the choice open: its mute item follows
+        this.player.toggleMute();
+        list.items[list.items.length - 1].label = CT.Mute.label(this.player.mute.muted);
+        break;
       default:
         return;
     }

@@ -45,6 +45,7 @@ final class PlayerController {
             shownSkipTarget = nil
             playerViewController?.contextualActions = []
             updateSkipButton()
+            updateMuteItem()
         }
     }
 
@@ -68,6 +69,8 @@ final class PlayerController {
     var isStartApplied: Bool { positionApplied }
     /// Audio renditions of the current item (gateway master playlists with several broadcast tracks).
     private var audioGroup: AVMediaSelectionGroup?
+    /// The app's one mute state (spec/apps.md "Mute (T34)"); this player takes it on creation.
+    let mute: PlayerMute?
 
     /// `resolve` fetches a fresh source (new signed URL / new gateway session) after a failure.
     /// `adBreaks` is given only for finished recordings: it enables the "Přeskočit reklamu" button.
@@ -79,8 +82,9 @@ final class PlayerController {
          progress: (target: ResumeTarget, store: ResumeStore)? = nil,
          progressAt: (store: ResumeStore, at: @MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)? = nil,
          title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
-         offAir: (@MainActor () -> Void)? = nil) {
+         offAir: (@MainActor () -> Void)? = nil, mute: PlayerMute? = nil) {
         self.source = source
+        self.mute = mute
         self.offAir = offAir
         self.title = title ?? PlayerTitle(title: source.title)
         self.liveTitle = liveTitle
@@ -91,6 +95,7 @@ final class PlayerController {
         self.resumeStore = tracked?.store ?? progressAt?.store
         self.progressAt = progressAt?.at
         applyAudioPreference(language: nil, describesVideo: false)
+        mute?.attach(player)
     }
 
     func start() {
@@ -172,8 +177,33 @@ final class PlayerController {
         adBreaks = []
         shownSkipTarget = nil
         playerViewController?.contextualActions = []
+        mute?.detach(player)
         player.pause()
         player.replaceCurrentItem(with: nil)
+    }
+
+    // MARK: mute ("Mute (T34)", spec/apps.md)
+
+    /// "Vypnout zvuk" / "Zapnout zvuk" in the transport bar, next to AVKit's own audio and subtitle menus.
+    private func updateMuteItem() {
+        guard let viewController = playerViewController else { return }
+        guard let mute else {
+            viewController.transportBarCustomMenuItems = []
+            return
+        }
+        let action = UIAction(title: mute.actionTitle,
+                              image: UIImage(systemName: mute.isMuted ? "speaker.wave.2.fill" : "speaker.slash.fill")) { [weak self] _ in
+            self?.toggleMute()
+        }
+        action.accessibilityIdentifier = "player.mute"
+        viewController.transportBarCustomMenuItems = [action]
+    }
+
+    func toggleMute() {
+        guard let mute else { return }
+        mute.toggle()
+        playerLog.info("mute \(mute.isMuted)")
+        updateMuteItem()
     }
 
     // MARK: progress ("Pokračovat")
@@ -576,3 +606,6 @@ final class PlayerController {
         return item.copy() as! AVMetadataItem
     }
 }
+
+/// AVPlayer's own `isMuted`: the app mutes its player only, never the TV (spec/apps.md "Mute (T34)").
+extension AVPlayer: @retroactive MutablePlayer {}

@@ -188,7 +188,9 @@
       <video id="html5player" playsinline></video>
       <div id="player-message"></div>
       <div id="zap-box"><div id="zap-channel"></div><div id="zap-programme"></div></div>
-      <div id="audio-list"><div class="audio-title">Zvuk</div><div id="audio-list-items"></div></div>
+      <div id="audio-list"><div class="audio-title">Zvuk</div><div id="audio-list-note" class="audio-note"></div><div id="audio-list-items"></div></div>
+      <!-- Mute (spec/apps.md "Mute (T34)"): the corner icon while muted, also with the bar hidden -->
+      <div id="mute-indicator" aria-label="Zvuk vypnut"></div>
       <div id="skip-ad">Přeskočit reklamu <span class="key">OK</span></div>
       <div id="osd">
         <div id="osd-title"></div>
@@ -207,7 +209,10 @@
           <div id="tl-ends"><span id="tl-start"></span><span id="tl-end"></span></div>
         </div>
         <div id="osd-times"><span id="osd-position"></span><span id="osd-state"></span><span id="osd-duration"></span></div>
-        <div id="osd-hint"></div>
+        <div id="osd-foot">
+          <div id="osd-hint"></div>
+          <div id="osd-mute"><span id="osd-mute-icon"></span><span id="osd-mute-label"></span><span class="key key-yellow" aria-label="žluté tlačítko"></span></div>
+        </div>
       </div>
     </div>
 
@@ -226,6 +231,7 @@
   <script src="js/core/entries.js"></script>
   <script src="js/core/resume.js"></script>
   <script src="js/core/audio.js"></script>
+  <script src="js/core/mute.js"></script>
   <script src="js/core/channel-prefs.js"></script>
   <script src="js/core/thumbs.js"></script>
   <script src="js/core/prefetch.js"></script>

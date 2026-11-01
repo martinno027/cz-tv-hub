@@ -26,6 +26,8 @@
     playErrorAction: null,
     /** function (kind, player) → the player's key hint ('live' | 'other' | 'timeline'), or null = the TV's own. */
     playerHint: null,
+    /** function (muted) after the player's mute changed or a player opened (the web: its bar button); or null. */
+    onMute: null,
     /** function (event, codes) → key name or null; null = the remote's codes (keys.js). */
     keyName: null,
     /** function () that opens the official app ("Otevřít v iVysílání"); null = not offered (Samsung). */

@@ -16,4 +16,7 @@
     <tizen:privilege name="http://tizen.org/privilege/internet"/>
     <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
     <tizen:privilege name="http://developer.samsung.com/privilege/avplay"/>
+    <!-- Mute (spec/apps.md "Mute (T34)"): AVPlay has no mute, the player mutes the TV while it is open
+         (tizen.tvaudiocontrol.setMute) and gives the TV its own mute back when it closes. -->
+    <tizen:privilege name="http://tizen.org/privilege/tv.audio"/>
 </widget>

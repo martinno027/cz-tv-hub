@@ -14,6 +14,8 @@ import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -86,6 +88,10 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var openApp: Button
     private lateinit var errorActions: LinearLayout
     private lateinit var skipAd: Button
+
+    /** Mute (T34): the button in Media3's controller (null in the timeline player, which has no controller). */
+    private var muteButton: ImageButton? = null
+    private lateinit var muteIndicator: ImageView
 
     /** Info bar: programme title over the channel, shown with the controller (spec "Title in the player's info bar"). */
     private lateinit var infoBox: LinearLayout
@@ -178,6 +184,15 @@ class PlayerActivity : ComponentActivity() {
             setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
                 infoBox.visibility = visibility
             })
+        }
+        muteButton = if (isTimeline) null else addMuteButton()
+        // Muted: a crossed speaker top right, also with the controller hidden.
+        muteIndicator = ImageView(this).apply {
+            setImageResource(R.drawable.ic_volume_off)
+            setBackgroundColor(Color.argb(160, 0, 0, 0))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            contentDescription = getString(R.string.muted_indicator)
+            visibility = View.GONE
         }
         infoTitle = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -293,7 +308,19 @@ class PlayerActivity : ComponentActivity() {
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.START,
             ).apply { setMargins(dp(48), dp(36), dp(320), 0) })
-            addView(digitBox, FrameLayout.LayoutParams(
+            // Top right: the mute indicator, the number buffer below it (in its old place while not muted).
+            addView(LinearLayout(this@PlayerActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.END
+                addView(muteIndicator, LinearLayout.LayoutParams(dp(MUTE_INDICATOR_DP), dp(MUTE_INDICATOR_DP)).apply {
+                    gravity = Gravity.END
+                    bottomMargin = dp(12)
+                })
+                addView(digitBox, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { gravity = Gravity.END })
+            }, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.END,
@@ -317,9 +344,12 @@ class PlayerActivity : ComponentActivity() {
             .build()
         val exo = ExoPlayer.Builder(this).setLoadControl(loadControl).build().apply {
             trackSelectionParameters = audioPreference.applyTo(trackSelectionParameters)
+            // Mute holds for every player until the app closes (zapping, the next programme, a timeline window).
+            volume = tvApp.mute.volume
             addListener(listener)
         }
         player = exo
+        renderMute()
         playerView.player = exo
         playerView.requestFocus()
         load(forceRefresh = false, resume = resumeOnStart)
@@ -1028,12 +1058,15 @@ class PlayerActivity : ComponentActivity() {
                 overrides += TrackSelectionOverride(group.mediaTrackGroup, i)
             }
         }
+        // The timeline player has no controller: its mute button lives here (T34), also with a single track.
+        val builder = AlertDialog.Builder(this)
+            .setTitle(R.string.audio_title)
+            .setNeutralButton(muteLabel()) { _, _ -> toggleMute() }
         if (labels.size < 2) {
-            showOverlayText(getString(R.string.audio_single))
+            builder.setMessage(R.string.audio_single).show()
             return
         }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.audio_title)
+        builder
             .setSingleChoiceItems(labels.toTypedArray(), selected) { dialog, which ->
                 exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
                     .setOverrideForType(overrides[which])
@@ -1041,6 +1074,47 @@ class PlayerActivity : ComponentActivity() {
                 dialog.dismiss()
             }
             .show()
+    }
+
+    /**
+     * „Vypnout zvuk" / „Zapnout zvuk" in Media3's controller, before its subtitle and settings buttons; null when
+     * the controller layout has no basic-controls row (another Media3 layout).
+     */
+    private fun addMuteButton(): ImageButton? {
+        val row = playerView.findViewById<LinearLayout>(androidx.media3.ui.R.id.exo_basic_controls) ?: return null
+        val width = resources.getDimensionPixelSize(androidx.media3.ui.R.dimen.exo_small_icon_width)
+        val height = resources.getDimensionPixelSize(androidx.media3.ui.R.dimen.exo_small_icon_height)
+        val margin = resources.getDimensionPixelSize(androidx.media3.ui.R.dimen.exo_small_icon_horizontal_margin)
+        val padH = resources.getDimensionPixelSize(androidx.media3.ui.R.dimen.exo_small_icon_padding_horizontal)
+        val padV = resources.getDimensionPixelSize(androidx.media3.ui.R.dimen.exo_small_icon_padding_vertical)
+        val button = ImageButton(this).apply {
+            val ripple = TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
+            setBackgroundResource(ripple.resourceId)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(padH, padV, padH, padV)
+            setOnClickListener { toggleMute() }
+        }
+        row.addView(button, 0, LinearLayout.LayoutParams(width, height).apply { setMargins(margin, 0, margin, 0) })
+        return button
+    }
+
+    private fun muteLabel(): String = getString(if (tvApp.mute.muted) R.string.mute_off else R.string.mute_on)
+
+    private fun toggleMute() {
+        tvApp.mute.toggle()
+        player?.volume = tvApp.mute.volume
+        renderMute()
+    }
+
+    /** The button shows the speaker as it is now (crossed when muted) and names its action; the corner icon. */
+    private fun renderMute() {
+        val muted = tvApp.mute.muted
+        muteButton?.apply {
+            setImageResource(if (muted) R.drawable.ic_volume_off else R.drawable.ic_volume_up)
+            contentDescription = muteLabel()
+        }
+        muteIndicator.visibility = if (muted) View.VISIBLE else View.GONE
     }
 
     private fun audioLabel(format: Format, number: Int): String {
@@ -1067,6 +1141,11 @@ class PlayerActivity : ComponentActivity() {
     // Lint flags any dispatchKeyEvent override in a ComponentActivity (androidx.core restriction); false positive.
     @SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // The remote's MUTE key, when the TV hands it to the app: mutes this app's player, not the TV.
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE || event.keyCode == KeyEvent.KEYCODE_MUTE) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) toggleMute()
+            return true
+        }
         if (isTimeline && handleTimelineKey(event)) return true
         if (handleZapKey(event)) return true
         if (event.keyCode == KeyEvent.KEYCODE_BACK && playerView.isControllerFullyVisible) {
@@ -1232,6 +1311,7 @@ class PlayerActivity : ComponentActivity() {
         const val BAR_MS = 5_000L
         const val BAR_TICK_MS = 250L
         const val TIMELINE_SKIP_MARGIN_DP = 300
+        const val MUTE_INDICATOR_DP = 56
 
         /** A growing window is clamped this far before its live edge (the playlist's target is 3 s). */
         const val TIMELINE_LIVE_GUARD_S = 6.0

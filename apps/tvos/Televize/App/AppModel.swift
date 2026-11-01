@@ -43,6 +43,8 @@ final class AppModel {
     let household: HouseholdDefaultController
     /// "Is it on now?" of the Chamber of Deputies' streams, checked only while Živě or the guide is on screen.
     let parliament = PSPLiveMonitor()
+    /// Mute of every player until the app closes (spec/apps.md "Mute (T34)"); never stored.
+    let mute = PlayerMute()
 
     var session: PlayerSession?
     /// The guide's programme page is on screen: it presents the player and messages instead of RootView.
@@ -490,7 +492,7 @@ final class AppModel {
                 let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks,
                                                   progress: resumeTarget.map { ($0, resume) },
                                                   progressAt: progressAt.map { (resume, $0) },
-                                                  title: title, liveTitle: liveTitle, offAir: offAir)
+                                                  title: title, liveTitle: liveTitle, offAir: offAir, mute: mute)
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
                 var session = PlayerSession(controller: controller)
                 if let timeline {

@@ -1394,10 +1394,72 @@ main {
   color: #ddd;
 }
 
+#osd-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+}
+
 #osd-hint {
   font-size: 22px;
   color: #aaa;
-  margin-top: 16px;
+}
+
+/* Mute (spec/apps.md "Mute (T34)"): the OSD's button (the yellow key) and the corner icon while muted */
+#osd-mute {
+  flex: none;
+  margin-left: 40px;
+  font-size: 24px;
+  color: #ddd;
+  white-space: nowrap;
+}
+
+#osd-mute-icon {
+  margin-right: 10px;
+}
+
+#osd-mute .key-yellow {
+  display: inline-block;
+  width: 34px;
+  height: 20px;
+  margin-left: 12px;
+  vertical-align: middle;
+  border-radius: 6px;
+  background: #e8c21a;
+}
+
+#mute-indicator {
+  position: absolute;
+  top: 40px;
+  right: 96px;
+  padding: 6px 16px;
+  font-size: 40px;
+  line-height: 52px;
+  border-radius: 12px;
+  background: rgba(13, 17, 23, 0.7);
+  display: none;
+  z-index: 3;
+}
+
+#mute-indicator.visible {
+  display: block;
+}
+
+/* both shown: the channel-number entry goes below the corner icon */
+#player.muted:not(.hidden) ~ #number-entry {
+  top: 130px;
+}
+
+.audio-note {
+  font-size: 26px;
+  color: var(--muted);
+  padding: 4px 32px 10px;
+}
+
+.audio-item.mute-item {
+  margin-top: 8px;
+  border-top: 2px solid var(--surface-hi);
 }
 
 /* "Přeskočit reklamu" (spec/ad-breaks.md): bottom right, above the OSD */
