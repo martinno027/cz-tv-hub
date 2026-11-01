@@ -144,7 +144,12 @@ one cell under the now line would be too easy to miss; Android, Samsung and the 
 could be played only from Živě). There is no retry button over the grid any more (it covered the other rows): a failed
 day is fetched again when it is opened again (its chip, crossing into it, reopening the guide); a failure is not
 cached. A later refresh that fails keeps the programmes already shown. Fixtures `schedule_ct1_ct24.json`, `graphql_error.json`.
-Cache schedules in memory per day; refetch today's after ~1 h. Polite: no more than ~10 requests per screen open.
+Cache schedules in memory per day; refetch today's after ~1 h. **A failed ČT day is asked again by itself (T42)**: while Živě or the
+guide is on screen, every 30 s after a failure for the first 5 minutes, then every 2 minutes, until it loads (only while the
+screen is visible: not behind the player, not in the background; these retries are outside the ~10 requests of one
+screen open); nothing to
+restart, and a later success replaces the failure text everywhere (guide rows, Živě cards). Polite: no more than ~10 requests per screen open (the T42 retries of a failed day come on top, by their own
+schedule).
 
 Fixture files wrap responses as `{"status": <http status>, "body": <json>}`; tokens are replaced by `TOKEN`.
 
