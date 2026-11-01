@@ -11,7 +11,7 @@
   var APP = 'app/';
   var HOOK = 'js/ui/platform.js'; // the Samsung defaults the web layer replaces
   var WEB = ['js/web-ct.js', 'js/web-player.js', 'js/web-focus.js', 'js/web-scroll.js', 'js/web-history.js',
-    'js/web-fullscreen.js', 'js/web-input.js', 'js/web-stage.js', 'js/web-gateway.js', 'js/web-demo.js', 'js/web-page.js',
+    'js/web-fullscreen.js', 'js/web-dnd.js', 'js/web-input.js', 'js/web-stage.js', 'js/web-gateway.js', 'js/web-demo.js', 'js/web-page.js',
     'js/platform-web.js'];
   var SKIP = /^\$WEBAPIS\/|^js\/local-config\.js$/; // Samsung's web APIs; a TV build's gateway preset
   var BUILD_INFO = 'js/build-info.js';
