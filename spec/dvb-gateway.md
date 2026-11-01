@@ -337,6 +337,92 @@ never positions ("Pokračovat"), the gateway address or key, recordings or anyth
   created`, never the password). State changes need the admin header and same-origin `Origin` as every `/admin` POST.
 - Profiles exist whenever the gateway runs (`[dvb] enabled`, the app key); no extra config key.
 
+## Sign-in log (T37; owner 2026-11-01: „logy kdo (profil) odkud kdy jak (aplikace/platforma/web/prohlížeč) se
+přihlásil"; legal-guard 2026-11-01: approve with changes, all in below; the owner's dated approval in
+docs/legal-notes.md)
+- **What is logged, and only that**: **connections** (owner 2026-11-01: „chceme logy i nepřihlášených uživatelů"):
+  an app or the web contacting the gateway (`GET /dvb/status`, which every app calls when it starts and on its
+  health check), logged as „připojení" (signed in or not: `/dvb/status` carries no profile token and must not)
+  at most **once per 12 hours per address and platform** (`tvos|androidtv|tizen|web|unknown`, not the free header
+  text), at most **20 connection entries per address per 24 hours** plus one „příliš mnoho připojení"; the dedup
+  state is in memory only (bounded, lost on restart). A `/dvb/status` without the header (Kodi, curl, an old app)
+  is logged with client „neznámý"; the worker key is never logged. And profile events of the gateway — sign-in (`POST /dvb/profiles/login`: success,
+  wrong name or password, too many attempts), profile created (`POST /dvb/profiles`), sign-out (`POST
+  /dvb/profile/logout`), a session ended by `/admin` (new password, deleted profile). **Never** what is watched, never
+  positions, never the password or token, never the request body, **never a per-request log**. A wrong name is logged
+  as „neznámé jméno" (the typed text is not kept: it can be a mistyped password). „Too many attempts" is written at
+  most once a minute per name, with the number of refused attempts (a flood must not push real entries out).
+- **Per entry**: `time` (UTC), `event`, `profile` (the profile's name; none for an unknown name), `address` (the
+  direct peer as the gateway saw it) and `network` („domácí síť" for private ranges, „Tailscale" for the tailnet
+  ranges of `ctweb.py`, „lokální" for loopback, else „jiná" — shown highlighted on `/admin`, it means a
+  misconfiguration; behind a reverse proxy every entry would be „lokální": not supported), `client` from the header
+  `X-Cztvhub-Client` — `"<platform>/<app version> (<build>)"`, platform `tvos`, `androidtv`, `tizen` or `web`
+  (validated: at most 64 characters of `[A-Za-z0-9 ./()+_-]`, else ignored) — and for the web a coarse browser from
+  `User-Agent` („Chrome · macOS", „Safari · iPhone", „Edge · Windows", else „prohlížeč"); no full User-Agent stored.
+- **No per-request log anywhere (T37, fixes O019)**: the HTTP server writes to the journal only errors (status ≥ 400
+  or an exception) with the path **without the query string**, never successful requests (no playback, recording,
+  HLS or details lines with the address); a test asserts that a 200/302 on a playback route writes nothing.
+- **The header** is sent by the apps and the web **only on the profile routes** (`/dvb/profiles*`, `/dvb/profile*`)
+  **and `GET /dvb/status`**, never on other gateway requests (never on playback), never to ČT or the Chamber's CDN (a test per app); the gateway reads it only on
+  those routes and writes it nowhere else (journal, other stores).
+- **Storage**: `<state_dir>/signin-log.jsonl` (`0600`, user `cztvhub`), newest **1 000 entries** and at most **90
+  days**: older lines dropped when written and **at every start of the service** (also without `[dvb]`). Never in
+  exports, profiles, backups or the apps.
+- **`/admin` tab „Přihlášení"**: newest first, paginated: time (Prague), profile, what, from (network + address),
+  how (platform + version, browser for the web); a filter by profile; **„Smazat záznamy"** (all, with a confirmation,
+  logged `admin: signin log deleted`). Read-only otherwise; no download. No `/dvb/*` route returns the log; the
+  worker key gets `403` everywhere.
+- **Implementation** (`src/cztvhub/dvb/signinlog.py`, T37):
+  - A connection is logged only for a `GET`/`HEAD /dvb/status` **with the app key** (bearer or cookie); a missing or
+    wrong key (`401`) and the worker key (`403`) write nothing. The dedup and flood state is bounded (1 000
+    addresses / address+platform pairs / names). With 12 h per platform an address can reach the 20-per-24-h cap
+    only after the dedup state forgot it (a restart, or 1 000 other pairs); the cap is a backstop, not a normal path.
+  - One JSON object per line, neutral codes: `{"time": "…Z", "event", "profile"?, "address", "network":
+    "home"|"tailscale"|"local"|"other", "client"?, "platform": "tvos"|"androidtv"|"tizen"|"web"|"unknown",
+    "browser"?: "Chrome"|"Safari"|"Edge"|"Firefox", "system"?: "macOS"|"Windows"|"iPhone"|"iPad"|"Android"|"Linux",
+    "count"?, "reason"?}`; `event` one of `connect`, `connectLimit` and `loginFailedLimit` (only `address` and
+    `network`), `login`,
+    `loginFailed` (with `profile` = wrong password, without = unknown name), `loginLocked` (`count`),
+    `profileCreated`, `logout`, `sessionsEnded` (`reason` `newPassword`|`deleted`, `count` = sessions ended; only when
+    ≥ 1 ended; address and browser are the admin's, `/admin` sends no client header). A header value that is valid
+    but names another platform (`kodi/21`) is kept as `client` with platform `unknown`. Browser and system only
+    for `web`/`unknown`, from a User-Agent of at most 512 characters; an iPad's Safari that reports itself as a Mac
+    shows as macOS. Lines that do not parse or have an unknown `event` are dropped, not guessed at.
+  - `loginLocked`: the first refused attempt for a name is written at once with `count` 1; the next ones within the
+    minute are counted and written (timed at the newest of them) with the next entry of any kind after the minute,
+    the next refused attempt after it, or when `/admin` reads the log; a restart loses an unwritten count.
+  - Trimming: when written (the file is rewritten atomically once it holds 1 100 lines or its oldest line is over
+    90 days; the page shows at most the newest 1 000), every 30 minutes while the gateway runs (with the EPG
+    collector), when `/admin` reads it, and at every start (`cztvhub serve`, before anything else, also without
+    `[dvb]`; a missing file is not created, an error is logged and the service starts). An unwritable file is
+    logged (`signin log: cannot write …`), never an error to the client.
+  - The journal keeps the profile lock line without the typed name: `dvb: login for profile <name> | an unknown
+    name: 5 failures, locked for 60 s`.
+  - `/admin`: `GET /admin/api/signin?page=N&profile=<name>` → `{"total", "page", "pages", "pageSize": 50,
+    "profiles": [names in the log], "entries": [...]}` (newest first; `400` bad page or profile over 64
+    characters); `POST /admin/api/signin {"deleteAll": true}` (admin header, same origin) → `{"deleted": n}`, logged
+    `admin: signin log deleted (n entries)`, also clears the dedup state; other methods `405`. Times shown in
+    `Europe/Prague`; „jiná" bold in the warning colour.
+  - The journal (`server.py`): `http: <status> <method> <route>` for status ≥ 400 (`-` for a request line that
+    did not parse), `http: exception while handling a request` + traceback for an exception; nothing else
+    (`log_message`/`log_error` silent, no address anywhere).
+  - **No journal line says what was watched** (coordinator decision 2026-11-01, `src/cztvhub/logsafe.py`): under
+    `/dvb/` and `/ct/` a logged path keeps only the routes' fixed words, every id segment becomes `*` (media
+    extension kept: `/dvb/live/*.m3u8`, `/dvb/v/*/m.m3u8`, `/ct/*.m3u8`, `/dvb/ct/vod/*`); error texts lose
+    TVHeadend stream/recording paths (`/stream/channel/…`, `/dvrfile/…`) and long ids; a session is "a live
+    session" / "a recording session". Lines: `dvb: live start: …`, `hls: a live session idle, removing`, `dvb: a
+    live session: unexpected video codec …`, `dvb: <route>: <error>`, `dvb: thumbnail: …`, `dvb: ct web: live|vod:
+    …`, `dvb: details: CT schedule: …`. The recorders' own lines (channels the household records 24/7, not
+    viewing) are unchanged.
+  - **Failed sign-ins**: at most **20 entries per address per 24 hours** — `loginFailed` (wrong password and unknown
+    name together) and `loginLocked` (also capped: a flood of made-up names would otherwise add one per name and
+    minute) — then one `loginFailedLimit` („příliš mnoho neúspěšných přihlášení", only `address` and `network`);
+    in memory like the connection cap. Successful sign-ins, sign-outs and created profiles are never capped.
+- **The users are told**: under the buttons of „Přihlásit se" and „Vytvořit profil" in all three apps and the web:
+  „Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení). Záznam vidí jen správce a po 90
+  dnech se smaže. Co sledujete, se nezaznamenává." — also in Nastavení → Server below the gateway status (TVs
+  without a profile see it there) (spec/apps.md "Profil"), and the same in docs/dvb-setup.md.
+
 ## Household default channel list (T11, `src/cztvhub/dvb/defaults.py`)
 One channel list for the whole household that TVs **without a profile and without their own changes** use, edited
 only on `/admin` and **never linked to a profile** (approved wording of the owner, 2026-10-24: take that profile's
@@ -686,9 +772,10 @@ gets it right). The gateway rewrites that offset so the CRA is presented right a
 (in place, served init/segments only). `tests/test_dvb_avsync.py` compares the display order with the source.
 
 ## Start-up timing
-Every live start logs one line (`journalctl -u cztvhub`): `dvb: live start live:<id>: tuner+TVHeadend +Xs, first
-bytes +Xs, probe sample +Xs, ffprobe +Xs, first segment +Xs, cushion 6.0s +Xs = Ns`, to see where a slow channel
-start spends its time.
+Every live start logs one line (`journalctl -u cztvhub`): `dvb: live start: tuner+TVHeadend +Xs, first
+bytes +Xs, probe sample +Xs, ffprobe +Xs, first segment +Xs, cushion 6.0s +Xs = Ns`, to see where a slow
+start spends its time. Since T37 the line names no channel (journal lines must not say what was watched,
+coordinator decision 2026-11-01); to time one channel, start only that one and read the newest line.
 
 ## Thumbnails (approved by the user on 2026-10-23; see `docs/legal-notes.md`)
 One still per recording so the viewer sees what a programme is ("it does not have to be current, just show what is

@@ -328,6 +328,22 @@ neodhlásí; po odhlášení platí zase vlastní nastavení televize. Pozice �
 administraci je záložka **Profily**: seznam, nový profil, nové heslo a smazání (obojí odhlásí všechny televize
 s tím profilem). Heslo aspoň 4 znaky; na Raspberry je uložené jen jako otisk (PBKDF2), televize si ho neukládá.
 
+**Přihlášení** (záložka v administraci): kdo se kdy, odkud a čím připojil a přihlásil. Zapisuje se připojení
+aplikace nebo webu k bráně (nejvýš jednou za 12 hodin z jedné adresy a platformy, ať je profil přihlášený, nebo ne;
+z jedné adresy nejvýš 20 záznamů za den), přihlášení k profilu (i nesprávné heslo, neznámé jméno a „příliš mnoho
+pokusů“ s jejich počtem; neúspěšných přihlášení z jedné adresy nejvýš 20 za den, pak jeden záznam „příliš mnoho
+neúspěšných přihlášení“), vytvoření profilu, odhlášení a odhlášení televizí z administrace (nové heslo, smazaný
+profil). U záznamu je čas, profil, adresa a druh sítě (domácí síť, Tailscale, lokální, **jiná** – ta je zvýrazněná a
+znamená adresu mimo domácí síť a tailnet, brána tam nemá být vidět) a aplikace s verzí, u webu prohlížeč a systém
+(např. „Chrome · macOS“). Neukládá se, co kdo sleduje, hesla, napsaná jména ani celé označení prohlížeče. Záznam je
+jen na disku Raspberry (`/var/lib/cztvhub/signin-log.jsonl`), drží nejnovějších 1 000 záznamů nejvýš 90 dní,
+starší se mažou samy (i při každém startu služby) a **Smazat záznamy** ho smaže celý; stáhnout ani exportovat se
+nedá. Aplikace a web to uživatelům říkají u přihlášení a v Nastavení → Server: „Připojení a přihlášení se
+zaznamenává (kdy, odkud a z jakého zařízení). Záznam vidí jen správce a po 90 dnech se smaže. Co sledujete, se
+nezaznamenává.“ Do journalu (`journalctl -u cztvhub`) brána nezapisuje jednotlivé požadavky, jen chyby (stav a cestu
+bez parametrů, bez adresy) a ani v nich, ani v řádcích o startu živého vysílání není, který kanál nebo nahrávka to
+byla.
+
 **Výchozí kanály domácnosti**: v administraci na záložce **Výchozí kanály** nastavíte pořadí, skryté kanály
 a zapnuté zdroje, které se ukážou na každé televizi bez přihlášeného profilu, kde nikdo kanály neměnil. Nejrychleji
 u svého profilu v záložce **Profily** tlačítkem **Použít jako výchozí**: zkopíruje se jeho současný seznam kanálů

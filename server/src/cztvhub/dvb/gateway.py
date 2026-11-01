@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .. import api as ct_api
+from .. import logsafe
 from ..channels import CHANNELS as CT_CHANNELS
 from ..config import Config
 from . import archive_catalog as catalog
@@ -40,6 +41,7 @@ from .epgstore import EpgHistory, merge_past
 from . import profiles as prof
 from .defaults import DefaultsStore
 from .profiles import ProfileError, ProfileStore
+from .signinlog import SigninLog
 from .thumbs import Settings, Thumbnails, ThumbsBusy
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
@@ -121,7 +123,8 @@ class DvbGateway:
                  now: Callable[[], float] = time.time, prober: Callable[[bytes], Codecs] | None = None,
                  popen: Callable[..., Any] | None = None, playlist_timeout: float = PLAYLIST_TIMEOUT,
                  log: Callable[[str], None] = print, archive: Archive | None = None,
-                 profiles: ProfileStore | None = None, defaults: DefaultsStore | None = None):
+                 profiles: ProfileStore | None = None, defaults: DefaultsStore | None = None,
+                 signin: SigninLog | None = None):
         self.cfg = cfg
         self.dvb = cfg.dvb
         tvh = cfg.tvheadend
@@ -140,6 +143,8 @@ class DvbGateway:
         self.history = EpgHistory(self.dvb.state_dir)
         self.profiles = profiles or ProfileStore(self.dvb.state_dir, log=log)
         self.defaults = defaults or DefaultsStore(self.dvb.state_dir, log=log)
+        # connections and profile events for /admin "Přihlášení" (spec "Sign-in log"); never served on /dvb/*
+        self.signin = signin or SigninLog(self.dvb.state_dir, now=now, log=log)
         # real programme starts from the broadcast's EIT (T14 phase 1: measured only), kept as long as recordings
         self.eit = EitStore(self.dvb.state_dir, lambda: self.archive.max_days(), log=log)
         if archive is None:
@@ -215,9 +220,11 @@ class DvbGateway:
             return error(401, "Chybí nebo nesedí klíč", {"WWW-Authenticate": 'Bearer realm="cztvhub"'})
         try:
             if role == "worker":
-                return self._worker_route(method, path, query, body)
+                return self._worker_route(method, path, query, body)  # never in the sign-in log
             if path.startswith(PROFILE_PREFIX):
-                return self._profile_route(method, path, headers, body)
+                return self._profile_route(method, path, headers, body, client)
+            if method == "GET" and path == "/dvb/status":
+                self.signin.connection(client, headers)  # the only other route that reads X-Cztvhub-Client
             if method != "GET":
                 if BREAKS_RE.match(path) and self.ads.enabled:
                     raise HttpError(403, "Bloky reklam ukládá jen pracovník")
@@ -230,10 +237,10 @@ class DvbGateway:
         except TvhNotFound:
             return error(404, "Nenalezeno")
         except StreamFailed as exc:
-            self.log(f"dvb: {path}: {exc}")
+            self.log(f"dvb: {logsafe.route(path)}: {logsafe.scrub(str(exc))}")  # never which channel
             return error(502, exc.user_message)
         except TvhError as exc:
-            self.log(f"dvb: {path}: {exc}")
+            self.log(f"dvb: {logsafe.route(path)}: {logsafe.scrub(str(exc))}")  # never which channel
             return error(502, TvhError.user_message)
 
     def _role(self, header: str, cookie: str, client: str) -> str | None:
@@ -363,6 +370,7 @@ class DvbGateway:
                 self.collect_epg()
             except TvhError as exc:
                 self.log(f"dvb: EPG history: {exc}")
+            self.signin.trim()  # nothing older than 90 days waits for the next entry or start
             if self._collector_stop.wait(EPG_COLLECT_SECONDS):
                 return
 
@@ -442,7 +450,7 @@ class DvbGateway:
     def _session(self, key: str, live: bool, open_source: Callable[[], Any]) -> HlsSession:
         def build(directory: Path, codecs: Codecs) -> list[str]:
             if codecs.video and codecs.video not in ("hevc", "h264"):
-                self.log(f"dvb: {key}: unexpected video codec {codecs.video!r}")
+                self.log(f"dvb: {logsafe.session_kind(key)}: unexpected video codec {codecs.video!r}")
             return build_ffmpeg_command(directory, codecs, live, self.dvb.ffmpeg)
 
         def factory(sid: str, directory: Path) -> HlsSession:
@@ -615,7 +623,7 @@ class DvbGateway:
                 prev = t[key]
         total = time.monotonic() - start
         parts.append(f"cushion {media:.1f}s +{time.monotonic() - prev:.1f}s")
-        self.log(f"dvb: live start {session.key}: " + ", ".join(parts) + f" = {total:.1f}s")
+        self.log("dvb: live start: " + ", ".join(parts) + f" = {total:.1f}s")  # not which channel (T37)
 
     @staticmethod
     def _synced(session: HlsSession, name: str, data: bytes) -> bytes:
@@ -693,7 +701,7 @@ class DvbGateway:
         try:
             programmes = self.fetch_schedules([slug], day).get(slug, [])
         except ct_api.StreamError as exc:
-            self.log(f"dvb: details: CT schedule {slug} {day.isoformat()}: {exc}")
+            self.log(f"dvb: details: CT schedule: {exc}")  # not which programme was opened
             raise HttpError(502, "Program ČT se nepodařilo načíst")
         with self._ct_lock:
             now = time.monotonic()
@@ -815,7 +823,8 @@ class DvbGateway:
         return out
 
     # -- profiles (profiles.py) ------------------------------------------------------------
-    def _profile_route(self, method: str, path: str, headers: Mapping[str, str], body: bytes) -> Response:
+    def _profile_route(self, method: str, path: str, headers: Mapping[str, str], body: bytes,
+                       client: str = "") -> Response:
         """Settings profiles (spec/dvb-gateway.md "Profiles"). The app key must come as the bearer header:
         the cookie is only for players, and a header cannot be sent cross-site without a CORS preflight."""
         scheme, _, key = (headers.get("Authorization") or "").partition(" ")
@@ -833,31 +842,42 @@ class DvbGateway:
         if handler is None:
             raise HttpError(405, "Nepodporovaná metoda")
         try:
-            return handler(headers.get(PROFILE_HEADER) or "", body)
+            return handler(headers.get(PROFILE_HEADER) or "", body, headers, client)
         except ProfileError as exc:
             return json_response(exc.status, exc.payload(), exc.headers)
 
-    def _profile_create(self, _token: str, body: bytes) -> Response:
+    def _profile_create(self, _token: str, body: bytes, headers: Mapping[str, str], client: str) -> Response:
         payload = prof.parse_body(body, prof.MAX_BODY)
-        return json_response(201, self.profiles.create(payload.get("name"), payload.get("password"),
-                                                       payload.get("settings")))
+        created = self.profiles.create(payload.get("name"), payload.get("password"), payload.get("settings"))
+        self.signin.profile_created(created["name"], client, headers)
+        return json_response(201, created)
 
-    def _profile_login(self, _token: str, body: bytes) -> Response:
+    def _profile_login(self, _token: str, body: bytes, headers: Mapping[str, str], client: str) -> Response:
         payload = prof.parse_body(body, prof.MAX_LOGIN_BODY)
-        return json_response(200, self.profiles.login(payload.get("name"), payload.get("password")))
+        try:
+            result = self.profiles.login(payload.get("name"), payload.get("password"))
+        except ProfileError as exc:
+            if exc.status == 401:  # exc.profile: the existing profile; None = unknown name (text not kept)
+                self.signin.login_failed(exc.profile, client, headers)
+            elif exc.status == 429:
+                normalized = prof.normalize_name(payload.get("name"))
+                self.signin.login_locked(normalized[1] if normalized else "", exc.profile, client, headers)
+            raise
+        self.signin.login(result["name"], client, headers)
+        return json_response(200, result)
 
-    def _profile_get(self, token: str, _body: bytes) -> Response:
+    def _profile_get(self, token: str, _body: bytes, _headers: Mapping[str, str], _client: str) -> Response:
         return json_response(200, self.profiles.get(token))
 
-    def _profile_put(self, token: str, body: bytes) -> Response:
+    def _profile_put(self, token: str, body: bytes, _headers: Mapping[str, str], _client: str) -> Response:
         if len(body) > prof.MAX_BODY:
             raise ProfileError(413, "Příliš velký požadavek")
         self.profiles.get(token)  # 401 before anything about the body
         payload = prof.parse_body(body, prof.MAX_BODY)
         return json_response(200, self.profiles.put(token, payload.get("settings")))
 
-    def _profile_logout(self, token: str, _body: bytes) -> Response:
-        self.profiles.logout(token)
+    def _profile_logout(self, token: str, _body: bytes, headers: Mapping[str, str], client: str) -> Response:
+        self.signin.logout(self.profiles.logout(token), client, headers)
         return Response(204, b"", JSON, {"Cache-Control": "no-store"})
 
     # -- ad breaks (spec/ad-breaks.md) -----------------------------------------------------

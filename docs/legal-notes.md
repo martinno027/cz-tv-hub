@@ -85,6 +85,19 @@ or Poslanecká sněmovna Parlamentu ČR.
 - No other metadata sources; ČSFD, IMDb and similar sites are not scraped. Each user registers their own key; none
   is published or committed.
 
+## Sign-in and connection log (approved by the user on 2026-11-01, T37: „schvaluju log prihlaseni (ale chceme logy i neprihlasenych uzivatelu)")
+- The gateway keeps a small log of who connects and signs in, for the household's administrator only. It records
+  connections of the apps and the web (at most one entry per address and platform every 12 hours, whether or not a
+  profile is signed in) and profile events: sign-in (success, wrong name or password, too many attempts), profile
+  created, sign-out and sessions ended on `/admin`.
+- Each entry holds only the time, the event, the profile name (for profile events), the address the gateway saw,
+  the kind of network (home network, Tailscale, local, other) and the app's platform and version, or for the web
+  a coarse browser and system. Never what is watched, never positions, passwords, tokens, typed names or full
+  browser identifiers, and the gateway keeps no per-request log of any kind.
+- The log stays on the Raspberry Pi's disk (newest 1 000 entries, at most 90 days, older entries deleted at every
+  start), is visible only on `/admin`, can be deleted there (logged) and is never downloadable, exported, backed up,
+  committed or shared. The apps and the web tell users about it next to sign-in and in Nastavení → Server.
+
 ## Publishing and use
 - The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,
   playlists or EPG exports and runs no public server. You build and run it yourself, for your own household only.

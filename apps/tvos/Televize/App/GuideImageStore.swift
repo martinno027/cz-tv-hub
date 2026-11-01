@@ -91,7 +91,7 @@ final class GuideImageStore {
         decoded.removeAll { $0.hasPrefix("poster|") }
         gatewayAllows = false
         statusCheckedAt = nil
-        client = config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly()) }
+        client = config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly(), clientHeader: BuildInfo.clientHeader) }
         Task { await refreshStatus() }
     }
 

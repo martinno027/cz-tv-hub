@@ -61,6 +61,7 @@
     this.revealKey(false);
     this.closeSection();
     this.showStatus();
+    $('set-signin-note').textContent = CT.ClientHeader.NOTE; // under the gateway status, also without a profile (T37)
     this.renderChannels();
     this.renderThumbs();
     this.renderProfile();
@@ -461,6 +462,9 @@
     $('pf-none').textContent = noGateway ? M.NEEDS_GATEWAY : '';
     $('pf-none').classList.toggle('hidden', !noGateway);
     $('pf-out').classList.toggle('hidden', noGateway || signedIn);
+    // Under „Přihlásit se"/„Vytvořit profil": what the gateway's sign-in log keeps (T37).
+    $('pf-signin-note').textContent = CT.ClientHeader.NOTE;
+    $('pf-signin-note').classList.toggle('hidden', noGateway || signedIn);
     $('pf-in').classList.toggle('hidden', !signedIn);
     $('pf-mode-login').classList.toggle('selected', this.pfMode === 'login');
     $('pf-mode-create').classList.toggle('selected', this.pfMode === 'create');

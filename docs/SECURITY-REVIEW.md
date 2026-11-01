@@ -100,6 +100,27 @@ of "done".
   10 min; no URL in a log line. *Wrong:* a client query or header forwarded, a DRM variant requested, a signed URL in
   the journal or on disk.
 
+- The sign-in log (T37, `dvb/signinlog.py`, `<state dir>/signin-log.jsonl`, 0600) holds only connections (`GET
+  /dvb/status` with the app key, once per 12 h per address and platform, ≤ 20 per address per 24 h) and profile events
+  (sign-in, wrong password, unknown name, too many attempts, created, signed out, sessions ended on `/admin`; failed
+  sign-ins ≤ 20 per address per 24 h, then one „příliš mnoho neúspěšných přihlášení", so a flood of made-up names
+  cannot push real entries out): time,
+  event, profile name, peer address, network kind, the validated `X-Cztvhub-Client` value (≤ 64 characters of
+  `[A-Za-z0-9 ./()+_-]`) and a coarse browser/system. Newest 1 000 entries, at most 90 days (trimmed when written,
+  every 30 min while running and at every start, also without `[dvb]`). Shown only on `/admin` „Přihlášení"
+  (login, read-only, „Smazat záznamy" with the admin header and same origin, logged); no `/dvb/*` route returns it;
+  the worker key, failed key checks and every other route write nothing. *Wrong:* a typed (unknown) name, a password,
+  a token, a request body, a full User-Agent or anything about what is watched in the file; the header read on a
+  playback route; a download or export of the log; an entry per request.
+- **No per-request log** (T37, O019): `server.py` writes to the journal only failed requests (`http: <status>
+  <method> <path>`, path without the query string, no address) and exceptions (traceback, no address); successful
+  requests write nothing (`tests/test_dvb_signinlog.py` `JournalTest`). No journal line says what was watched:
+  paths under `/dvb/` and `/ct/` keep only the fixed route words (`/dvb/live/*.m3u8`), errors lose TVHeadend
+  stream/recording paths and ids, sessions are "a live session" / "a recording session" (`logsafe.py`,
+  `PlaybackLogLinesTest`). *Wrong:* `log_message` printing the request line again, an address or a query string
+  (idec, programme ids, positions) in the journal, a channel or recording id in `dvb: live start`, `hls: … idle`,
+  an error or thumbnail line, a new "session started for <address>" line.
+
 ### Secrets
 
 - Keys and passwords only in `/etc/cztvhub/cztvhub.conf` (0600, user `cztvhub`) and the platform keychains / encrypted

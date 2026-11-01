@@ -12,6 +12,7 @@ import cz.cztvhub.core.Planner
 import cz.cztvhub.core.PspMonitor
 import cz.cztvhub.core.ResumeStore
 import cz.cztvhub.core.ScheduleRepository
+import cz.cztvhub.core.dvb.ClientHeader
 import cz.cztvhub.core.dvb.DvbClient
 import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.dvb.DvbRepository
@@ -73,6 +74,16 @@ class TvApp : Application() {
     /** Mute (T34): one state for every player until the app closes; in memory only, never stored. */
     val mute = MuteSession()
 
+    /**
+     * `X-Cztvhub-Client` (T37): only the profile requests and `GET /dvb/status` carry it, so the gateway's sign-in
+     * log shows the app and version (spec/dvb-gateway.md "Sign-in log"); a development build sends just `androidtv`.
+     */
+    val clientHeader: String = ClientHeader.value(
+        BuildConfig.VERSION_NAME,
+        // "?" = built without git (versionCode then falls back to 1, which is not a real build number).
+        BuildConfig.BUILD_NUMBER.takeUnless { it == "?" },
+    )
+
     /** "Pokračovat": remembered positions, on this device only. */
     val resume by lazy { ResumeStore(ResumePrefs(this)) }
 
@@ -86,7 +97,7 @@ class TvApp : Application() {
     val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) {
             gateway.value?.let { config ->
                 val transport = UrlConnectionProfileTransport()
-                ProfileClient(config, if (bridged(config)) bridgeWatch.profile(transport) else transport)
+                ProfileClient(config, if (bridged(config)) bridgeWatch.profile(transport) else transport, clientHeader)
             }
         } }
 
@@ -112,7 +123,7 @@ class TvApp : Application() {
         val config = gateway.value ?: return null.also { dvbRepository = null }
         dvbRepository?.let { if (it.client.config == config) return it }
         val transport = UrlConnectionDvbTransport()
-        return DvbRepository(DvbClient(config, if (bridged(config)) bridgeWatch.dvb(transport) else transport))
+        return DvbRepository(DvbClient(config, clientHeader, if (bridged(config)) bridgeWatch.dvb(transport) else transport))
             .also { dvbRepository = it }
     }
 

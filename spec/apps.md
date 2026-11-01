@@ -485,6 +485,12 @@ restarts included) until **Odhlásit**, or until the gateway says the session is
   - Signed in, the Kanály intro says "Ukládá se do profilu <jméno>." instead of the app's usual "this TV only" intro
     (which stays as it is when signed out).
   - The profile calls carry the app key as the `Authorization: Bearer` header (the gateway refuses the cookie there).
+- **Sign-in note (T37)**: under the buttons of „Přihlásit se" and „Vytvořit profil", and in Nastavení → Server
+  under the gateway status, a small line: „Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení).
+  Záznam vidí jen správce a po 90 dnech se smaže. Co sledujete, se nezaznamenává." Without a version/build (a development
+  build) the value is just the platform (`tizen`, `tvos`, …). The profile requests and
+  `GET /dvb/status` carry `X-Cztvhub-Client: <platform>/<version> (<build>)` (`tvos`,
+  `androidtv`, `tizen`, `web`) — only those requests (spec/dvb-gateway.md "Sign-in log").
 - Golden cases: `spec/fixtures/profile_cases.json` (`names`, `passwords`, `document`, `sync`), tested in all three apps
   and, for names/passwords, in the gateway.
 

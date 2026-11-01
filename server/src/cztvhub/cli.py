@@ -33,6 +33,9 @@ def _sigterm_as_interrupt():
 
 def cmd_serve(args):
     cfg = _config(args)
+    from .dvb.signinlog import trim_file
+
+    trim_file(cfg.dvb.state_dir)  # at every start, also without [dvb] (spec "Sign-in log": 1 000 entries, 90 days)
     gateway = admin = web = None
     if cfg.dvb.enabled:
         from .dvb.gateway import DvbGateway

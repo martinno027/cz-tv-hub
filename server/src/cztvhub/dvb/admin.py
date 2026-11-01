@@ -15,7 +15,9 @@ The tab "Výchozí kanály" edits the household default channel list (``defaults
 the tab "Profily" copies a profile's list into it once. The tab "TMDb" shows the TMDb store (``tmdbstore.py``)
 read-only and paginated, with refresh / delete per entry, delete all and the refresh period; every change is
 logged (``admin: tmdb: …``). The store is never downloadable. The tab "Aktualizace" asks the Pi to update itself
-(``update.py``: only a request file; a root systemd unit runs the fixed ``deploy/update.sh``).
+(``update.py``: only a request file; a root systemd unit runs the fixed ``deploy/update.sh``). The tab
+"Přihlášení" shows the sign-in log (``signinlog.py``) read-only, newest first, paginated, filtered by profile;
+"Smazat záznamy" deletes it (logged ``admin: signin log deleted``). It is never downloadable.
 
 Login: HTTP Basic, user ``admin``, ``[admin] password``. State-changing requests must carry the
 ``X-Cztvhub-Admin`` header (a cross-site page cannot send it without a CORS preflight, which this
@@ -48,6 +50,7 @@ CHANNEL_RE = re.compile(r"^/admin/api/channels/([A-Za-z0-9_-]{1,64})$")
 PROFILE_RE = re.compile(r"^/admin/api/profiles/([0-9a-f]{16})$")
 TMDB_PATH = "/admin/api/tmdb"
 UPDATE_PATH = "/admin/api/update"
+SIGNIN_PATH = "/admin/api/signin"
 TMDB_KEY_MAX = 600  # a store key: ["kind", year, "cleaned title"]
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BULK = 500
@@ -237,7 +240,7 @@ class AdminSite:
         self.updater = updater or Updater(cfg.dvb.state_dir)
 
     def handle(self, method: str, path: str, headers: Mapping[str, str], body: bytes = b"",
-               query: Mapping[str, str] | None = None) -> Response:
+               query: Mapping[str, str] | None = None, client: str = "") -> Response:
         if not self._authorized(headers.get("Authorization") or ""):
             return Response(401, "Přihlaste se jménem admin.\n".encode("utf-8"), "text/plain; charset=utf-8",
                             {"WWW-Authenticate": 'Basic realm="cz-tv-hub admin", charset="UTF-8"',
@@ -264,7 +267,7 @@ class AdminSite:
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
                 m = PROFILE_RE.match(path)
-                return self._profile(m.group(1) if m else None, body)
+                return self._profile(m.group(1) if m else None, body, headers, client)
             if method == "GET" and path == "/admin/api/defaults":
                 return self._defaults_overview()
             if method == "POST" and path == "/admin/api/defaults":
@@ -277,6 +280,12 @@ class AdminSite:
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
                 return self._tmdb(body)
+            if method == "GET" and path == SIGNIN_PATH:
+                return self._signin_overview(query or {})
+            if method == "POST" and path == SIGNIN_PATH:
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._signin(body)
             if method == "GET" and path == UPDATE_PATH:
                 return json_response(200, self.updater.overview())
             if method == "POST" and path == UPDATE_PATH:
@@ -284,7 +293,7 @@ class AdminSite:
                     return error(403, "Požadavek z cizí stránky")
                 return self._update()
             if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles") \
-                    or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH):
+                    or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH, SIGNIN_PATH):
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -416,7 +425,8 @@ class AdminSite:
         return json_response(200, {"settings": {"thumbnails": self.gateway.thumbs.enabled,
                                                 "maxDays": self.gateway.archive.max_days()}})
 
-    def _profile(self, profile_id: str | None, body: bytes) -> Response:
+    def _profile(self, profile_id: str | None, body: bytes, headers: Mapping[str, str] | None = None,
+                 client: str = "") -> Response:
         """Tab "Profily": ``POST /admin/api/profiles`` {"name", "password"} (default settings), or for one
         profile ``POST /admin/api/profiles/<id>`` {"password"} (ends its sessions) | {"delete": true} |
         {"makeDefault": true} (its channel list copied once into the household default).
@@ -429,12 +439,14 @@ class AdminSite:
                 self.gateway.log(f"admin: profile {name}: created")
                 return json_response(201, {"name": name})
             if payload.get("delete") is True:
-                name = store.delete(profile_id)
+                name, ended = store.delete(profile_id)
                 self.gateway.log(f"admin: profile {name}: deleted")
+                self.gateway.signin.sessions_ended(name, "deleted", ended, client, headers or {})
                 return json_response(200, {"name": name})
             if "password" in payload:
-                name = store.set_password(profile_id, payload.get("password"))
+                name, ended = store.set_password(profile_id, payload.get("password"))
                 self.gateway.log(f"admin: profile {name}: new password")
+                self.gateway.signin.sessions_ended(name, "newPassword", ended, client, headers or {})
                 return json_response(200, {"name": name})
             if payload.get("makeDefault") is True:
                 name, prefs = store.channel_prefs(profile_id)
@@ -488,6 +500,32 @@ class AdminSite:
             return error(409, refused)
         self.gateway.log("admin: update requested")
         return json_response(202, {"requested": True})
+
+    # -- tab "Přihlášení" (signinlog.py) ---------------------------------------------------
+    def _signin_overview(self, query: Mapping[str, str]) -> Response:
+        """One page of the sign-in log, newest first; ``profile`` filters by the profile's name."""
+        try:
+            page = int(query.get("page") or "1")
+        except ValueError:
+            page = 0
+        if not 1 <= page <= 100000:
+            return error(400, "Neplatná stránka")
+        profile = query.get("profile")
+        if profile is not None and not 0 < len(profile) <= 64:
+            return error(400, "Neplatný profil")
+        return json_response(200, self.gateway.signin.page(page, profile))
+
+    def _signin(self, body: bytes) -> Response:
+        """``POST /admin/api/signin`` {"deleteAll": true}: "Smazat záznamy" (logged)."""
+        try:
+            payload = parse_body(body, 1024)
+        except ProfileError as exc:
+            return json_response(exc.status, exc.payload(), exc.headers)
+        if payload.get("deleteAll") is not True:
+            return error(400, 'Očekávám {"deleteAll": true}')
+        removed = self.gateway.signin.delete_all()
+        self.gateway.log(f"admin: signin log deleted ({removed} entr{'y' if removed == 1 else 'ies'})")
+        return json_response(200, {"deleted": removed})
 
     # -- tab "TMDb" (tmdbstore.py) ---------------------------------------------------------
     def _tmdb_overview(self, page_param: str | None) -> Response:
@@ -695,6 +733,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
   <button role="tab" id="tab-channels" aria-selected="true">Kanály</button>
   <button role="tab" id="tab-storage" aria-selected="false">Přehled nahrávek</button>
   <button role="tab" id="tab-profiles" aria-selected="false">Profily</button>
+  <button role="tab" id="tab-signin" aria-selected="false">Přihlášení</button>
   <button role="tab" id="tab-defaults" aria-selected="false">Výchozí kanály</button>
   <button role="tab" id="tab-tmdb" aria-selected="false">TMDb</button>
   <button role="tab" id="tab-update" aria-selected="false">Aktualizace</button>
@@ -723,6 +762,22 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
   <p class="help">Profil drží nastavení televizí (pořadí a skrytí kanálů, zdroje, náhledy), nic o sledování. Nový
   profil má výchozí nastavení; přihlásí se k němu televize v Nastavení → Profil. Nové heslo odhlásí všechny televize
   profilu, Smazat ho odstraní i s jeho přihlášeními. Heslo se ukládá jen jako otisk (PBKDF2).</p>
+</section>
+<section id="signin" hidden>
+  <div class="filters">
+    <select id="signin-profile" aria-label="Profil"><option value="">Všechny profily</option></select>
+    <span class="count" id="signin-count"></span>
+  </div>
+  <table><thead><tr><th>Čas</th><th>Profil</th><th>Co</th><th>Odkud</th><th>Jak</th></tr></thead>
+    <tbody id="signin-rows"></tbody></table>
+  <div class="dactions">
+    <button id="signin-prev">Novější</button> <span class="meta" id="signin-pages"></span> <button id="signin-next">Starší</button>
+    <span id="signin-delete"></span>
+  </div>
+  <p class="help">Záznam připojení aplikací a webu k bráně (nejvýš jednou za 12 hodin z jedné adresy a platformy, ať je
+  profil přihlášený, nebo ne) a přihlášení, odhlášení a vytvoření profilů. Neukládá se, co kdo sleduje, hesla ani
+  napsaná jména. Drží se nejnovějších 1 000 záznamů, nejvýš 90 dní; starší se mažou samy. Síť „jiná“ znamená adresu
+  mimo domácí síť a Tailscale – brána by tam neměla být vidět. Seznam se nedá stáhnout ani exportovat.</p>
 </section>
 <section id="defaults" hidden>
   <p class="sub" id="defaults-state"></p>
@@ -827,7 +882,7 @@ function api(method, path, body) {
   });
 }
 
-var TABS = ["channels", "storage", "profiles", "defaults", "tmdb", "update"];
+var TABS = ["channels", "storage", "profiles", "signin", "defaults", "tmdb", "update"];
 function showTab(name) {
   TABS.forEach(function (t) {
     document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
@@ -835,6 +890,7 @@ function showTab(name) {
   });
   if (name === "storage") loadStorage();
   if (name === "profiles") loadProfiles();
+  if (name === "signin") loadSignin(signinPage);
   if (name === "defaults" && !dfltDirty) loadDefaults();  // unsaved edits survive a look at another tab
   if (name === "tmdb") loadTmdb(tmdbPage);
   if (name === "update") loadUpdate();
@@ -993,6 +1049,96 @@ document.getElementById("tmdb-months-form").addEventListener("submit", function 
     say("Údaje z TMDb se obnoví po " + months(data.months) + "." + (data.warning ? " " + data.warning : ""));
   }, function (e) { say(e.message, true); }).then(function () { loadTmdb(1); });
 });
+
+var signinPage = 1, signinConfirm = false;
+var NETWORKS = {home: "domácí síť", tailscale: "Tailscale", local: "lokální", other: "jiná"};
+var PLATFORMS = {tvos: "Apple TV", androidtv: "Android TV", tizen: "Samsung", web: "web"};
+function attempts(n) {
+  return plural(n, "odmítnut ", "odmítnuty ", "odmítnuto ") + n + " " + plural(n, "pokus", "pokusy", "pokusů");
+}
+function prague(iso) {
+  return new Date(iso).toLocaleString("cs-CZ", {timeZone: "Europe/Prague", day: "numeric", month: "numeric",
+    year: "numeric", hour: "2-digit", minute: "2-digit"});
+}
+function signinWhat(e) {
+  switch (e.event) {
+    case "connect": return "připojení";
+    case "connectLimit": return "příliš mnoho připojení (další se 24 hodin nezapisují)";
+    case "loginFailedLimit": return "příliš mnoho neúspěšných přihlášení (další se 24 hodin nezapisují)";
+    case "login": return "přihlášení";
+    case "loginFailed": return e.profile ? "špatné heslo" : "neznámé jméno";
+    case "loginLocked": return "příliš mnoho pokusů (" + attempts(e.count || 1) + ")";
+    case "profileCreated": return "vytvoření profilu";
+    case "logout": return "odhlášení";
+    case "sessionsEnded": return "odhlášeno správcem (" + (e.reason === "deleted" ? "smazaný profil" : "nové heslo") +
+      ", " + tvs(e.count || 0) + ")";
+    default: return e.event;
+  }
+}
+function signinHow(e) {
+  var browser = e.browser ? e.browser + (e.system ? " · " + e.system : "") : (e.system ? "prohlížeč · " + e.system : "");
+  if (e.event === "sessionsEnded") return "/admin" + (browser ? ", " + browser : "");
+  if (e.event === "connectLimit" || e.event === "loginFailedLimit") return "–";
+  var version = e.client && e.client.indexOf("/") >= 0 ? e.client.slice(e.client.indexOf("/") + 1) : "";
+  if (PLATFORMS[e.platform] && e.platform !== "web") return PLATFORMS[e.platform] + (version ? " " + version : "");
+  if (e.platform === "web") return (browser || "prohlížeč") + (version ? " (web " + version + ")" : "");
+  var seen = e.browser ? browser : (e.system || "");  // no browser recognised: not called one (Kodi, curl)
+  return "neznámý" + (e.client ? " (" + e.client + ")" : "") + (seen ? ", " + seen : "");
+}
+function loadSignin(page) {
+  var select = document.getElementById("signin-profile"), profile = select.value;
+  var url = "/admin/api/signin?page=" + page + (profile ? "&profile=" + encodeURIComponent(profile) : "");
+  return api("GET", url).then(function (data) {
+    signinPage = data.page;
+    select.textContent = "";
+    select.appendChild(el("option", null, "Všechny profily")).value = "";
+    data.profiles.forEach(function (name) { select.appendChild(el("option", null, name)).value = name; });
+    if (profile && data.profiles.indexOf(profile) < 0) select.appendChild(el("option", null, profile)).value = profile;
+    select.value = profile;
+    document.getElementById("signin-count").textContent = entries(data.total);
+    var body = document.getElementById("signin-rows");
+    body.textContent = "";
+    if (!data.entries.length) {
+      var tr = el("tr"), td = el("td", null, "Žádné záznamy.");
+      td.colSpan = 5; tr.appendChild(td); body.appendChild(tr);
+    }
+    data.entries.forEach(function (e) {
+      var tr = el("tr");
+      tr.appendChild(el("td", null, prague(e.time)));
+      tr.appendChild(el("td", "name", e.profile || "–"));
+      tr.appendChild(el("td", null, signinWhat(e)));
+      var from = el("td", e.network === "other" ? "warn" : null);
+      from.appendChild(e.network === "other" ? el("b", null, NETWORKS.other) : document.createTextNode(NETWORKS[e.network] || "?"));
+      from.appendChild(document.createTextNode(" " + (e.address || "")));
+      tr.appendChild(from);
+      tr.appendChild(el("td", null, signinHow(e)));
+      body.appendChild(tr);
+    });
+    document.getElementById("signin-pages").textContent = "strana " + data.page + " z " + data.pages;
+    document.getElementById("signin-prev").disabled = data.page <= 1;
+    document.getElementById("signin-next").disabled = data.page >= data.pages;
+    var del = document.getElementById("signin-delete");
+    del.textContent = "";
+    if (signinConfirm) {
+      del.appendChild(el("span", null, "Smazat všechny záznamy přihlášení? "));
+      var yes = el("button", "danger", "Smazat záznamy"), no = el("button", null, "Zpět");
+      yes.addEventListener("click", function () {
+        signinConfirm = false;
+        api("POST", "/admin/api/signin", {deleteAll: true}).then(function () { say("Záznamy přihlášení jsou smazané."); },
+          function (e) { say(e.message, true); }).then(function () { loadSignin(1); });
+      });
+      no.addEventListener("click", function () { signinConfirm = false; loadSignin(signinPage); });
+      del.appendChild(yes); del.appendChild(no);
+    } else if (data.total) {
+      var ask = el("button", null, "Smazat záznamy");
+      ask.addEventListener("click", function () { signinConfirm = true; loadSignin(signinPage); });
+      del.appendChild(ask);
+    }
+  }, function (e) { say("Záznamy přihlášení se nepodařilo načíst: " + e.message, true); });
+}
+document.getElementById("signin-prev").addEventListener("click", function () { loadSignin(Math.max(1, signinPage - 1)); });
+document.getElementById("signin-next").addEventListener("click", function () { loadSignin(signinPage + 1); });
+document.getElementById("signin-profile").addEventListener("change", function () { loadSignin(1); });
 
 function tvs(n) { return n + " " + plural(n, "televize", "televize", "televizí"); }
 var profileEditing = null;

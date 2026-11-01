@@ -107,7 +107,12 @@ val specAssets: File = generateSequence(rootDir.absoluteFile) { it.parentFile }
     .firstOrNull { it.isDirectory }
     ?: throw GradleException("spec/assets not found in any parent of $rootDir")
 
+// SignInNoteTest (T37) compares the note in strings.xml with spec/apps.md, read in place the same way.
+val specApps: File = specAssets.resolveSibling("apps.md")
+
 tasks.withType<Test>().configureEach {
     inputs.dir(specAssets).withPropertyName("specAssets")
     inputs.file("src/main/res/drawable/tmdb_logo_short.xml").withPropertyName("tmdbLogo")
+    inputs.file(specApps).withPropertyName("specApps")
+    inputs.file("src/main/res/values/strings.xml").withPropertyName("strings")
 }

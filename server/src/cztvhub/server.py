@@ -8,9 +8,12 @@ from __future__ import annotations
 import http.server
 import re
 import socketserver
+import sys
+import traceback
 import urllib.parse
 from typing import TYPE_CHECKING
 
+from . import logsafe
 from .api import StreamError, StreamResolver
 from .channels import BY_ID
 from .dvb.profiles import MAX_BODY  # the largest body: a profile's 64 KB settings plus its wrapper
@@ -122,7 +125,8 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
         def _admin(self, path, method="GET", body=b"", query=""):
             if admin is None:
                 return self._send(404, b"admin is off ([admin] password in the config)\n")
-            resp = admin.handle(method, path, self.headers, body, dict(urllib.parse.parse_qsl(query)))
+            resp = admin.handle(method, path, self.headers, body, dict(urllib.parse.parse_qsl(query)),
+                                self.client_address[0])
             self._send(resp.status, resp.body, resp.content_type, resp.headers)
 
         def _dvb(self, path, query, method="GET", body=b""):
@@ -132,10 +136,30 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
             resp = gateway.handle(path, params, self.headers, method, body, self.client_address[0])
             self._send(resp.status, resp.body, resp.content_type, resp.headers)
 
+        def parse_request(self):
+            self.path = ""  # a malformed request on a kept-alive connection must not log the previous path
+            return super().parse_request()
+
+        # No per-request log (spec "Sign-in log", O019): successful requests write nothing, errors only the
+        # status, method and path without the query string; never the address, never a header.
+        def log_request(self, code="-", size="-"):
+            status = code.value if isinstance(code, http.HTTPStatus) else code
+            try:
+                failed = int(status) >= 400
+            except (TypeError, ValueError):
+                failed = True
+            if failed:
+                path = logsafe.route(getattr(self, "path", "") or "")  # no query, no channel/recording id
+                print(f"http: {status} {self.command or '-'} {path or '-'}", flush=True)
+
+        def log_error(self, fmt, *args):
+            pass  # send_error's text can quote the raw request line (with its query); log_request reports the status
+
         def log_message(self, fmt, *args):
-            print(self.address_string(), fmt % args, flush=True)
+            pass  # BaseHTTPRequestHandler's own lines carry the address; nothing else calls it
 
     return Handler
+
 
 
 def _is_web(path: str) -> bool:
@@ -145,6 +169,11 @@ def _is_web(path: str) -> bool:
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        """An exception while handling a request: the traceback, without the client's address."""
+        print("http: exception while handling a request", file=sys.stderr, flush=True)
+        traceback.print_exc()
 
 
 def serve(host: str, port: int, resolver: StreamResolver | None = None, gateway: DvbGateway | None = None,

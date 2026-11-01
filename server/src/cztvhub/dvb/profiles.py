@@ -48,9 +48,13 @@ EXISTS = "Profil s tímto jménem už existuje"
 
 
 class ProfileError(Exception):
-    def __init__(self, status: int, message: str, headers: dict[str, str] | None = None, code: str = ""):
+    """``profile``: the name of an existing profile a failed sign-in was for (the sign-in log only, never sent)."""
+
+    def __init__(self, status: int, message: str, headers: dict[str, str] | None = None, code: str = "",
+                 profile: str | None = None):
         super().__init__(message)
         self.status, self.message, self.headers, self.code = status, message, headers or {}, code
+        self.profile = profile
 
     def payload(self) -> dict[str, str]:
         return {"error": self.message, **({"code": self.code} if self.code else {})}
@@ -232,13 +236,13 @@ class ProfileStore:
             self._check_locked(key)
             self._trying.add(key)
         try:
-            return self._attempt(key, normalized, name, plain)
+            return self._attempt(key, normalized, plain)
         finally:
             with self._lock:
                 self._trying.discard(key)
                 self._turn.notify_all()
 
-    def _attempt(self, key: str, normalized: tuple[str, str] | None, name: Any, plain: str | None) -> dict:
+    def _attempt(self, key: str, normalized: tuple[str, str] | None, plain: str | None) -> dict:
         with self._lock:
             profile = self._by_key(key) if normalized else None
             snapshot = (profile["id"], profile["hash"]) if profile else None
@@ -250,8 +254,9 @@ class ProfileStore:
         with self._lock:
             profile = self._by_id(snapshot[0]) if ok and snapshot else None
             if profile is None or profile["hash"] != snapshot[1]:  # deleted or new password meanwhile
-                self._fail(key, name if normalized is None else normalized[0])
-                raise ProfileError(401, WRONG_LOGIN)
+                known = self._by_key(key) if normalized else None
+                self._fail(key, known["name"] if known else None)
+                raise ProfileError(401, WRONG_LOGIN, profile=known["name"] if known else None)
             self._failures.pop(key, None)
             token = secrets.token_urlsafe(TOKEN_BYTES)
             stamp = iso(self.now())
@@ -288,9 +293,11 @@ class ProfileStore:
             target = self._commit(change)  # last write wins (spec): no version check
             return {"version": target["version"], "updated": target["updated"]}
 
-    def logout(self, token: str) -> None:
+    def logout(self, token: str) -> str:
+        """Ends this session; returns the profile's name (for the sign-in log)."""
         with self._lock:
-            pid = self._session(token)["id"]
+            profile = self._session(token)
+            pid = profile["id"]
             digest = token_hash(token)
 
             def change(profiles: list[dict]) -> None:
@@ -298,6 +305,7 @@ class ProfileStore:
                 target["sessions"] = [s for s in target["sessions"] if not hmac.compare_digest(s["hash"], digest)]
 
             self._commit(change)
+            return profile["name"]
 
     # -- /admin ----------------------------------------------------------------------------
     def overview(self) -> list[dict]:
@@ -333,8 +341,8 @@ class ProfileStore:
             self._commit(change)
         return normalized[0]
 
-    def set_password(self, pid: str, password: Any) -> str:
-        """A new password from the admin; every session of the profile ends."""
+    def set_password(self, pid: str, password: Any) -> tuple[str, int]:
+        """A new password from the admin; every session of the profile ends. (name, sessions ended)."""
         plain = normalize_password(password)
         if plain is None:
             raise ProfileError(400, f"Heslo musí mít {MIN_PASSWORD} až {MAX_PASSWORD} znaků")
@@ -343,27 +351,29 @@ class ProfileStore:
                 raise ProfileError(404, "Profil nenalezen")
         secret = self._new_secret(plain)
         with self._lock:
-            def change(profiles: list[dict]) -> str:
+            def change(profiles: list[dict]) -> tuple[str, int]:
                 target = next((p for p in profiles if p["id"] == pid), None)
                 if target is None:
                     raise ProfileError(404, "Profil nenalezen")
+                ended = len(target["sessions"])
                 target.update(secret, sessions=[])
-                return target["name"]
+                return target["name"], ended
 
-            name = self._commit(change)
+            name, ended = self._commit(change)
             key = normalize_name(name)[1]  # type: ignore[index]
             self._failures.pop(key, None)  # the household member gets fresh attempts with the new password
             self._locked.pop(key, None)
-            return name
+            return name, ended
 
-    def delete(self, pid: str) -> str:
+    def delete(self, pid: str) -> tuple[str, int]:
+        """(name, sessions ended)."""
         with self._lock:
-            def change(profiles: list[dict]) -> str:
+            def change(profiles: list[dict]) -> tuple[str, int]:
                 target = next((p for p in profiles if p["id"] == pid), None)
                 if target is None:
                     raise ProfileError(404, "Profil nenalezen")
                 profiles.remove(target)
-                return target["name"]
+                return target["name"], len(target["sessions"])
 
             return self._commit(change)
 
@@ -410,10 +420,14 @@ class ProfileStore:
     def _check_locked(self, key: str) -> None:
         until = self._locked.get(key)
         if until is not None and self.clock() < until:
-            raise ProfileError(429, TOO_MANY, {"Retry-After": str(LOCK_SECONDS)})
+            known = self._by_key(key) if key else None
+            raise ProfileError(429, TOO_MANY, {"Retry-After": str(LOCK_SECONDS)},
+                               profile=known["name"] if known else None)
         self._locked.pop(key, None)
 
-    def _fail(self, key: str, shown: Any) -> None:
+    def _fail(self, key: str, shown: str | None) -> None:
+        """``shown``: the existing profile's name, None for an unknown name (what was typed is never logged:
+        it can be a mistyped password)."""
         now = self.clock()
         failures = self._failures.pop(key, None) or deque()
         failures.append(now)
@@ -426,8 +440,8 @@ class ProfileStore:
             self._locked[key] = now + LOCK_SECONDS
             while len(self._locked) > MAX_TRACKED_NAMES:
                 del self._locked[next(iter(self._locked))]
-            self.log(f"dvb: profile login for {str(shown)[:MAX_NAME]!r}: {len(failures)} failures, "
-                     f"locked for {LOCK_SECONDS} s")
+            who = f"profile {shown}" if shown is not None else "an unknown name"
+            self.log(f"dvb: login for {who}: {len(failures)} failures, locked for {LOCK_SECONDS} s")
 
 
 def _epoch(stamp: str) -> float:
