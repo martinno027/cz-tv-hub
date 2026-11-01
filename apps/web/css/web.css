@@ -74,8 +74,28 @@ body.web #stage.section-open #screen-settings h1.page-title {
   margin-bottom: 8px;
 }
 
+.web-osd-buttons {
+  display: flex;
+  align-items: center;
+}
+
 .web-osd-row .web-fullscreen {
   margin-left: 0;
+}
+
+/* Mute (spec/apps.md "Mute (T34)"): 🔊/🔇 before the fullscreen button; the Samsung's yellow-key button is not shown */
+.web-mute {
+  font-size: 34px;
+  line-height: 1;
+  padding: 10px 16px;
+  margin-right: 16px;
+  border-radius: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+body.web #osd-mute {
+  display: none;
 }
 
 /* The mouse: hovering only highlights (the remote's focus is hidden while the mouse is used, web-focus.js) */
@@ -88,6 +108,7 @@ body.web .ch-btn:hover,
 body.web .ar-menu-item:hover,
 body.web .audio-item:hover,
 body.web .web-fullscreen:hover,
+body.web .web-mute:hover,
 body.web .web-back-link:hover {
   background: var(--surface-hi);
   color: var(--text);

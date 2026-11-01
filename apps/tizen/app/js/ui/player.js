@@ -46,7 +46,14 @@
   function AvPlayBackend(cb) {
     this.av = root.webapis.avplay;
     this.cb = cb;
+    // AVPlay has no mute of its own: the TV's audio control while the player is open (spec/apps.md "Mute (T34)")
+    var control = root.tizen && root.tizen.tvaudiocontrol;
+    this.audio = control ? new CT.Mute.TvAudio(control) : null;
   }
+
+  AvPlayBackend.prototype.audioOutput = function () {
+    return this.audio;
+  };
 
   AvPlayBackend.prototype.open = function (target, startMs) {
     var av = this.av;
@@ -182,6 +189,7 @@
   function Html5Backend(cb) {
     var v = this.video = $('html5player');
     this.cb = cb;
+    this.audio = new CT.Mute.ElementAudio(v);
     v.onplaying = function () { cb.onBuffering(false); };
     v.onwaiting = function () { cb.onBuffering(true); };
     v.onended = function () { cb.onEnded(); };
@@ -200,6 +208,10 @@
       v.play();
       cb.onReady();
     };
+  };
+
+  Html5Backend.prototype.audioOutput = function () {
+    return this.audio;
   };
 
   Html5Backend.prototype.close = function () {
@@ -274,6 +286,7 @@
     this.tl = null; // TimelineController while an Anténa timeline plays
     this.timelineAt = null; // {id, time}: the timeline window and wall clock to continue at after re-resolving
     this.errorAction = null; // {label, run} under the error shown now (CT.Platform.playErrorAction), OK runs it
+    this.mute = new CT.Mute.Session(); // muted or not for the whole app session (spec/apps.md "Mute (T34)")
     var cb = {
       onReady: function () {
         self.showHint(self.hintKind); // the platform's hint may depend on the stream (the web: its audio tracks)
@@ -298,7 +311,8 @@
     // ?demo: a simulated player for timelines, so the timeline bar can be checked in a browser
     this.demoBackend = CT.Demo.enabled ? CT.Demo.backend(cb) : null;
     $('avplayer').style.display = hasAvPlay ? 'block' : 'none';
-    setInterval(function () { self.updateOsd(); self.updateTitle(); }, 1000);
+    this.renderMute();
+    setInterval(function () { self.updateOsd(); self.updateTitle(); self.pollMute(); }, 1000);
     setInterval(function () { self.saveProgress(); }, RESUME_SAVE_MS);
   }
 
@@ -322,6 +336,7 @@
     this.zapList = isLive(request) ? this.app.channelList(this.app.dvbChannels) : [];
     this.showHint(isLive(request) ? 'live' : 'other');
     $('player').classList.remove('hidden');
+    this.attachMute();
     this.updateTitle();
     this.load(false, null);
   };
@@ -487,6 +502,7 @@
     if (backend !== this.backend) {
       this.backend.close();
       this.backend = backend;
+      this.attachMute();
     }
     if (target.kind === 'timeline') {
       if (!this.tl) this.tl = new CT.TimelineController(this);
@@ -576,6 +592,7 @@
     if (this.tl) this.tl.stop();
     this.tl = null;
     this.timelineAt = null;
+    this.mute.detach(); // the TV gets its own mute back; the app's state stays for the next player
     $('player').classList.add('hidden');
     this.app.onPlayerClosed(request);
   };
@@ -589,10 +606,12 @@
     this.loadToken++;
     this.stopBreaks();
     this.backend.close();
+    this.mute.detach();
   };
 
   Player.prototype.resume = function () {
     if (!this.isOpen()) return;
+    this.attachMute();
     this.load(true, this.suspendedAt === undefined ? null : this.suspendedAt);
   };
 
@@ -665,10 +684,45 @@
       case 'audio':
         this.nextAudio();
         break;
+      case 'mute':
+        this.toggleMute();
+        break;
       default:
         break;
     }
     this.showOsd();
+  };
+
+  // -- mute (spec/apps.md "Mute (T34)") ------------------------------------------------------------------------
+
+  /** The playing backend's audio output gets the session's state. */
+  Player.prototype.attachMute = function () {
+    this.mute.attach(this.backend.audioOutput ? this.backend.audioOutput() : null);
+    this.renderMute();
+  };
+
+  /** The OSD button / the yellow key / M on the web / the timeline's "Zvuk" item. */
+  Player.prototype.toggleMute = function () {
+    var before = this.mute.muted;
+    if (this.mute.toggle() === before) $('osd-state').textContent = 'Zvuk teď nejde vypnout';
+    this.renderMute();
+  };
+
+  /** The TV's own MUTE key changes the TV's mute: the app follows it. */
+  Player.prototype.pollMute = function () {
+    if (this.isOpen() && this.mute.poll()) this.renderMute();
+  };
+
+  /** The corner icon (only while muted) and the OSD button's icon and text. */
+  Player.prototype.renderMute = function () {
+    var muted = this.mute.muted;
+    var indicator = $('mute-indicator');
+    indicator.textContent = muted ? CT.Mute.INDICATOR : '';
+    indicator.classList.toggle('visible', muted);
+    $('player').classList.toggle('muted', muted);
+    $('osd-mute-icon').textContent = muted ? CT.Mute.ICON_ON : CT.Mute.INDICATOR;
+    $('osd-mute-label').textContent = CT.Mute.label(muted);
+    if (CT.Platform.onMute) CT.Platform.onMute(muted);
   };
 
   /** Key releases: the timeline player seeks on release and tells a long OK from a short one. */

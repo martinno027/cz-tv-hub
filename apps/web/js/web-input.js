@@ -20,7 +20,8 @@
   var BAR_SLOP_PX = 24; // screen px above and below the player's bar that still grab it
 
   /**
-   * The remote key name of a keyboard event (CT.Platform.keyName): the Samsung codes, plus Space = play/pause.
+   * The remote key name of a keyboard event (CT.Platform.keyName): the Samsung codes, plus Space = play/pause,
+ * A = AUDIO and M = mute (the Samsung's yellow key).
    * Browser shortcuts (Ctrl, Cmd, Alt — Alt+← is the browser's Back) stay the browser's; while typing, Backspace and
    * Space belong to the field. Synthetic events of this module carry their name in `ctName`.
    */
@@ -32,6 +33,7 @@
     if (typing && (code === 8 || code === 32)) return null;
     if (code === 32 || code === 179) return 'playpause';
     if (!typing && (event.key === 'a' || event.key === 'A' || (!event.key && code === 65))) return 'audio'; // AUDIO
+    if (!typing && (event.key === 'm' || event.key === 'M' || (!event.key && code === 77))) return 'mute'; // T34
     return codes[code] || null;
   }
 
@@ -235,6 +237,7 @@
     function click(target) {
       var on = function (selector) { return target.closest ? target.closest(selector) : null; };
       if (on('.web-fullscreen')) return fullscreen();
+      if (on('.web-mute') && playerOpen()) return muteClick();
       if (on('.web-back-link')) return opts.history.back();
       var tab = on('.tab');
       if (tab) return selectTab(tab.getAttribute('data-tab'));
@@ -261,6 +264,12 @@
       if ($('audio-list').classList.contains('visible')) return undefined;
       if (!osdVisible() || player.errorAction) return player.showOsd();
       return ok();
+    }
+
+    /** The player bar's 🔊/🔇: the player's own mute (the same as M), the bar stays up. */
+    function muteClick() {
+      app.player.toggleMute();
+      app.player.showOsd();
     }
 
     /** Right click / long press: long OK where the screen has one (Archiv cards, episodes, the timeline's audio). */

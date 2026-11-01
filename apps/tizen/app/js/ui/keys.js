@@ -10,7 +10,11 @@
     412: 'rewind', 417: 'forward',
     427: 'chup', 428: 'chdown', 33: 'chup', 34: 'chdown',
     65376: 'done', 65385: 'cancel',
-    10195: 'audio', 404: 'audio' // AUDIO/MTS and the green key: next audio track
+    10195: 'audio', 404: 'audio', // AUDIO/MTS and the green key: next audio track
+    // The yellow key: the player's mute button (spec/apps.md "Mute (T34)"). The remote's MUTE (VolumeMute, 449) is
+    // not registered: it stays the TV's own, which is the same TV mute the player uses (AVPlay has none), and the
+    // player follows it (CT.Mute.TvAudio.outside). Registering it would take MUTE away from the TV in every screen.
+    405: 'mute'
   };
   // Digits (remote and keyboard row, keyboard numpad): 'd0' … 'd9'.
   for (var d = 0; d <= 9; d++) {
@@ -20,7 +24,7 @@
 
   /** Media keys are delivered to the app only after registration. */
   var MEDIA_KEYS = ['MediaPlayPause', 'MediaPlay', 'MediaPause', 'MediaStop', 'MediaRewind', 'MediaFastForward',
-    'ChannelUp', 'ChannelDown', 'MTS', 'ColorF1Green', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    'ChannelUp', 'ChannelDown', 'MTS', 'ColorF1Green', 'ColorF2Yellow', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   CT.Keys = {
     name: function (event) {

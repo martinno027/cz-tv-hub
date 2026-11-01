@@ -1,7 +1,8 @@
 /*
  * The web page's own controls and wiring (spec/web.md "Input (T29)", "Layout (T31)", "Fullscreen"): a "‹ Zpět"
  * link inside the headers that need one (a Nastavení section, the Archiv show page, the player bar; the programme page
- * has its own Zpět button, the Archiv sub-menu its "‹ <category>" item), the fullscreen button at the right end of the tab bar and in the player bar, and the input, history
+ * has its own Zpět button, the Archiv sub-menu its "‹ <category>" item), the fullscreen button at the right end of the tab bar and in the player bar,
+ * the mute button (🔊/🔇, spec/apps.md "Mute (T34)") before it in the player bar, and the input, history
  * and fullscreen glue. No strip or overlay over the TV layout.
  */
 (function (root) {
@@ -9,6 +10,8 @@
   var CT = root.CT = root.CT || {};
 
   var BACK = '‹ Zpět';
+  var MUTE_HINT = 'M ztlumení · ';
+  var END_HINT = 'F celá obrazovka · Esc zpět';
 
   function el(doc, tag, cls, text) {
     var e = doc.createElement(tag);
@@ -24,13 +27,13 @@
   function hint(kind, tracks) {
     var audio = tracks > 1;
     if (kind === 'live') {
-      return 'Mezerník pauza · ▲ ▼ kanál · 0–9 číslo kanálu · ' + (audio ? 'A zvuk · ' : '') + 'F celá obrazovka · Esc zpět';
+      return 'Mezerník pauza · ▲ ▼ kanál · 0–9 číslo kanálu · ' + (audio ? 'A zvuk · ' : '') + MUTE_HINT + END_HINT;
     }
     if (kind === 'timeline') {
       return 'Mezerník pauza · ◀ ▶ 10 s, podržet = rychleji · ▲ ▼ začátek pořadu · ' +
-        (audio ? 'A nebo podržet Enter zvuk · ' : '') + 'F celá obrazovka · Esc zpět';
+        (audio ? 'A nebo podržet Enter zvuk · ' : '') + MUTE_HINT + END_HINT;
     }
-    return 'Mezerník pauza · ◀ ▶ posun o 10 s · ' + (audio ? '▲ zvuk · ' : '') + 'F celá obrazovka · Esc zpět';
+    return 'Mezerník pauza · ◀ ▶ posun o 10 s · ' + (audio ? '▲ zvuk · ' : '') + MUTE_HINT + END_HINT;
   }
 
   /** The tracks of what plays now (none before the stream is ready). */
@@ -58,9 +61,24 @@
     var osd = doc.getElementById('osd');
     var row = el(doc, 'div', 'web-osd-row');
     row.appendChild(el(doc, 'div', 'web-back-link', BACK));
-    row.appendChild(el(doc, 'div', 'web-fullscreen web-fullscreen-player'));
+    var right = el(doc, 'div', 'web-osd-buttons');
+    var mute = el(doc, 'div', 'web-mute');
+    right.appendChild(mute);
+    right.appendChild(el(doc, 'div', 'web-fullscreen web-fullscreen-player'));
+    row.appendChild(right);
     osd.insertBefore(row, osd.firstChild);
+    renderMute(mute, false);
+    CT.Platform.onMute = function (muted) { renderMute(mute, muted); };
     renderFullscreen(doc);
+  }
+
+  /** The player bar's mute button: the state's icon (🔊 sound on, 🔇 muted), what a click does as its label. */
+  function renderMute(button, muted) {
+    var text = CT.Mute.label(muted);
+    button.textContent = muted ? CT.Mute.INDICATOR : CT.Mute.ICON_ON;
+    button.setAttribute('title', text);
+    button.setAttribute('aria-label', text);
+    button.classList.toggle('muted', muted);
   }
 
   function renderFullscreen(doc) {
@@ -173,5 +191,5 @@
     }
   }
 
-  CT.WebPage = { BACK: BACK, adapt: adapt, wire: wire, reopen: reopen, relayout: relayout, needsBackLink: needsBackLink, hint: hint, playerHint: playerHint };
+  CT.WebPage = { BACK: BACK, adapt: adapt, renderMute: renderMute, wire: wire, reopen: reopen, relayout: relayout, needsBackLink: needsBackLink, hint: hint, playerHint: playerHint };
 })(typeof window !== 'undefined' ? window : global);
