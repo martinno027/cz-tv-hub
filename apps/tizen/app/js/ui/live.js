@@ -34,13 +34,14 @@
     var dvbOn = dvb && app.sourceOn('dvb');
     var list = app.channelList(dvb ? dvb.channels : []);
 
-    if (app.sourceOn('ct') && ct.error && !ct.onAir) this.root.appendChild(el('div', 'group-error', ct.error));
+    // A failed ČT schedule is said on each ČT card (T36), not above the list.
+    var ctFailed = !!ct.error && !ct.onAir;
     if (dvbOn && dvb.error) this.root.appendChild(el('div', 'group-error', dvb.error));
     this.group(list, function (item, i) {
       var ch = item.channel;
       if (item.source === 'psp') return self.pspCard(item, i + 1);
       var onAir = item.source === 'dvb' ? dvb.onAir : ct.onAir;
-      return self.card(item, i + 1, ch.name, onAir ? onAir[ch.id] : null, now);
+      return self.card(item, i + 1, ch.name, onAir ? onAir[ch.id] : null, now, item.source === 'ct' && ctFailed);
     });
 
     // While the Anténa channels are still loading the list may be empty without anything being hidden.
@@ -63,7 +64,7 @@
   };
 
   /** `number` = the channel's number on this TV (spec/apps.md "Channel numbers and zapping"). */
-  LiveScreen.prototype.card = function (item, number, name, info, now) {
+  LiveScreen.prototype.card = function (item, number, name, info, now, ctFailed) {
     var card = this.cardHead(item, number, '');
     var current = info ? info.current : null;
     var next = info ? info.next : null;
@@ -76,7 +77,7 @@
       bar.appendChild(fill);
       card.appendChild(bar);
     } else {
-      card.appendChild(el('div', 'card-title muted', info ? 'Mimo vysílání' : ''));
+      card.appendChild(el('div', 'card-title muted', CT.Entries.offAirText(item.source, info, ctFailed)));
     }
     if (next) card.appendChild(el('div', 'card-next', 'Potom ' + CT.Days.time(next.start) + ' ' + next.title));
     return card;

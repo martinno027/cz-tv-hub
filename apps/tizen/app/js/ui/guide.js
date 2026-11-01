@@ -187,7 +187,8 @@
 
   /**
    * One row per channel, CT internet and "Anténa" mixed in this TV's order without hidden channels or
-   * switched-off sources ("Kanály" in Nastavení); empty rows show as "Mimo vysílání". A Poslanecká sněmovna stream
+   * switched-off sources ("Kanály" in Nastavení); empty rows show as "Mimo vysílání" (ČT rows of a day whose ČT
+   * schedule failed: "Program se nepodařilo načíst", Entries.fillerText). A Poslanecká sněmovna stream
    * is one cell over the whole day: "Přímý přenos" / "Nevysílá se" (its live check) on the day containing now.
    */
   GuideScreen.prototype.build = function (ct, dvb) {
@@ -219,9 +220,11 @@
       this.showDetail(null);
       return;
     }
-    var ctError = this.app.sourceOn('ct') ? ct.error : null;
+    // A failed ČT day is said in each ČT row's filler (T36), never by the band over the first row: after scrolling
+    // that row is another channel's. The band stays only for a day without any programme at all.
+    var ctFailed = !!ct.error && rows.some(function (r) { return r.source === 'ct'; });
     var programmes = all.filter(function (e) { return e.source !== 'psp'; }).length;
-    $('grid-message').textContent = ctError || (programmes ? '' : 'Pro tento den není program');
+    $('grid-message').textContent = ctFailed || programmes ? '' : 'Pro tento den není program';
 
     // Exactly the broadcast day 05:00–05:00 Prague; programmes crossing 05:00 are clipped.
     var axisStart = dayBounds[0];
@@ -243,7 +246,7 @@
     // Only data here: cells get DOM when they come near the screen (see syncWindow).
     this.rows = rows.map(function (row) {
       return { name: row.name, number: row.number, source: row.source, slots: CT.GuideLayout.row(row.entries, axisStart, axisEnd),
-        line: null, nameEl: null, nameX: null, range: null };
+        filler: CT.Entries.fillerText(row.source, ctFailed), line: null, nameEl: null, nameX: null, range: null };
     });
     var container = $('grid-rows');
     container.innerHTML = '';
@@ -340,7 +343,7 @@
       }
     }
     var added = document.createDocumentFragment();
-    for (i = range[0]; i < range[1]; i++) if (!row.slots[i].el) added.appendChild(this.cell(row.slots[i]));
+    for (i = range[0]; i < range[1]; i++) if (!row.slots[i].el) added.appendChild(this.cell(row.slots[i], row.filler));
     row.track.appendChild(added);
     row.range = range;
   };
@@ -367,7 +370,7 @@
       slot.item = entry;
       if (slot.el) {
         var old = slot.el;
-        var fresh = self.cell(slot);
+        var fresh = self.cell(slot, row.filler);
         if (old.classList.contains('focused')) fresh.classList.add('focused');
         if (self.focusEl === old) self.focusEl = fresh;
         row.track.replaceChild(fresh, old);
@@ -377,7 +380,8 @@
     });
   };
 
-  GuideScreen.prototype.cell = function (slot) {
+  /** `filler` = the text of an empty slot (Entries.fillerText of its row). */
+  GuideScreen.prototype.cell = function (slot, filler) {
     var cell = el('div', 'cell');
     cell.style.left = px(slot.start - this.axisStart) + 'px';
     cell.style.width = Math.max(1, px(slot.end - slot.start) - 4) + 'px';
@@ -395,7 +399,7 @@
       label.appendChild(el('span', 'cell-title', slot.item.title));
     } else {
       cell.classList.add('filler');
-      label.appendChild(el('span', 'cell-title', 'Mimo vysílání'));
+      label.appendChild(el('span', 'cell-title', filler || CT.Entries.OFF_AIR));
     }
     cell.appendChild(label);
     slot.el = cell;

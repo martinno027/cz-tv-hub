@@ -6,6 +6,8 @@
  * Poslanecká sněmovna: synthetic playlists (stream 1 on, the others "not processed now" 404), and playback gets a
  * local URL that does not exist, so the demo never contacts the Chamber's CDN.
  * `?demo&psp=13` = streams 1 and 3 on; `?demo&psp=0` = none on.
+ * `?demo&ct=down` = ČT's schedule fails for every day (spec/fixtures/graphql_error.json): the guide's ČT rows and
+ * Živě's ČT cards say "Program se nepodařilo načíst" (T36).
  * "Profil": an in-memory fake of the gateway's profile API (forgotten on reload, so a TV signed in before the reload
  * gets the 401 path); profile "Demo" with password "1234" exists (ČT2 hidden, thumbnails off).
  * `?demo&profile=offline` = reading and saving a profile fail as if the gateway were down (login still works).
@@ -37,6 +39,7 @@
     return m ? Math.min(300, Number(m[1])) : 0;
   })();
   var SLOTS = [15, 20, 25, 30, 45, 60, 90];
+  var CT_SCHEDULE_DOWN = /[?&]ct=down\b/.test(root.location.search);
   var PSP_ON = (function () {
     var m = /[?&]psp=(\d+)/.exec(root.location.search);
     return m ? m[1] : '1';
@@ -202,6 +205,7 @@
       return new Promise(function (resolve) { setTimeout(function () { resolve(pspPlaylist(url)); }, 300); });
     }
     if (url.indexOf('/graphql/') >= 0) {
+      if (CT_SCHEDULE_DOWN) return load('graphql_error.json');
       var date = JSON.parse(request.body).variables.date.split('.'); // MM.DD.YYYY
       var day = date[2] + '-' + date[0] + '-' + date[1];
       return load('schedule_ct1_ct24.json').then(function (r) { return shifted(r, CT_DAY, day); });
