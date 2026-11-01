@@ -57,6 +57,7 @@ import cz.cztvhub.core.archive.ArchiveShow
 import cz.cztvhub.core.archive.CardKind
 import cz.cztvhub.core.archive.CardSource
 import cz.cztvhub.core.archive.EpisodeSource
+import cz.cztvhub.core.archive.PeriodChip
 import cz.cztvhub.tv.R
 import cz.cztvhub.tv.tvApp
 import java.time.Instant
@@ -231,6 +232,18 @@ private fun Episodes(
             }
             Spacer(Modifier.height(12.dp))
         }
+        val periods = state.periods
+        if (periods != null) {
+            // T32: year chips, then the chosen year's month chips; the first focus is the selected year without seasons.
+            PeriodRow(ArchiveRules.yearChips(periods), if (show.seasons.size <= 1) first else null) { viewModel.loadYear(it) }
+            val months = ArchiveRules.monthChips(periods)
+            if (months.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                PeriodRow(months, null) { viewModel.loadMonth(it) }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        val focusFirstEpisode = show.seasons.size <= 1 && periods == null
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
             show.groups.forEachIndexed { groupIndex, group ->
                 if (group.episodes.isEmpty()) return@forEachIndexed
@@ -240,7 +253,7 @@ private fun Episodes(
                 val ctGroup = group.episodes.any { it.source == EpisodeSource.CT }
                 itemsIndexed(group.episodes, key = { index, e -> "$groupIndex:$index:${e.idec ?: e.recordingId}" }) { index, episode ->
                     val from = offer(episode)
-                    val focus = if (show.seasons.size <= 1 && groupIndex == show.groups.indexOfFirst { it.episodes.isNotEmpty() } && index == 0) {
+                    val focus = if (focusFirstEpisode && groupIndex == show.groups.indexOfFirst { it.episodes.isNotEmpty() } && index == 0) {
                         Modifier.focusRequester(first)
                     } else {
                         Modifier
@@ -250,7 +263,7 @@ private fun Episodes(
                         onFromStart = { choosing = episode },
                         modifier = focus.onFocusChanged {
                             if (it.isFocused && ctGroup && index >= group.episodes.size - ArchiveRules.PAGE_AHEAD) {
-                                state.season?.let { season -> viewModel.loadSeason(season, more = true) }
+                                viewModel.loadMore()
                             }
                         },
                     ) { play(episode, from) }
@@ -260,12 +273,26 @@ private fun Episodes(
             item(key = "back") {
                 Button(
                     onClick = onDismiss,
-                    modifier = if (show.groups.all { it.episodes.isEmpty() } && show.seasons.size <= 1) Modifier.focusRequester(first) else Modifier,
+                    modifier = if (show.groups.all { it.episodes.isEmpty() } && focusFirstEpisode) Modifier.focusRequester(first) else Modifier,
                 ) { Text(stringResource(R.string.back)) }
             }
         }
     }
     LaunchedEffect(show.card.id) { runCatching { first.requestFocus() } }
+}
+
+/** A row of year or month chips (T32); [focus] goes on the selected chip. */
+@Composable
+private fun PeriodRow(chips: List<PeriodChip>, focus: FocusRequester?, onSelect: (Int) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.focusGroup()) {
+        items(chips, key = { it.value }) { chip ->
+            Chip(
+                chip.label,
+                selected = chip.selected,
+                modifier = if (chip.selected && focus != null) Modifier.focusRequester(focus) else Modifier,
+            ) { onSelect(chip.value) }
+        }
+    }
 }
 
 @Composable

@@ -65,13 +65,26 @@ data class ArchiveEpisode(
     val channelId: String? = null,
 )
 
-/** A ČT group carries its [season] (id or null) and [nextPage]; "Nahráno z antény" only title and episodes. */
+/**
+ * A ČT group carries its [season] (id or null) and [nextPage]; "Nahráno z antény" only title and episodes. [periods]
+ * (T32) when ČT lists more than 100 episodes: the group then holds the episodes of that year and month.
+ */
 data class EpisodeGroup(
     val title: String,
     val episodes: List<ArchiveEpisode>,
     val season: String? = null,
     val nextPage: Int? = null,
+    val periods: ArchivePeriods? = null,
 )
+
+/**
+ * The years and months a long ČT episode list is split into (spec/dvb-gateway.md "Archive", "Year and month (T32)"):
+ * [years] newest first, [months] (1–12) of the selected [year] newest first; [year] is in [years], [month] in [months].
+ */
+data class ArchivePeriods(val years: List<Int>, val year: Int, val months: List<Int>, val month: Int)
+
+/** One year or month chip: its label ("2026", "listopad"), the number it selects and whether it is the selection. */
+data class PeriodChip(val label: String, val value: Int, val selected: Boolean)
 
 data class ArchiveSeason(val id: String, val title: String)
 

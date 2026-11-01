@@ -65,10 +65,21 @@ class DvbClient(val config: DvbConfig, private val transport: DvbTransport = Url
             ArchiveParser.parsePage(s, b)
         }
 
-    /** A show page; with [season] that season's episodes ([page] from 1). */
-    fun archiveShow(id: String, season: String? = null, page: Int = 1): ArchiveShow {
+    /**
+     * A show page; with [season] that season's episodes, with [year] (and [month]) that period's (T32), [page] from 1.
+     * Without any of them and on page 1 the plain show; [month] goes out only with [year] (a year alone = its newest
+     * month, the gateway decides).
+     */
+    fun archiveShow(id: String, season: String? = null, page: Int = 1, year: Int? = null, month: Int? = null): ArchiveShow {
         if (!ArchiveParser.isCardId(id)) throw CtException("bad archive id $id", ArchiveMessages.GENERIC)
-        val query = season?.let { "?season=${encode(it)}&page=$page" }.orEmpty()
+        val params = buildList {
+            season?.let { add("season=${encode(it)}") }
+            year?.let { y ->
+                add("year=$y")
+                month?.let { add("month=$it") }
+            }
+        }
+        val query = if (params.isEmpty() && page <= 1) "" else "?" + (params + "page=$page").joinToString("&")
         // The id is checked above; only a non-ASCII letter of a normalised title needs escaping, the colon stays.
         return call("/dvb/archive/show/${encode(id).replace("%3A", ":")}$query") { s, b -> ArchiveParser.parseShow(s, b) }
     }
