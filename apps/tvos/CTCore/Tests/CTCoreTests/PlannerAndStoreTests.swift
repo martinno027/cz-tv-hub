@@ -184,4 +184,58 @@ final class ScheduleStoreTests: XCTestCase {
         XCTAssertEqual(onAir["ct2"]?.idec, "night")
         XCTAssertNil(onAir["ct24"])
     }
+
+    // T36: Živě's ČT cards show "Program se nepodařilo načíst" when the day's schedule failed.
+
+    func testOnAirMarksChannelsOfAFailedTodayAsFailed() async throws {
+        let transport = FakeTransport()
+        try transport.on("10.17.2026", fixture: "graphql_error")
+        transport.on("10.16.2026", scheduleBody([("ct1", "old", "2026-10-16T18:00:00Z", "2026-10-16T20:00:00Z")]))
+        let store = ScheduleStore(client: CTClient(transport: transport))
+        let onAir = await store.onAirNow(at: utc("2026-10-17T10:00:00Z"))  // 12:00 Prague
+        XCTAssertEqual(onAir.programmes, [:])
+        XCTAssertEqual(onAir.failed, Set(Channels.all.map(\.slug)))
+    }
+
+    func testOnAirFailsOnlyChannelsWithoutAProgramme() async throws {
+        let transport = FakeTransport()
+        // 00:30 Prague on the 17th: the guide still shows the 16th, which failed; ct1 is found on the 17th.
+        transport.on("10.17.2026", scheduleBody([("ct1", "today", "2026-10-16T22:00:00Z", "2026-10-16T23:00:00Z")]))
+        try transport.on("10.16.2026", fixture: "graphql_error")
+        let store = ScheduleStore(client: CTClient(transport: transport))
+        let onAir = await store.onAirNow(at: utc("2026-10-16T22:30:00Z"))
+        XCTAssertEqual(onAir.programmes["ct1"]?.idec, "today")
+        XCTAssertFalse(onAir.failed.contains("ct1"))
+        XCTAssertTrue(onAir.failed.contains("ct2"))
+        XCTAssertEqual(onAir.failed.count, Channels.all.count - 1)
+    }
+
+    func testFailedYesterdayDoesNotMatterAfterFiveInTheMorning() async throws {
+        let transport = FakeTransport()
+        transport.on("10.17.2026", scheduleBody([("ct1", "today", "2026-10-17T09:00:00Z", "2026-10-17T11:00:00Z")]))
+        try transport.on("10.16.2026", fixture: "graphql_error")
+        let store = ScheduleStore(client: CTClient(transport: transport))
+        let onAir = await store.onAirNow(at: utc("2026-10-17T10:00:00Z"))
+        XCTAssertEqual(onAir.programmes["ct1"]?.idec, "today")
+        XCTAssertEqual(onAir.failed, [], "a channel with nothing on air on a loaded day is just off air")
+        let plain = await store.onAir(at: utc("2026-10-17T10:00:00Z"))
+        XCTAssertEqual(plain, onAir.programmes)
+    }
+}
+
+final class GuideFillerTests: XCTestCase {
+    func testCTRowsShowTheScheduleFailureOnlyWhenTheDayFailed() {
+        let failed = GuideFiller.text(source: .ct, ctScheduleFailed: true)
+        let ok = GuideFiller.text(source: .ct, ctScheduleFailed: false)
+        XCTAssertEqual(failed, "Program se nepodařilo načíst")
+        XCTAssertEqual(ok, "Mimo vysílání")
+        XCTAssertNotEqual(failed, ok)
+    }
+
+    func testAntennaAndParliamentRowsAreUnaffected() {
+        for source in [ChannelPrefs.Source.dvb, .psp] {
+            XCTAssertEqual(GuideFiller.text(source: source, ctScheduleFailed: true), "Mimo vysílání")
+            XCTAssertEqual(GuideFiller.text(source: source, ctScheduleFailed: false), "Mimo vysílání")
+        }
+    }
 }
