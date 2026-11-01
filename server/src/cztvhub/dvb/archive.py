@@ -198,6 +198,18 @@ class Archive:
         self.enforce()
         return days
 
+    def reserve_gb(self) -> int | None:
+        """The household's free-space reserve in GB from /admin, None = automatic (T43)."""
+        value = self.settings.get("reserveGb")
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= space.RESERVE_MIN_GB \
+            else None
+
+    def set_reserve_gb(self, gb: int | None) -> int | None:
+        """The caller checked the range (``space.reserve_max_gb``); applied by a retention pass at once."""
+        self.settings.update(reserveGb=gb)
+        self.enforce()
+        return self.reserve_gb()
+
     # -- recording state for the guide -----------------------------------------------------
     def is_recorded(self, channel: str) -> bool:
         return channel in self.record_channels() or self.store.newest(channel) is not None
@@ -637,7 +649,7 @@ class Archive:
         blocks = {c: self.store.blocks(c) for c in self.store.channels()}
         free, total = self.store.disk()
         extra = space.RESUME_MARGIN if self.recorders.paused else 0  # paused: free up to where recording resumes
-        plan = space.plan(blocks, self.now(), self.max_days(), free, total, extra)
+        plan = space.plan(blocks, self.now(), self.max_days(), free, total, extra, self.reserve_gb())
         for block in plan.delete:
             self.store.delete_block(block.channel, block.name)
         if plan.delete:
@@ -650,7 +662,7 @@ class Archive:
             self.recorders.pause(True)
         elif self.recorders.paused:
             free_now, total_now = self.store.disk()
-            if free_now >= space.reserve_bytes(total_now) + space.RESUME_MARGIN:
+            if free_now >= space.reserve_bytes(total_now, self.reserve_gb()) + space.RESUME_MARGIN:
                 self.recorders.pause(False)
         self.sync()
         self.last_plan = plan
@@ -676,9 +688,13 @@ class Archive:
     def overview(self, names: dict[str, str]) -> dict:
         free, total = self.store.disk()
         recorded = self.record_channels()
+        reserve = self.reserve_gb()
         channels = []
+        blocks: dict[str, list] = {}
         for channel in sorted(set(self.store.channels()) | recorded, key=lambda c: names.get(c, c).casefold()):
-            stats = self.store.stats(channel)
+            stats, items = self.store.summary(channel)
+            if items:
+                blocks[channel] = items
             rec = self.recorders.recorder(channel)
             channels.append({
                 "id": channel,
@@ -694,13 +710,19 @@ class Archive:
                 "gaps": stats["gaps"],
                 "gapMinutes": round(stats["gapSeconds"] / 60, 1),
             })
-        blocks = {c: self.store.blocks(c) for c in self.store.channels()}
+        # "Průměrně za hodinu" and "Všechny kanály dohromady" (T43): channels with at least 10 minutes recorded
+        rates = space.rates(blocks)
+        per_hour = [r * 3600 / space.GB for r in rates.values()]
         return {
-            "disk": {"freeBytes": free, "totalBytes": total, "reserveBytes": space.reserve_bytes(total)},
+            "disk": {"freeBytes": free, "totalBytes": total, "reserveBytes": space.reserve_bytes(total, reserve),
+                     "reserveAutoBytes": space.auto_reserve_bytes(total), "reserveGb": reserve,
+                     "reserveMaxGb": space.reserve_max_gb(total)},
             "usedBytes": sum(c["bytes"] for c in channels),
             "maxDays": self.max_days(),
             "paused": self.recorders.paused,
-            "hoursPerChannel": space.hours_per_channel(blocks, free, total, self.max_days()),
+            "hoursPerChannel": space.hours_per_channel(blocks, free, total, self.max_days(), reserve),
+            "averageGbPerHour": round(sum(per_hour) / len(per_hour), 2) if per_hour else None,
+            "totalGbPerHour": round(sum(per_hour), 2) if per_hour else None,
             "channels": channels,
         }
 

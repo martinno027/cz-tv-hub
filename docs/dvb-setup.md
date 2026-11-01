@@ -197,14 +197,19 @@ konci (nejvýš 12 hodin). Jde tak dojet před začátek podle programu (časy v
 pořadů; u kraje okna aplikace sama otevře další, takže se dá projít celý uložený záznam. Na časové ose je skutečné
 datum a čas vysílání. Jeden playlist přes celý záznam kanálu brána nenabízí a nic z toho nejde stáhnout.
 
-- **Uchovávat nahrávky nejvýše** 1–14 dní (výchozí `retention_days` z konfigurace). Starší záznam se smaže vždy.
-- **Když dochází místo**: na disku zůstává rezerva 10 % (nejméně 5 GB). Když by volné místo kleslo pod ni, smaže se
-  nejstarších 10 minut z kanálu, který má uloženo nejvíc hodin – každý nahrávaný kanál tak drží zhruba stejný
-  počet posledních hodin (na malém disku a s mnoha kanály třeba jen posledních 5 hodin z každého). Když rezervu
-  nejde udržet, nahrávání se pozastaví a v administraci je to vidět.
-- **Přehled nahrávek** (záložka v administraci): pro každý kanál kolik hodin je uloženo, jak daleko zpět, velikost,
-  skutečný datový tok (GB/h, změřený z nahrávek) a výpadky; nahoře disk, rezerva a odhad, kolik hodin na kanál se
-  vejde.
+- **Uchovávat nahrávky nejvýše** 1–14 dní (záložka Přehled nahrávek; výchozí `retention_days` z konfigurace).
+  Starší záznam se smaže vždy.
+- **Rezerva volného místa** (tamtéž): automaticky 10 % disku, nejméně 5 GB (na disku 118 GB tedy 11,8 GB). Místo toho
+  jde zadat vlastní počet GB, od 1 GB do poloviny disku; tlačítko **Automaticky** vrátí výchozí pravidlo. Platí hned.
+- **Když dochází místo**: když by volné místo kleslo pod rezervu, smaže se nejstarších 10 minut z kanálu, který má
+  uloženo nejvíc hodin – každý nahrávaný kanál tak drží zhruba stejný počet posledních hodin (na malém disku a
+  s mnoha kanály třeba jen posledních 5 hodin z každého). Když rezervu nejde udržet ani mazáním, nahrávání se
+  pozastaví a v administraci je to vidět.
+- **Přehled nahrávek** (záložka v administraci; při otevření chvíli trvá, mezitím ukazuje „Načítám přehled
+  nahrávek…“): pro každý kanál kolik hodin je uloženo, jak daleko zpět, velikost, skutečný datový tok (GB/h,
+  změřený z nahrávek) a výpadky; nahoře disk, rezerva a odhad, kolik hodin na kanál se vejde, a pod tím
+  **Průměrně za hodinu** (kolik GB zabere hodina záznamu jednoho kanálu, průměr kanálů s aspoň 10 minutami
+  záznamu) a **Všechny kanály dohromady** (kolik GB za hodinu přibývá, když se nahrávají všechny najednou).
 - Vypnutím „Nahrávat“ nebo skrytím kanálu se jeho záznam **hned smaže**. Kódované kanály nahrávat nejde.
 - Dva tunery = kanály nejvýš ze dvou multiplexů najednou (všechny kanály jednoho multiplexu nahraje jeden tuner).
 - **Kolik kanálů najednou**: zvuk ve vysílání DVB-T2 (HE-AAC v LATM) se musí pro přehrávače převést, což stojí výkon

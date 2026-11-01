@@ -283,45 +283,55 @@ class BufferStore:
         return total
 
     def blocks(self, channel: str) -> list[BlockInfo]:
-        with self._lock:
-            chan = self._channels.get(channel)
-            if not chan:
-                return []
-            info: dict[str, BlockInfo] = {}
-            for seg in chan.segments:
-                b = info.get(seg.block)
-                if b is None:
-                    info[seg.block] = BlockInfo(channel, seg.block, seg.start, seg.end, seg.duration,
-                                                chan.sizes.get(seg.block, 0))
-                else:
-                    b.start, b.end = min(b.start, seg.start), max(b.end, seg.end)
-                    b.seconds += seg.duration
-            return sorted(info.values(), key=lambda b: b.name)
+        return self.summary(channel)[1]
 
     def stats(self, channel: str) -> dict:
         """Hours, how far back, bytes, measured bitrate and gaps of one channel's recording."""
-        blocks = self.blocks(channel)
+        return self.summary(channel)[0]
+
+    def summary(self, channel: str) -> tuple[dict, list[BlockInfo]]:
+        """``stats`` and ``blocks`` of a channel in one pass over its segments (T43: "Přehled nahrávek" asked
+        for both, three passes over ~100 000 segments per channel and 3 days)."""
+        info: dict[str, BlockInfo] = {}
+        seconds, gaps, gap_seconds = 0.0, 0, 0.0
+        first = last = None
         with self._lock:
             chan = self._channels.get(channel)
-            segs = list(chan.segments) if chan else []
-        seconds = sum(s.duration for s in segs)
+            segments = chan.segments if chan else []
+            sizes = chan.sizes if chan else {}
+            prev_end = None
+            for seg in segments:
+                start, duration = seg.start, seg.duration
+                end = start + duration
+                seconds += duration
+                if prev_end is not None and start - prev_end > GAP_SECONDS:
+                    gaps += 1
+                    gap_seconds += start - prev_end
+                prev_end = end
+                b = info.get(seg.block)
+                if b is None:
+                    info[seg.block] = BlockInfo(channel, seg.block, start, end, duration, sizes.get(seg.block, 0))
+                else:
+                    if start < b.start:
+                        b.start = start
+                    if end > b.end:
+                        b.end = end
+                    b.seconds += duration
+            if segments:
+                first, last = segments[0].start, segments[-1].end
+        blocks = sorted(info.values(), key=lambda b: b.name)
         size = sum(b.bytes for b in blocks)
-        gaps, gap_seconds = 0, 0.0
-        for a, b in zip(segs, segs[1:]):
-            hole = b.start - a.end
-            if hole > GAP_SECONDS:
-                gaps += 1
-                gap_seconds += hole
-        return {
+        stats = {
             "seconds": round(seconds, 1),
             "bytes": size,
-            "oldest": segs[0].start if segs else None,
-            "newest": segs[-1].end if segs else None,
+            "oldest": first,
+            "newest": last,
             "bytesPerHour": int(size / seconds * 3600) if seconds >= 60 else None,
             "gaps": gaps,
             "gapSeconds": round(gap_seconds, 1),
             "blocks": len(blocks),
         }
+        return stats, blocks
 
     # -- deleting --------------------------------------------------------------------------
     def delete_block(self, channel: str, block: str) -> int:

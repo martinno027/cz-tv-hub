@@ -216,6 +216,21 @@ Approved by the user on 2026-10-23 (CLAUDE.md hard rules, `docs/legal-notes.md`;
   the measured bitrates, and per channel: recording, state, hours, oldest/newest, bytes, measured GB/h, gaps). The page
   states that the recording is a private copy for this household, deleted after N days or earlier and not
   downloadable.
+- **"Přehled nahrávek" (T43, owner 2026-11-01)**: while the answer loads the tab shows „Načítám přehled nahrávek…"
+  (never an empty table that looks like no recordings; a failed load says so with the error). Above the table:
+  **„Průměrně za hodinu: X,X GB"** = the average of the recorded channels' measured GB/h (channels with at least
+  10 minutes recorded; „—" without any), and **„Všechny kanály dohromady: Y,Y GB/h"** (their sum). Two settings in
+  this tab: **„Uchovávat nahrávky nejvýše"** (`maxDays` 1–14, the same setting as before, moved here from Kanály)
+  and **„Rezerva volného místa"** (`reserveGb`, whole GB): default = today's rule max(10 % of the disk, 5 GB) shown as
+  „automaticky (11,8 GB)"; a number between 1 GB and half of the disk replaces it (`POST /admin/api/settings
+  {"reserveGb": n | null}`, null = automatic; outside → 400 with the allowed range; logged `admin: reserve <n> GB` /
+  `automatic`). The retention pass uses it at once (`space.plan`, `space.reserve_bytes(total, override)`); the
+  hours estimate uses it too. The recording still pauses only when even deleting cannot reach the reserve.
+  Stored as `reserveGb` in `settings.json`; a stored number above half of a disk replaced by a smaller one since is
+  used as half of that disk. `GET /admin/api/storage` adds `disk.reserveGb` (null = automatic), `disk.reserveAutoBytes`,
+  `disk.reserveMaxGb`, `averageGbPerHour` and `totalGbPerHour` (null without a channel with 10 minutes); it asks
+  TVHeadend only for channels, services and multiplexes (names and multiplex column), and the per-channel numbers
+  come from one pass over the channel's segment index (`BufferStore.summary`).
 
 ## Channel administration (`/admin`, `src/cztvhub/dvb/admin.py`)
 A web page for the household (LAN / tailnet only, like the rest) to choose which antenna channels are offered.
