@@ -26,6 +26,9 @@ struct PlayerScreen: View {
                     TimelineBar(timeline: timeline).transition(.opacity)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                if model.mute.isMuted { MutedBadge() }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if timeline.skipTarget != nil {
                     TimelineSkipBadge().padding(.bottom, timeline.barVisible ? 330 : 80)
@@ -54,7 +57,10 @@ struct PlayerScreen: View {
                 if let banner = session.zapper?.banner { ZapBanner(banner: banner) }
             }
             .overlay(alignment: .topTrailing) {
-                if let entry = session.zapper?.entry { NumberEntryBadge(entry: entry) }
+                VStack(alignment: .trailing, spacing: 0) {
+                    if model.mute.isMuted { MutedBadge() }
+                    if let entry = session.zapper?.entry { NumberEntryBadge(entry: entry) }
+                }
             }
             .onAppear {
                 model.isPlayerOnScreen = true
@@ -66,6 +72,23 @@ struct PlayerScreen: View {
                 session.controller.stop()  // saves "Pokračovat" first
                 model.playerClosed()
             }
+    }
+}
+
+/// Muted: a small speaker-off sign top right, also with the transport bar hidden (spec/apps.md "Mute (T34)").
+private struct MutedBadge: View {
+    var body: some View {
+        Image(systemName: "speaker.slash.fill")
+            .font(.system(size: 34, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(14)
+            .background(.black.opacity(0.55), in: Circle())
+            .padding(.top, 50)
+            .padding(.trailing, 70)
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityLabel("Zvuk vypnutý")
+            .accessibilityIdentifier("player.muted")
     }
 }
 
