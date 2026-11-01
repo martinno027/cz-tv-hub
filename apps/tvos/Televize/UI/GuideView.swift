@@ -263,8 +263,12 @@ struct GuideView: View {
     @State private var antennaChannels: [DVBChannel] = []
     @State private var antennaEPG: AntennaStore.EPG = [:]
     /// The day's ČT schedule failed: ČT rows say "Program se nepodařilo načíst" in their gaps (spec/apps.md, T36);
-    /// the other rows stay as they are. Retried on the next open of the guide.
+    /// the other rows stay as they are. Asked again by itself while the guide is visible (T42) and on the next open.
     @State private var ctFailed = false
+    /// When the grid's day failed and was last asked (T42); `ctRetryDay` = the day it belongs to.
+    @State private var ctRetry = ScheduleRetry()
+    @State private var ctRetryDay: BroadcastDay?
+    @Environment(\.scenePhase) private var scenePhase
     @State private var layout = GuideLayout()
     @State private var window = Window()
     @State private var focusedEntry: GuideEntry?
@@ -303,6 +307,12 @@ struct GuideView: View {
         let atEnd: Bool
     }
 
+    private struct RetryKey: Equatable {
+        let day: BroadcastDay
+        let failed: Bool
+        let visible: Bool
+    }
+
     private struct LoadKey: Equatable {
         let day: BroadcastDay
         let gateway: GatewayConfig?
@@ -325,6 +335,17 @@ struct GuideView: View {
             }
         }
         .task(id: LoadKey(day: day, gateway: model.gateway, reloads: model.gatewayReloads)) { await load() }
+        // A failed ČT day is asked again by itself while the guide is visible (spec/apps.md T42): 30 s, after
+        // 5 minutes 2 min (ScheduleRetry). Not behind the player or the programme page, not in the background;
+        // back in front it asks at once when the time has passed.
+        .task(id: RetryKey(day: day, failed: ctFailed,
+                           visible: scenePhase == .active && model.session == nil && page == nil)) {
+            guard ctFailed, scenePhase == .active, model.session == nil, page == nil else { return }
+            while ctFailed, let wait = ctRetry.delay(now: Date()) {
+                do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+                guard await retryCT() else { return }
+            }
+        }
         .onChange(of: model.channelPrefs.prefs) { _, _ in rebuildLayout() }
         // checked only while the grid shows today (other days have no live state)
         .watchesParliament(layout.timeline.contains(Date()) ? layout.parliamentStreams : [])
@@ -499,8 +520,46 @@ struct GuideView: View {
             schedule = [:]
             ctFailed = true
         }
+        recordCT(failed: ctFailed)
         rebuildLayout()
         positionAtAnchor(now: now)
+    }
+
+    /// Asks ČT again for the grid's day after a failure (T42). On success the ČT rows get their programmes in place:
+    /// the grid is not repositioned, and focus on a ČT filler that no longer exists moves to that row's cell at the
+    /// same time. True while it still fails.
+    private func retryCT() async -> Bool {
+        guard ctFailed else { return false }
+        let loading = day
+        let result = try? await model.schedules.schedule(for: loading)
+        guard loading == day, ctFailed else { return false }
+        recordCT(failed: result == nil)
+        guard let loaded = result else { return true }
+        let oldID = focusedID
+        let oldRow = oldID.flatMap { layout.rowOf[$0] }
+        let time = focusTime
+        schedule = loaded
+        ctFailed = false
+        rebuildLayout()
+        if let oldID, let oldRow, layout.entries[oldID] == nil, let time,
+           let target = layout.cellID(row: oldRow, at: time),
+           target != oldID {
+            redirectID = target
+            focusedID = target
+        } else if oldID == nil, defaultFocusID == nil, day == GuideDays.openDay(now: Date()) {
+            // the open found no ČT programme to land on: the first row's programme airing now, as an open does
+            let now = Date()
+            defaultFocusID = layout.rows.first?.entries.first { $0.isAiring(at: now) }?.id
+        }
+        return false
+    }
+
+    private func recordCT(failed: Bool) {
+        if ctRetryDay != day {
+            ctRetry = ScheduleRetry()
+            ctRetryDay = day
+        }
+        ctRetry.record(failed: failed, at: Date())
     }
 
     /// Anténa rows; a day outside the gateway's range (or an unreachable gateway) just leaves them empty.
