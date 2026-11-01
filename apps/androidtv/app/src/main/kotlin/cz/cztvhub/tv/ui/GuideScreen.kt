@@ -226,6 +226,7 @@ fun GuideScreen(
     val notice = tailnetNotice?.takeIf { prefs.isSourceOn(ChannelPrefs.SOURCE_DVB) }
     val connecting = notice != null
     PspPolling(viewModel)
+    ScheduleRetrying(viewModel, live = false)
     val today = Days.today(now)
 
     // "Across days" (spec/apps.md): left/right past a row's end opens the neighbouring day.
@@ -297,7 +298,7 @@ fun GuideScreen(
         when (val plan = plans[day]) {
             null, Load.Loading -> CenteredMessage(stringResource(R.string.loading))
             // A failed ČT day keeps the grid (spec/apps.md, T36): its ČT rows say "Program se nepodařilo načíst",
-            // Anténa and Poslanecká sněmovna rows stay as they are. Picking the day again retries it.
+            // Anténa and Poslanecká sněmovna rows stay as they are. It is asked again by itself (30 s, after 5 min every 2 min; T42).
             is Load.Failed, is Load.Ready -> {
                 val ctPlan = (plan as? Load.Ready)?.value.orEmpty()
                 val ctFailed = plan is Load.Failed

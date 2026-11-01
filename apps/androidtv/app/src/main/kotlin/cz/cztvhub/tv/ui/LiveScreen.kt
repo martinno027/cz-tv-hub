@@ -66,6 +66,7 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
     val psp by viewModel.psp.collectAsStateWithLifecycle()
     val notOn = stringResource(R.string.psp_not_on)
     PspPolling(viewModel)
+    ScheduleRetrying(viewModel, live = true)
     // Tailscale is not Running yet or being checked (spec/apps.md T21, T18): "Připojuji se k Tailscale…" (or the wait
     // for a login) instead of the gateway's error or an empty Anténa group (also before the bridge exists).
     val tailnetNotice by viewModel.tailnetNotice.collectAsStateWithLifecycle()

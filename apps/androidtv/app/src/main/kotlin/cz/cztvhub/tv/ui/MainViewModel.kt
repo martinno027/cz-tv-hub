@@ -11,6 +11,7 @@ import cz.cztvhub.core.OnAir
 import cz.cztvhub.core.OnAirLike
 import cz.cztvhub.core.Programme
 import cz.cztvhub.core.PspState
+import cz.cztvhub.core.ScheduleRetry
 import cz.cztvhub.core.dvb.DetailsQuery
 import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbEvent
@@ -57,7 +58,8 @@ data class DvbState(
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application.tvApp
-    private val schedules = app.schedules
+    /** Every ČT schedule load goes through here, so a failed day is asked again by itself (T42). */
+    private val schedules = ScheduleRetry(app.schedules)
 
     /** Null when "Anténa" is not set up: the group is hidden everywhere. */
     private val _dvb = MutableStateFlow<DvbState?>(null)
@@ -212,7 +214,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             while (true) {
                 _now.value = Instant.now()
-                refreshOnAir()
+                // Živě's failure text is asked again only by [pollSchedules], only while that screen is visible (T42);
+                // a failed refresh behind programmes still shown goes on as before.
+                val failedOnAir = _onAir.value is Load.Failed && schedules.hasFailed(Days.openDay(_now.value))
+                if (!failedOnAir) refreshOnAir()
                 refreshDvb()
                 delay(30_000)
             }
@@ -287,16 +292,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshOnAir() {
         viewModelScope.launch {
+            val now = Instant.now()
+            var onAirDay: DayPlan? = null
             val result = withContext(Dispatchers.IO) {
                 try {
-                    Load.Ready(schedules.onAir(Instant.now()))
+                    Load.Ready(schedules.onAir(now)).also {
+                        // Cached by onAir: a guide grid still showing this day's failure gets it too (T42).
+                        if (_plans.value[Days.openDay(now)] is Load.Failed) {
+                            onAirDay = runCatching { schedules.day(Days.openDay(now)) }.getOrNull()
+                        }
+                    }
                 } catch (e: CtException) {
                     Load.Failed(e.userMessage)
                 }
             }
             // Keep showing the last good data if a later refresh fails.
             if (result is Load.Ready || _onAir.value !is Load.Ready) _onAir.value = result
+            onAirDay?.let { plan -> recovered(mapOf(Days.openDay(now) to plan)) }
         }
+    }
+
+    /**
+     * While Živě ([live]) or the guide is on screen and the app is visible (spec/apps.md, T42): a ČT day showing
+     * "Program se nepodařilo načíst" there is asked again until it loads, every 30 s for the first 5 minutes of the
+     * outage, then every 2 minutes; a success replaces the failure text in the guide and on Živě. Cancelling stops it.
+     */
+    suspend fun pollSchedules(live: Boolean) {
+        while (true) {
+            val shown = failedOnScreen(live)
+            val loaded = withContext(Dispatchers.IO) { schedules.retryDue(shown) }
+            recovered(loaded)
+            val wait = schedules.untilNext(failedOnScreen(live))?.toMillis() ?: SCHEDULE_IDLE_MS
+            delay(wait.coerceIn(SCHEDULE_MIN_WAIT_MS, SCHEDULE_IDLE_MS))
+        }
+    }
+
+    /** The ČT days whose failure text Živě's cards or the guide's grid show now. */
+    private fun failedOnScreen(live: Boolean): List<LocalDate> =
+        if (live) {
+            listOfNotNull(Days.openDay(Instant.now()).takeIf { _onAir.value is Load.Failed })
+        } else {
+            listOfNotNull(_selectedDay.value.takeIf { _plans.value[it] is Load.Failed })
+        }
+
+    /** Days that loaded after failing: shown wherever they failed (guide rows, Živě cards). */
+    private fun recovered(loaded: Map<LocalDate, DayPlan>) {
+        if (loaded.isEmpty()) return
+        _plans.update { plans -> plans + loaded.filterKeys { plans[it] !is Load.Ready }.mapValues { Load.Ready(it.value) } }
+        if (_onAir.value !is Load.Ready && Days.openDay(Instant.now()) in loaded) refreshOnAir()
     }
 
     /** Every open of the guide (spec/apps.md): the grid of the broadcast day containing now, also 00:00–05:00. */
@@ -329,6 +372,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             if (result is Load.Ready || showLoading) _plans.update { it + (day to result) }
+            if (result is Load.Ready) recovered(mapOf(day to result.value))
         }
     }
 
@@ -337,5 +381,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         const val PSP_MIN_WAIT_MS = 200L
         const val NOTICE_MS = 3_000L
         const val LONG_NOTICE_MS = 8_000L
+        const val SCHEDULE_IDLE_MS = 5_000L
+        const val SCHEDULE_MIN_WAIT_MS = 1_000L
     }
 }
