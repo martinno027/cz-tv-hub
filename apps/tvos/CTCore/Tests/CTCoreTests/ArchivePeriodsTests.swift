@@ -22,12 +22,13 @@ final class ArchivePeriodsTests: XCTestCase {
 
     func testGoldenChips() throws {
         let cases = try XCTUnwrap(golden()["chips"] as? [[String: Any]])
-        XCTAssertEqual(cases.count, 3)
+        XCTAssertEqual(cases.count, 8)
         for item in cases {
             let name = item["name"] as! String
             // the golden periods go through the parser, as the gateway's would
             let periods = ArchiveParser.periods(item["periods"])
-            XCTAssertEqual(periods == nil, item["periods"] is NSNull, name)
+            // no chips expected = the parser keeps no periods (also for periods that are there but make no sense)
+            XCTAssertEqual(periods == nil, (item["years"] as! [Any]).isEmpty, name)
             let chips = ArchivePeriodRules.chips(periods)
             func expected(_ key: String) -> [[String: AnyHashable]] {
                 (item[key] as! [[String: Any]]).map { ["label": $0["label"] as! String, "selected": $0["selected"] as! Bool] }
@@ -41,7 +42,7 @@ final class ArchivePeriodsTests: XCTestCase {
 
     func testGoldenSelectYear() throws {
         let cases = try XCTUnwrap(golden()["selectYear"] as? [[String: Any]])
-        XCTAssertEqual(cases.count, 2)
+        XCTAssertEqual(cases.count, 3)
         for item in cases {
             XCTAssertEqual(ArchivePeriodRules.selectYear(months: item["months"] as! [Int]), item["month"] as? Int,
                            item["name"] as? String ?? "")
@@ -82,12 +83,33 @@ final class ArchivePeriodsTests: XCTestCase {
                        "no month named")
         XCTAssertEqual(with(["month": NSNull()])?.month, 11)
         XCTAssertNil(with(["years": []]))
-        XCTAssertNil(with(["months": []]))
+        XCTAssertNil(with(["months": [13, "3"]]), "months none of which is a month")
+        XCTAssertNil(with(["months": "10"]), "months not a list")
         XCTAssertNil(with(["year": "2026"]), "a string is no number")
         XCTAssertEqual(with(["month": true])?.month, 11, "a bool is no number")
         // out-of-range, repeated and fractional values are dropped, the rest kept in the gateway's order
         XCTAssertEqual(with(["years": [2026, 2026, 1850, 2025.5, "2024", 2025], "months": [13, 11, 0, 10, 11]]),
                        ArchivePeriods(years: [2026, 2025], year: 2026, months: [11, 10], month: 11))
+    }
+
+    /// T51: a year of at most 100 episodes is shown whole: year chips, no month (null or left out).
+    func testYearsOnly() {
+        let whole = ArchivePeriods(years: [2026, 2025], year: 2025, months: [], month: nil)
+        XCTAssertEqual(ArchiveParser.periods(["years": [2026, 2025], "year": 2025, "months": [], "month": NSNull()]), whole)
+        XCTAssertEqual(ArchiveParser.periods(["years": [2026, 2025], "year": 2025, "months": []]), whole)
+        XCTAssertNil(ArchiveParser.periods(["years": [2026, 2025], "year": 2024, "months": [], "month": NSNull()]),
+                     "the chosen year is still checked")
+        // lead's decision: a month named for no months, or no months list at all, is still a year shown whole
+        XCTAssertEqual(ArchiveParser.periods(["years": [2026, 2025], "year": 2025, "months": [], "month": 3]), whole,
+                       "a month named for a year without months is dropped")
+        XCTAssertEqual(ArchiveParser.periods(["years": [2026, 2025], "year": 2025, "month": 3]), whole, "no months key")
+        XCTAssertEqual(ArchiveParser.periods(["years": [2026, 2025], "year": 2025, "months": NSNull(), "month": 3]), whole,
+                       "months null")
+        let chips = ArchivePeriodRules.chips(whole)
+        XCTAssertEqual(chips.years.filter(\.selected).map(\.value), [2025])
+        XCTAssertTrue(chips.months.isEmpty)
+        // the years-only and the month variant differ
+        XCTAssertNotEqual(ArchiveParser.periods(good), ArchiveParser.periods(good.merging(["months": [], "month": NSNull()]) { $1 }))
     }
 
     func testShowAndEpisodePageCarryThePeriods() throws {
@@ -154,6 +176,12 @@ final class ArchivePeriodsTests: XCTestCase {
         XCTAssertEqual(year.paging(ArchivePeriods(years: [2026, 2025], year: 2025, months: [12], month: 12)),
                        ArchiveEpisodeQuery(season: "s1", year: 2025, month: 12), "later pages name the month shown")
         XCTAssertEqual(start.paging(nil), start)
+        // T51: the next page of a year shown whole names the year only
+        let whole = ArchivePeriods(years: [2026, 2025], year: 2025, months: [], month: nil)
+        XCTAssertEqual(ArchiveEpisodeQuery(season: "s1", year: 2026, month: 10).selectingYear(2025).paging(whole),
+                       ArchiveEpisodeQuery(season: "s1", year: 2025))
+        XCTAssertEqual(ArchiveEpisodeQuery(season: "s1", year: 2025).paging(whole).queryItems(page: 2).map(\.name),
+                       ["season", "year", "page"])
     }
 
     func testRequests() async throws {

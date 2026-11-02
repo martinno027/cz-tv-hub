@@ -539,13 +539,39 @@ test('periods parser: defensive, broken periods are no chips', () => {
   assert.equal(p([2026]), null);
   assert.equal(p({ years: [2026], year: 2024, months: [1], month: 1 }), null); // a year not listed
   assert.equal(p({ years: [2026], months: [1], month: 1 }), null); // no year
-  assert.equal(p({ years: [2026], year: 2026, months: [], month: 1 }), null); // no months
+  assert.equal(p({ years: [2026], year: 2026, months: ['3', 0, 13], month: 3 }), null); // months, none usable
   assert.equal(p({ years: [], year: 2026, months: [1], month: 1 }), null);
   assert.deepEqual(A.periodChips(null), { years: [], months: [] });
   // only a ČT group's periods count
   const rec = A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [{ title: 'Nahráno z antény',
     periods: { years: [2026], year: 2026, months: [1], month: 1 }, episodes: [{ source: 'rec', recordingId: 'r1' }] }] }));
   assert.equal(A.periodsOf(rec.groups), null);
+});
+
+test('periods: a year shown whole has no month (T51)', () => {
+  const p = (o) => A.parseShow(200, body({ card: { id: 'ct:1', title: 'S' }, groups: [{ title: 'i', periods: o,
+    episodes: [{ source: 'ct', idec: '1' }] }] })).groups[0].periods;
+  // the golden case of a year shown whole as the gateway sends it (`months: []`, `month: null`)
+  const golden = cases.periods.chips.filter((c) => c.periods && Array.isArray(c.periods.months) && !c.periods.months.length && c.periods.month === null);
+  assert.equal(golden.length, 1);
+  // the golden cases' variants (a month next to no months, no months key, months none of which is one) pass the chips
+  // test above through the parser; here what the parser makes of them
+  const variants = cases.periods.chips.filter((c) => c.periods && /T51/.test(c.name) && c !== golden[0]);
+  assert.equal(variants.length, 4);
+  variants.forEach((c) => assert.deepEqual(p(c.periods), c.years.length ? { years: [2026, 2025], year: 2026, months: [], month: null } : null, c.name));
+  assert.deepEqual(p(golden[0].periods), { years: [2026, 2025], year: 2025, months: [], month: null });
+  // a stale month next to an empty list is dropped, as the gateway ignores ?month= for such a year; no months key
+  // at all is the same (the lead's decision for all apps)
+  const whole2026 = { years: [2026, 2025], year: 2026, months: [], month: null };
+  assert.deepEqual(p({ years: [2026, 2025], year: 2026, months: [], month: 4 }), whole2026);
+  assert.deepEqual(p({ years: [2026, 2025], year: 2026, month: 4 }), whole2026);
+  assert.deepEqual(p({ years: [2026, 2025], year: 2026 }), whole2026);
+  assert.deepEqual(A.periodChips(p({ years: [2026, 2025], year: 2026, month: 4 })).months, []);
+  // a month not in a non-empty list is still the year's newest (T32)
+  assert.deepEqual(p({ years: [2026], year: 2026, months: [2, 5], month: 4 }).month, 5);
+  // the next page of such a year asks for the year alone
+  const whole = p(golden[0].periods);
+  assert.equal(A.showQuery(null, 2, { year: whole.year, month: whole.month }), '?year=2025&page=2');
 });
 
 test('periods: the request carries the season, year, month and page', () => {

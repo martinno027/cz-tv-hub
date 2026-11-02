@@ -321,7 +321,12 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
   while a year loads its month chips are hidden; a failed load restores the previous season/year/month; switching
   the season resets to its newest month; a show without seasons starts with the focus on the selected year; a ČT
   list **without seasons pages too** (`nextPage` → `?page=n` with the same year/month); `periods` that do not make
-  sense (a year or month not in its own list, not numbers) = no chips, the episodes are shown as they come.
+  sense (a year not in its own list, not numbers) = no chips, the episodes are shown as they come; a month not in
+  a non-empty `months` = that year's newest month (since T32).
+  **Years only (T51)**: when the answer's `months` is empty (`month` null: a year of at most 100 episodes), the
+  month row is not shown and the list holds the whole year, newest first, paged; selecting such a year needs no
+  month (`selectYear` of `[]` = none); `months` empty or missing with any `month` = the year shown whole (`month`
+  null), not "no periods". The same in all apps and the web (`archive_cases.json` "periods").
 - **Playing**: iVysílání episodes through the existing archive path (`idec` → VOD on the TV; DRM-only → ČT's text);
   our recordings through the Anténa timeline player (T05). Back returns to the page, then to the grid (T23).
 - **"Pokračovat ve sledování"** (owner, 2026-10-25, v1; a menu item with its grid since T23, "the row" below = that

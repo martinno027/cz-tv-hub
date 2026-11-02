@@ -144,7 +144,10 @@ object ArchiveRules {
     fun monthChips(periods: ArchivePeriods?): List<PeriodChip> =
         periods?.months.orEmpty().mapNotNull { m -> monthName(m)?.let { PeriodChip(it, m, m == periods?.month) } }
 
-    /** A year chosen alone shows its newest month of [months] (the months the gateway lists for that year). */
+    /**
+     * A year chosen alone shows its newest month of [months] (the months the gateway lists for that year); a year
+     * without months (T51, at most 100 episodes) is shown whole: null.
+     */
     fun selectYear(months: List<Int>): Int? = months.maxOrNull()
 
     /** The resume key of an episode (`ct:<idec>`, `dvb:<recording id>`), as the guide uses it. */

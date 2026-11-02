@@ -234,7 +234,8 @@ private fun Episodes(
         }
         val periods = state.periods
         if (periods != null) {
-            // T32: year chips, then the chosen year's month chips; the first focus is the selected year without seasons.
+            // T32: year chips, then the chosen year's month chips (none for a year shown whole, T51); the first focus is
+            // the selected year without seasons.
             PeriodRow(ArchiveRules.yearChips(periods), if (show.seasons.size <= 1) first else null) { viewModel.loadYear(it) }
             val months = ArchiveRules.monthChips(periods)
             if (months.isNotEmpty()) {

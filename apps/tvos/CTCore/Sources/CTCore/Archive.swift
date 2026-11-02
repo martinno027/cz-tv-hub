@@ -502,6 +502,7 @@ public enum ArchiveParser {
     /// `{"years", "year", "months", "month"}` (T32): years 1900–2999 and months 1–12, each once, the gateway's
     /// order kept; the chosen year must be in the list, else no chips (the episodes still show). A month that is
     /// missing or not listed falls back to the year's newest (`ArchivePeriodRules.selectYear`, spec/apps.md).
+    /// `"months": []` (or null, or left out) is a year shown whole (T51): year chips, no month, any `month` dropped.
     static func periods(_ value: Any?) -> ArchivePeriods? {
         guard let item = value as? [String: Any] else { return nil }
         func ints(_ value: Any?, _ range: ClosedRange<Int>) -> [Int] {
@@ -511,9 +512,18 @@ public enum ArchiveParser {
                 .filter { seen.insert($0).inserted }
         }
         let years = ints(item["years"], ArchivePeriods.yearRange)
-        let months = ints(item["months"], 1...12)
-        guard let year = number(item["year"]).map({ Int($0) }), years.contains(year),
-              let month = number(item["month"]).map({ Int($0) }).flatMap({ months.contains($0) ? $0 : nil })
+        guard let year = number(item["year"]).map({ Int($0) }), years.contains(year) else { return nil }
+        // T51 (lead's decision for all apps): `"months": []`, null or left out = a year shown whole, whatever
+        // `month` says; another type, or a list none of which is a month (13, "3"), stays unknown: no chips
+        let listed: [Any]
+        switch item["months"] {
+        case nil, is NSNull: listed = []
+        case let list as [Any]: listed = list
+        default: return nil
+        }
+        if listed.isEmpty { return ArchivePeriods(years: years, year: year, months: [], month: nil) }
+        let months = ints(listed, 1...12)
+        guard let month = number(item["month"]).map({ Int($0) }).flatMap({ months.contains($0) ? $0 : nil })
                 ?? ArchivePeriodRules.selectYear(months: months) else { return nil }
         return ArchivePeriods(years: years, year: year, months: months, month: month)
     }

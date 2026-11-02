@@ -49,14 +49,17 @@
 
   /**
    * A ČT group's `periods` (T32) → {years, year, months, month} or null (no chips). The selected year has to be one
-   * of the years and its months must not be empty; a month missing or not listed is the year's newest (the rule of a
-   * year alone).
+   * of the years; a month missing or not listed is the year's newest (the rule of a year alone). `months` empty or
+   * missing = a year shown whole (T51): year chips, no month (`month` null, whatever was sent); a list of months none
+   * of which is one (13, "3") = broken, no chips.
    */
   function parsePeriods(o) {
     if (!isObject(o)) return null;
     var years = wholes(o, 'years', 1880, 2200);
     var months = wholes(o, 'months', 1, 12);
-    if (years.indexOf(o.year) < 0 || !months.length) return null;
+    var rawMonths = o.months;
+    if (rawMonths != null && !Array.isArray(rawMonths)) return null; // not a list: unknown, no chips
+    if (years.indexOf(o.year) < 0 || (J.arr(o, 'months').length && !months.length)) return null;
     return { years: years, year: o.year, months: months, month: months.indexOf(o.month) >= 0 ? o.month : Archive.selectYear(months) };
   }
 
@@ -419,7 +422,7 @@
       return MONTHS[month - 1] || '';
     },
 
-    /** A year alone (T32): its newest month of those the gateway lists for it, or null. */
+    /** A year alone (T32): its newest month of those the gateway lists for it, or null (a year shown whole, T51). */
     selectYear: function (months) {
       return months && months.length ? Math.max.apply(null, months) : null;
     },

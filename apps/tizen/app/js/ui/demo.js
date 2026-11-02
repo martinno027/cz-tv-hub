@@ -22,8 +22,8 @@
  * sub-genres and 3 pages, search by title, a film and a series with seasons, pages and our recorded episodes (one
  * of them is the sample timeline, so it opens the Anténa player). Year and month (T32): every third generated
  * iVysílání series (also "Kuchyně u sousedů" and "Příběh řeky" of the home sample) has more than 100 episodes in
- * its 1st and 2nd season, so it comes a month at a time (2005–2026, a daily episode, 15 a page; the 3rd season
- * has none); dvb_archive_show_periods.json answers for its own card when the sample is there (the card first in the
+ * its 1st and 2nd season, so it comes a month at a time (2012–2026, a daily episode, 15 a page; the 3rd season
+ * has none); 2005–2011 are weekly, so those years come whole with no month row (T51); dvb_archive_show_periods.json answers for its own card when the sample is there (the card first in the
  * Seriály grid).
  */
 (function (root) {
@@ -327,26 +327,47 @@
 
   /**
    * The generated periods of a long show (T32): {years, year, months, month} for ?year=&month= (a year alone = its
-   * newest month, none = the newest year), null when the year or month is not listed (the gateway's 400).
+   * newest month, none = the newest year), null when the year or month is not listed (the gateway's 400). A year
+   * shown whole (T51: weekly, at most 100 episodes, here 2005–2011 of the generated shows) has `months: []`,
+   * `month: null`, and a month asked for it is ignored as the gateway does.
    */
   function demoPeriods(year, month, sample) {
     var all = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
     // the shared sample's own years (its newest year's months as it lists them, the others whole), else 2005–2026
     var monthsOf = sample ? function (y) { return y === sample.year ? sample.months : all; } : function (y) {
-      return y === 2026 ? all.slice(2) : y === 2005 ? all.slice(0, 4) : all;
+      return y === 2026 ? all.slice(2) : y <= 2011 ? [] : all;
     };
     var years = sample ? sample.years : [];
     for (var y0 = 2026; !sample && y0 >= 2005; y0--) years.push(y0); // 22 year chips: more than the row shows
     var y = year === null ? years[0] : Number(year);
     if (years.indexOf(y) < 0) return null;
     var months = monthsOf(y);
+    if (!months.length) return { years: years, year: y, months: [], month: null };
     var m = month === null ? months[0] : Number(month);
     return months.indexOf(m) < 0 ? null : { years: years, year: y, months: months, month: m };
   }
 
-  /** A daily episode of that month (Prague evening), newest first, `per` (15) a page. */
+  /** A weekly episode of a year shown whole (T51), newest first. */
+  function demoYearEpisodes(season, year) {
+    var episodes = [];
+    for (var w = 51; w >= 0; w--) {
+      var aired = Date.UTC(year, 0, 3 + w * 7, 19, 0);
+      var day = new Date(aired);
+      var label = day.getUTCDate() + '. ' + (day.getUTCMonth() + 1) + '. ' + year;
+      episodes.push({ source: 'ct', idec: 'demo-' + season + '-' + year + '-w' + w, title: 'Týden z ' + label,
+        description: 'Smyšlený týdenní díl z ukázky.', durationSeconds: 2700, aired: day.toISOString(),
+        channel: w % 4 === 0 ? 'ČT2' : 'ČT1', playable: w % 9 !== 0 });
+    }
+    return episodes;
+  }
+
+  /** A daily episode of that month (Prague evening), newest first, `per` (15) a page; a year shown whole: weekly. */
   function demoMonthEpisodes(season, periods, page, per) {
     per = per || 15;
+    if (!periods.month) {
+      var weekly = demoYearEpisodes(season, periods.year);
+      return { episodes: weekly.slice((page - 1) * per, page * per), nextPage: weekly.length > page * per ? page + 1 : null };
+    }
     var days = new Date(Date.UTC(periods.year, periods.month, 0)).getUTCDate();
     var episodes = [];
     for (var d = days; d >= 1; d--) {

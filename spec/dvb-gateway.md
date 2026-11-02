@@ -655,8 +655,8 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     episode's (finding the empty ones up front would cost a bisection per year). A year found to have no episode
     is dropped from the cached list (with every newer year up to the episode just before where it would start) and
     the answer moves to the next **older** year with episodes (repeated; none older → the next newer). The answer's
-    `years` holds only years not yet known to be empty, and the selected year always has `months` (never `[]`,
-    `month` never `null`). `?year=` of a year already known to be empty (a stale chip) answers for the nearest
+    `years` holds only years not yet known to be empty, and the selected year with more than 100 episodes always has `months`
+    (`[]` + `month: null` only for a year shown whole, T51). `?year=` of a year already known to be empty (a stale chip) answers for the nearest
     year with episodes the same way, its `month` dropped (that year's newest), not `400`.
     ČT's API has no date filter (checked 2026-11-01: `year`, `dateFrom`, `month` … are validation errors; `limit`
     at most 100), but its list is ordered by date. The newest year comes from the first chunk (`orderBy: newest`,
@@ -671,6 +671,16 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     time** through the same slot as the other archive calls. Measured on a fake list the size of "Události"
     (`test_dvb_archive_periods.py`): opening the show 7 requests (show, page 1, oldest, 4 chunks), the year below
     5, a jump to 2005 18 (13 bisection + 5 chunks), 2005 directly on a cold cache 22.
+    **Months only where a year has many episodes (T51, owner 2026-11-02: „u Hydepark civilizace je v kazdem
+    mesici 2 dily, coz je malo … v tomto pripade staci delit jen na roky … at uzivatel nemusi extreme klikat“)**:
+    a year with **at most 100** episodes (`YEAR_MONTHS_MIN` = 101, the same 100 as the list threshold: one ČT
+    chunk, a few pages in the app) is shown **whole**: `"months": []`, `"month": null`, the year's episodes newest
+    first, paged as today. Only a year with more than 100 episodes (daily programmes) gets `months` and a selected
+    `month` as above. The decision is per year (a show can be daily in one year and weekly in another); it is known
+    once the year has been read (the year is read whole anyway, up to 30 chunks). `?month=` for a year shown whole
+    is ignored (a stale chip), not `400` (a malformed `month` — not 1–12, or without `year` — stays `400`, checked
+    before the year is known; "a month the year does not have `400`" above applies to years with months). The apps
+    hide the month row when `months` is empty.
     Sample: `spec/fixtures/dvb/dvb_archive_show_periods.json`. Golden cases: `archive_cases.json` "periods" (Czech
     month names, the chips' order and labels, what a year alone selects).
   - **card** `{"id", "source": "ct"|"rec"|"both", "title", "kind": "movie"|"series"|null, "year"?, "image"

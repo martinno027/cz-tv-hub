@@ -1205,6 +1205,45 @@
     "periods": null,
     "years": [],
     "months": []
+   },
+   {
+    "name": "years only (T51): empty months with a month = the year shown whole, the month dropped",
+    "periods": {"years": [2026, 2025], "year": 2026, "months": [], "month": 3},
+    "years": [
+     {"label": "2026", "selected": true},
+     {"label": "2025", "selected": false}
+    ],
+    "months": []
+   },
+   {
+    "name": "years only (T51): months missing = the year shown whole",
+    "periods": {"years": [2026, 2025], "year": 2026, "month": 3},
+    "years": [
+     {"label": "2026", "selected": true},
+     {"label": "2025", "selected": false}
+    ],
+    "months": []
+   },
+   {
+    "name": "months not a list (T51): no chips",
+    "periods": {"years": [2026, 2025], "year": 2026, "months": 3, "month": 3},
+    "years": [],
+    "months": []
+   },
+   {
+    "name": "months that are not months (T51): no chips",
+    "periods": {"years": [2026, 2025], "year": 2026, "months": [13, "3"], "month": 3},
+    "years": [],
+    "months": []
+   },
+   {
+    "name": "years only (T51): a year of at most 100 episodes has no months, no month row",
+    "periods": {"years": [2026, 2025], "year": 2025, "months": [], "month": null},
+    "years": [
+     {"label": "2026", "selected": false},
+     {"label": "2025", "selected": true}
+    ],
+    "months": []
    }
   ],
   "selectYear": [
@@ -1223,6 +1262,11 @@
      3
     ],
     "month": 3
+   },
+   {
+    "name": "a year shown whole (T51): no month",
+    "months": [],
+    "month": null
    }
   ]
  }

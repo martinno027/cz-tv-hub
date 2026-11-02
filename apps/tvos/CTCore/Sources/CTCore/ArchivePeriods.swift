@@ -2,17 +2,19 @@ import Foundation
 
 /// The year/month pre-selection of a long ČT episode list (T32, spec/dvb-gateway.md "Archive" → "Year and month",
 /// spec/apps.md "Archiv" → show page): the gateway sends it only when the list has more than 100 episodes.
+/// A year of at most 100 episodes is shown whole (T51): `months` empty and `month` nil, no month row.
 public struct ArchivePeriods: Sendable, Hashable {
     static let yearRange = 1900...2999
 
     /// Newest first, as the gateway lists them.
     public let years: [Int]
     public let year: Int
-    /// The months of `year` with an episode (1–12), newest first.
+    /// The months of `year` with an episode (1–12), newest first; empty = the year is shown whole (T51).
     public let months: [Int]
-    public let month: Int
+    /// The month listed; nil exactly when `months` is empty (the whole year, newest first).
+    public let month: Int?
 
-    public init(years: [Int], year: Int, months: [Int], month: Int) {
+    public init(years: [Int], year: Int, months: [Int], month: Int?) {
         self.years = years
         self.year = year
         self.months = months
@@ -51,7 +53,7 @@ public enum ArchivePeriodRules {
     }
 
     /// A year alone shows its newest month. The gateway picks it for `?year=` without `month`; this is only the
-    /// fallback when its answer names no month or one not in its list.
+    /// fallback when its answer names no month or one not in its list. No months (a year shown whole, T51) = nil.
     public static func selectYear(months: [Int]) -> Int? {
         months.filter { (1...12).contains($0) }.max()
     }

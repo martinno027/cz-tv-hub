@@ -174,7 +174,8 @@ struct ShowPageView: View {
     }
 
     /// T32: the year row and, under it, the months of the selected year; the selection shows at once, the month
-    /// row of another year when the gateway answered with its months.
+    /// row of another year when the gateway answered with its months. A year shown whole (T51: `months` empty,
+    /// at most 100 episodes) has no month row.
     @ViewBuilder
     private func periodChips(_ show: ArchiveShow) -> some View {
         if let periods {
@@ -191,7 +192,7 @@ struct ShowPageView: View {
                         .focused($focusedYear, equals: item.value)
                     }
                 }
-                if periods.year == year {
+                if periods.year == year, !chips.months.isEmpty {
                     chipRow {
                         ForEach(chips.months) { item in
                             chip(item.label, selected: item.selected, identifier: "show.month.\(item.value)") {

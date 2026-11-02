@@ -111,6 +111,13 @@ class Base(unittest.TestCase):
                                          clock=self.clock, log=lambda m: None)
         return self.catalog
 
+    def hydepark(self):
+        """Two a month (7th and 21st, 20:00 UTC) from January 2015 to October 2026: 286 episodes, 24 a year."""
+        dates = [iso(datetime(y, m, d, 20, tzinfo=timezone.utc)) for y in range(2015, 2027) for m in range(1, 13)
+                 for d in (7, 21) if (y, m) <= (2026, 10)]
+        self.make(dates)
+        return truth(dates)
+
     def show(self, season=None, page=1, year=None, month=None):
         return self.catalog.show("ct:" + SHOW, season, page, year, month)
 
@@ -256,19 +263,22 @@ class PeriodsRulesTest(Base):
         dates += ["2025-12-31T23:30:00.000Z",  # 00:30 on 1 January 2026 in Prague
                   "2026-03-31T22:30:00.000Z",  # 00:30 on 1 April (summer time, UTC+2)
                   "2026-06-30T21:59:00.000Z"]  # 23:59 on 30 June
-        self.make(dates)
+        # 2026 needs more than 100 episodes to have months (T51)
+        dates += spread(100, datetime(2026, 2, 2, 18, tzinfo=timezone.utc), datetime(2026, 2, 27, 18, tzinfo=timezone.utc))
+        self.make(sorted(dates))
         periods, aired, _ = self.month_of(self.show())
-        self.assertEqual((periods["years"], periods["year"], periods["months"]), ([2026, 2025], 2026, [6, 4, 1]))
+        self.assertEqual((periods["years"], periods["year"], periods["months"]), ([2026, 2025], 2026, [6, 4, 2, 1]))
         self.assertEqual(aired, ["2026-06-30T21:59:00Z"])
         self.assertEqual(self.month_of(self.show(year=2026, month=1))[1], ["2025-12-31T23:30:00Z"])
         self.assertEqual(self.month_of(self.show(year=2026, month=4))[1], ["2026-03-31T22:30:00Z"])
         self.assertNotIn("2025-12-31T23:30:00Z", self.all_episodes(2025, 12))
 
     def gaps(self):
-        """Episodes in 2009, 2011 and 2013: 2012 (next to the newest) and 2010 (next to the oldest) are empty."""
+        """Episodes in 2009, 2011 and 2013 (over 100 each: months, T51): 2012 (next to the newest) and 2010 (next to
+        the oldest) are empty."""
         dates = []
         for year in (2009, 2011, 2013):
-            part = spread(60, datetime(year, 1, 5, 18, tzinfo=timezone.utc), datetime(year, 12, 20, 18, tzinfo=timezone.utc))
+            part = spread(200, datetime(year, 1, 5, 18, tzinfo=timezone.utc), datetime(year, 12, 20, 18, tzinfo=timezone.utc))
             dates += [d for d in part if not d.startswith(f"{year}-04")]
         self.make(dates)
         return truth(dates)
@@ -306,6 +316,9 @@ class PeriodsRulesTest(Base):
         self.show()
         group = self.show(year=2011)["groups"][0]  # the episode where 2011 would start is of 2009
         self.assertEqual((group["periods"]["year"], group["periods"]["years"]), (2009, [2013, 2009]))
+        # 60 a year: shown whole (T51), also after landing from an empty year
+        self.assertEqual((group["periods"]["months"], group["periods"]["month"], len(group["episodes"])), ([], None, 20))
+        self.assertEqual(group["episodes"][0]["aired"], "2009-12-20T18:00:00Z")
 
     def test_an_empty_oldest_year_moves_to_the_next_newer_one(self):
         expected = self.gaps()
@@ -318,8 +331,8 @@ class PeriodsRulesTest(Base):
         self.assertEqual(self.show(year=2008)["groups"][0]["periods"]["year"], 2009)  # stale chip, no older one
 
     def test_episodes_without_a_date_are_in_no_month(self):
-        dates = spread(300, datetime(2020, 1, 1, 18, tzinfo=timezone.utc), datetime(2022, 12, 31, 18, tzinfo=timezone.utc))
-        for i in range(0, 300, 7):
+        dates = spread(600, datetime(2020, 1, 1, 18, tzinfo=timezone.utc), datetime(2022, 12, 31, 18, tzinfo=timezone.utc))
+        for i in range(0, 600, 7):
             dates[i] = None
         self.make(dates)
         expected = truth(dates)
@@ -348,7 +361,7 @@ class PeriodsRulesTest(Base):
     def test_a_season_with_periods(self):
         seasons = {"season:a1": spread(50, datetime(2001, 1, 1, 18, tzinfo=timezone.utc),
                                        datetime(2001, 12, 1, 18, tzinfo=timezone.utc)),
-                   "season:a2": spread(400, datetime(2010, 1, 1, 18, tzinfo=timezone.utc),
+                   "season:a2": spread(800, datetime(2010, 1, 1, 18, tzinfo=timezone.utc),
                                        datetime(2012, 6, 30, 18, tzinfo=timezone.utc))}
         self.make(None, seasons)
         first = self.show()["groups"][0]  # the first season: 50 episodes, oldest first as before
@@ -371,26 +384,119 @@ class PeriodsRulesTest(Base):
         for case in GOLDEN["periods"]["selectYear"]:
             with self.subTest(case=case["name"]):
                 dates = []
-                for month in case["months"]:
-                    dates += [iso(datetime(2024, month, day, 17, tzinfo=timezone.utc)) for day in range(1, 29)]
+                if case["months"]:  # more than 100 episodes in the year: months (T51)
+                    per_day = math.ceil(ac.YEAR_MONTHS_MIN / (28 * len(case["months"])))
+                    dates += [iso(datetime(2024, month, day, 10 + hour, tzinfo=timezone.utc))
+                              for month in case["months"] for day in range(1, 29) for hour in range(per_day)]
+                else:  # two a month, as "Hydepark Civilizace": the year whole
+                    dates += [iso(datetime(2024, month, day, 20, tzinfo=timezone.utc))
+                              for month in range(1, 13) for day in (7, 21)]
                 dates += spread(101, datetime(2025, 1, 1, 18, tzinfo=timezone.utc),
                                 datetime(2025, 12, 1, 18, tzinfo=timezone.utc))
                 self.make(sorted(dates))
                 periods = self.show(year=2024)["groups"][0]["periods"]
                 self.assertEqual((periods["months"], periods["month"]), (case["months"], case["month"]))
 
+    @staticmethod
+    def gateway_shaped(periods):
+        """What the gateway sends: these four keys, newest first, the year among the years, and a month among the
+        months, or none with no months (a year shown whole, T51)."""
+        return isinstance(periods, dict) and list(periods) == ["years", "year", "months", "month"] \
+            and all(type(v) is int for v in periods["years"]) and periods["years"] == sorted(periods["years"], reverse=True) \
+            and periods["year"] in periods["years"] and isinstance(periods["months"], list) \
+            and all(type(m) is int and 1 <= m <= 12 for m in periods["months"]) \
+            and periods["months"] == sorted(periods["months"], reverse=True) \
+            and (periods["month"] in periods["months"] if periods["months"] else periods["month"] is None)
+
     def test_golden_chips_have_the_gateway_shape(self):
         self.make(udalosti()[-300:])
-        ours = self.show()["groups"][0]["periods"]
-        cases = [c["periods"] for c in GOLDEN["periods"]["chips"] if c["periods"] is not None]
-        self.assertTrue(cases)
-        for periods in cases + [ours]:
-            self.assertEqual(list(periods), ["years", "year", "months", "month"])
-            self.assertEqual(periods["years"], sorted(periods["years"], reverse=True))
-            self.assertEqual(periods["months"], sorted(periods["months"], reverse=True))
-            self.assertIn(periods["year"], periods["years"])
-            self.assertIn(periods["month"], periods["months"])
-            self.assertTrue(all(1 <= m <= 12 for m in periods["months"]))
+        ours = [self.show()["groups"][0]["periods"]]
+        self.hydepark()
+        ours.append(self.show()["groups"][0]["periods"])
+        self.assertEqual((ours[0]["months"][:1], ours[1]["months"]), ([11], []))
+        for periods in ours:
+            self.assertTrue(self.gateway_shaped(periods), periods)
+        # the golden chips also hold what the apps must survive (T51: months missing, not months, a month with
+        # empty months); the gateway-shaped ones cover both kinds the gateway sends
+        shaped = [c["periods"] for c in GOLDEN["periods"]["chips"] if self.gateway_shaped(c["periods"])]
+        self.assertTrue(any(p["months"] for p in shaped))
+        self.assertTrue(any(not p["months"] for p in shaped))
+        self.assertFalse(self.gateway_shaped({"years": [2026], "year": 2026, "months": [], "month": 3}))
+
+
+class YearsOnlyTest(Base):
+    """T51 (owner 2026-11-02: "Hydepark Civilizace" has two episodes a month): a year of at most 100 episodes is
+    shown whole, without months; only a year with more gets month chips. Decided per year."""
+
+    @staticmethod
+    def whole(expected, year):
+        return [d for eps in expected[year].values() for d in eps]
+
+    def test_a_weekly_show_is_divided_by_years_only(self):
+        expected = self.hydepark()
+        answer, count = self.requests(self.show)
+        periods, aired, next_page = self.month_of(answer)
+        self.assertEqual(periods, {"years": list(range(2026, 2014, -1)), "year": 2026, "months": [], "month": None})
+        self.assertEqual(aired, self.whole(expected, 2026)[:20])
+        self.assertEqual((aired[0], aired[-1], next_page), ("2026-10-21T20:00:00Z", "2026-01-07T20:00:00Z", None))
+        self.assertEqual(count, 4)  # show, page 1, oldest, the first chunk (2026 and 2025 in it): as with months
+        for year in (2026, 2020, 2015):
+            with self.subTest(year=year):
+                self.assertEqual(self.all_episodes(year, None), self.whole(expected, year))
+                self.assertEqual(len(self.whole(expected, year)), 20 if year == 2026 else 24)
+
+    def test_a_month_for_a_year_shown_whole_is_ignored(self):
+        self.hydepark()
+        plain = self.show(year=2020)["groups"][0]
+        for month in (3, 4, 12):  # one it has, and every month has episodes: still not a month list
+            with self.subTest(month=month):
+                group, count = self.requests(lambda: self.show(year=2020, month=month)["groups"][0])
+                self.assertEqual((group, count), (plain, 0))
+        self.assertEqual(self.show(page=2, year=2020, month=5)["groups"][0]["episodes"],
+                         self.show(page=2, year=2020)["groups"][0]["episodes"])
+
+    def test_paged_like_a_month(self):
+        self.hydepark()
+        first = self.show(year=2019)["groups"][0]
+        second = self.show(page=2, year=2019)["groups"][0]
+        self.assertEqual((len(first["episodes"]), first["nextPage"]), (20, 2))
+        self.assertEqual((len(second["episodes"]), second["nextPage"]), (4, None))
+        self.assertEqual(second["episodes"][-1]["aired"], "2019-01-07T20:00:00Z")
+        self.assertEqual(self.show(page=3, year=2019)["groups"][0]["episodes"], [])
+
+    def test_100_a_year_whole_101_months(self):
+        for count, months in ((100, []), (101, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1])):
+            with self.subTest(count=count):
+                dates = spread(count, datetime(2024, 1, 3, 18, tzinfo=timezone.utc), datetime(2024, 12, 28, 18, tzinfo=timezone.utc))
+                dates += spread(150, datetime(2025, 1, 3, 18, tzinfo=timezone.utc), datetime(2025, 12, 28, 18, tzinfo=timezone.utc))
+                self.make(dates)
+                periods, aired, _ = self.month_of(self.show(year=2024))
+                self.assertEqual(periods["months"], months)
+                self.assertEqual(periods["month"], months[0] if months else None)
+                if months:
+                    self.assertEqual(aired, truth(dates)[2024][12])  # December's few, not the year's 20
+                    self.assertEqual(len(self.all_episodes(2024, 12)), len(truth(dates)[2024][12]))
+                else:
+                    self.assertEqual(len(aired), 20)
+                    self.assertEqual(len(self.all_episodes(2024, None)), 100)  # every page, nothing capped
+
+    def test_daily_one_year_weekly_another(self):
+        dates = spread(365, datetime(2024, 1, 1, 18, tzinfo=timezone.utc), datetime(2024, 12, 30, 18, tzinfo=timezone.utc))
+        dates += [iso(datetime(2025, 1, 6, 19, tzinfo=timezone.utc) + timedelta(weeks=n)) for n in range(52)]
+        dates += spread(200, datetime(2026, 1, 1, 18, tzinfo=timezone.utc), datetime(2026, 10, 30, 18, tzinfo=timezone.utc))
+        self.make(dates)
+        expected = truth(dates)
+        default = self.month_of(self.show())[0]
+        self.assertEqual((default["year"], default["month"], default["months"]), (2026, 10, list(expected[2026])))
+        weekly, aired, next_page = self.month_of(self.show(year=2025, month=10))  # a month chip from 2026: ignored
+        self.assertEqual((weekly["year"], weekly["months"], weekly["month"], next_page), (2025, [], None, 2))
+        self.assertEqual(aired, self.whole(expected, 2025)[:20])
+        self.assertEqual(len(self.all_episodes(2025, None)), 52)
+        daily = self.month_of(self.show(year=2024))[0]
+        self.assertEqual((daily["months"], daily["month"]), (list(range(12, 0, -1)), 12))
+        with self.assertRaises(ac.BadPeriod):  # a daily year still checks its months
+            self.show(year=2024, month=13)
+        self.assertEqual(default["years"], [2026, 2025, 2024])
 
 
 class RouteTest(unittest.TestCase):
@@ -417,7 +523,8 @@ class RouteTest(unittest.TestCase):
                  ({"year": "2025", "month": "1"}, 200), ({"year": "2024", "month": "11"}, 200),
                  ({"year": "2024", "month": "12", "page": "2"}, 200),
                  ({"year": "2023"}, 400), ({"year": "2027"}, 400), ({"year": "2026", "month": "11"}, 400),
-                 ({"year": "2024", "month": "10"}, 400), ({"month": "10"}, 400), ({"year": "26"}, 400),
+                 ({"year": "2024", "month": "10"}, 200),  # 2024: 42 episodes, shown whole, the month ignored (T51)
+                 ({"year": "2024", "page": "3"}, 200), ({"month": "10"}, 400), ({"year": "26"}, 400),
                  ({"year": "abcd"}, 400), ({"year": "2026", "month": "13"}, 400), ({"year": "2026", "month": "0"}, 400),
                  ({"year": "2026", "month": "010"}, 400), ({"year": "2026", "page": "11"}, 400)]
         for query, status in cases:
@@ -440,17 +547,27 @@ class RouteTest(unittest.TestCase):
         _, second = self.get({"page": "2"})
         self.assertEqual([e["title"] for e in second["groups"][0]["episodes"]][-1], "Večerní zpravodaj 01. 10. 2026")
         self.assertIsNone(second["groups"][0]["nextPage"])
+        # 2024 has 42 episodes (20 November to 31 December): the whole year, newest first, paged (T51)
         _, older = self.get({"year": "2024"})
-        self.assertEqual((older["groups"][0]["periods"]["months"], older["groups"][0]["periods"]["month"]),
-                         ([12, 11], 12))
-        self.assertEqual(len(older["groups"][0]["episodes"]), 20)
-        _, november = self.get({"year": "2024", "month": "11"})
-        self.assertEqual([e["title"] for e in november["groups"][0]["episodes"]][::10],
-                         ["Večerní zpravodaj 30. 11. 2024", "Večerní zpravodaj 20. 11. 2024"])
+        self.assertEqual((older["groups"][0]["periods"]["months"], older["groups"][0]["periods"]["month"]), ([], None))
+        whole = []
+        for page in (1, 2, 3):
+            _, part = self.get({"year": "2024", "page": str(page)})
+            whole += [e["title"] for e in part["groups"][0]["episodes"]]
+            self.assertEqual(part["groups"][0]["nextPage"], page + 1 if page < 3 else None)
+        self.assertEqual(len(whole), 42)
+        self.assertEqual((whole[0], whole[20], whole[-1]), ("Večerní zpravodaj 31. 12. 2024",
+                                                           "Večerní zpravodaj 11. 12. 2024",
+                                                           "Večerní zpravodaj 20. 11. 2024"))
+        _, november = self.get({"year": "2024", "month": "11"})  # a stale month chip: ignored
+        self.assertEqual(november["groups"][0], older["groups"][0])
         self.assertNotEqual(body["groups"][0]["episodes"], older["groups"][0]["episodes"])
+        _, daily = self.get({"year": "2025"})  # 365 episodes: months
+        self.assertEqual((daily["groups"][0]["periods"]["months"], daily["groups"][0]["periods"]["month"]),
+                         (list(range(12, 0, -1)), 12))
 
     def test_never_an_empty_month(self):
-        _, body = self.get({"year": "2024"})
+        _, body = self.get({"year": "2025"})
         self.assertTrue(body["groups"][0]["periods"]["months"])
         self.assertIsNotNone(body["groups"][0]["periods"]["month"])
 

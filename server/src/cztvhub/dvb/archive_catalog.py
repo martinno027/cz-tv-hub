@@ -5,7 +5,8 @@ household's own recordings, in ČT's categories, one card per normalised title (
   time, answers cached 6 h (rows, sub-genres), 1 h (a show, its episodes), 10 min (a search); at most 3 pages of
   20 shows per row. Nothing of ČT's is stored on disk.
 - An episode list of more than 100 gets year/month periods (T32, ``EpisodePeriods``): ČT has no date filter, so a
-  year is found by bisection over its date-ordered list and read in chunks of 100, all kept for the show TTL.
+  year is found by bisection over its date-ordered list and read in chunks of 100, all kept for the show TTL. A
+  year of at most 100 episodes is shown whole, without months (T51).
 - Our recordings are ended programmes of the continuous recording (the gateway passes them in); the same cleaned
   title is one show. Their categories come from the stored TMDb match or the DVB genre, computed per answer and
   never stored (golden ``spec/fixtures/archive_cases.json``).
@@ -43,6 +44,7 @@ HOME_REC = 10  # our shows mixed into a home row (and per category page)
 EPISODE_PAGE = 20
 MAX_EPISODE_PAGES = 10
 PERIODS_OVER = 100  # more playable episodes than this: year and month chips (T32)
+YEAR_MONTHS_MIN = 101  # a year with fewer episodes is shown whole, without month chips (T51: ≤ 5 pages)
 CT_LIMIT = 100  # ČT's largest `limit` (2026-11-01: 100 works, 200 is a validation error)
 OLDEST_PROBE = 10  # the oldest episodes asked for the oldest year
 YEAR_MAX_CHUNKS = 30  # ≤ 3000 episodes of one year read (Události: ~475 a year)
@@ -915,7 +917,8 @@ class ArchiveCatalog:
              month: int | None = None) -> dict:
         """``ct:<id>`` or ``rec:<id>``; NotFound → 404, BadInput → 400, CtError → 502. The same answer for
         ``?season=&page=``: the ČT group then holds that page (the apps replace it on page 1, append later).
-        More than 100 episodes: the group has ``periods`` and holds a month's episodes (``year``/``month``)."""
+        More than 100 episodes: the group has ``periods`` and holds a month's episodes (``year``/``month``), or a
+        whole year's when the year has at most 100 (T51)."""
         kind, _, ident = card_id.partition(":")
         if kind == "rec":
             if year is not None or month is not None:
@@ -973,8 +976,9 @@ class ArchiveCatalog:
     def _periods(self, ident: str, season: str | None, year: int | None, month: int | None,
                  page: int) -> tuple[list[dict], bool, dict] | None:
         """(the month's page of episodes, more, ``periods``) or None when the list has none; BadPeriod for a year
-        or month it does not have. Default: the newest year, a year's newest month; a year found empty (also one
-        asked for again from a stale chip): the next older year with episodes, else the next newer."""
+        or month it does not have. A year of at most 100 episodes: its page of the whole year, ``months`` [] and
+        ``month`` None, any ``month`` ignored (T51). Default: the newest year, a year's newest month; a year found
+        empty (also one asked for again from a stale chip): the next older year with episodes, else the next newer."""
         index = self.ct.periods(ident, season)
         years = index.years()
         if not years:
@@ -997,15 +1001,20 @@ class ArchiveCatalog:
             year, month = _nearest(year, years), None
         else:
             return None
-        if month is None:
-            month = next(iter(by_month))
-        elif month not in by_month:
-            raise BadPeriod("unknown month")
-        episodes = by_month[month]
+        if sum(map(len, by_month.values())) < YEAR_MONTHS_MIN:
+            # T51: few episodes a year (a weekly show) is one list, newest first; a month from a stale chip is
+            # ignored. Months are newest first and each newest first, so joined they are the year newest first.
+            episodes, months, month = [e for eps in by_month.values() for e in eps], [], None
+        else:
+            if month is None:
+                month = next(iter(by_month))
+            elif month not in by_month:
+                raise BadPeriod("unknown month")
+            episodes, months = by_month[month], list(by_month)
         start = (page - 1) * EPISODE_PAGE
         more = page < MAX_EPISODE_PAGES and len(episodes) > start + EPISODE_PAGE
         return episodes[start:start + EPISODE_PAGE], more, {"years": index.years(), "year": year,
-                                                            "months": list(by_month), "month": month}
+                                                            "months": months, "month": month}
 
     def _show_without_ct(self, ident: str, exc: CtError) -> dict:
         """ČT is down: a show the archive listed that we also recorded still shows our episodes."""
