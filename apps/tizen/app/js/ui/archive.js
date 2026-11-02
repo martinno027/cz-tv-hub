@@ -5,13 +5,16 @@
  * item filters. The menu's rules are CT.ArchiveMenu (core, golden cases); this screen draws them, waits 0.4 s of
  * resting focus before changing the grid, and moves the focus between the menu, the sort chips, the search field and
  * the grid. A card opens the show page (show.js); a "Pokračovat" card plays at once. Without a gateway the tab only
- * says how to set one up.
+ * says how to set one up. While the grid waits for the gateway (T52, CT.Loading) its old cards stay, dimmed, under a
+ * loader shown after 150 ms, and they can still be focused and opened (the grid on screen, `shown()`); its next page
+ * has a small loader below the last row. "Pokračovat ve sledování" is this TV's own list and never waits.
  */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
   var A = CT.Archive;
   var M = CT.ArchiveMenu;
+  var L = CT.Loading;
   var Cards = CT.ArchiveCards;
   var el = Cards.el;
 
@@ -37,6 +40,8 @@
     var self = this;
     this.app = app;
     this.page = new CT.ShowPage(app, this);
+    // the grid's wait for the gateway (T52): the categories before the first grid, a page of cards
+    this.wait = new L.Wait(function () { self.renderLoading(); });
     // OK on a "Pokračovat" card: short = play from the position, long = "Odebrat z řady"
     this.press = new Cards.LongPress(function () { self.playContinue(); }, function () { self.offerRemove(); });
     this.reset();
@@ -59,6 +64,8 @@
     this.sortFocus = 0;
     this.visible = false;
     clearTimeout(this.debounce);
+    if (this.wait) this.wait.cancel();
+    this.dropStale();
     if (this.grid && this.grid.lines) this.grid.lines.clear();
     this.grid = emptyGrid(null);
     if (this.search) clearTimeout(this.search.timer);
@@ -106,6 +113,8 @@
     var generation = this.generation;
     if (!client) return;
     this.cats.loading = true;
+    // before the first menu the grid has nothing but this to wait for (a refresh later keeps the grid as it is)
+    var ticket = this.menu ? null : this.wait.begin(L.REPLACE);
     client.categories().then(function (list) {
       if (generation !== self.generation) return;
       self.cats = { list: list, loadedAt: Date.now(), loading: false, error: null };
@@ -114,9 +123,11 @@
       // the menu still has Hledat, Pokračovat and Naše nahrávky; the categories are asked for again next time
       self.cats = { list: self.cats.list || [], loadedAt: 0, loading: false, error: e.userMessage || A.FAILED };
     }).then(function () {
-      if (generation !== self.generation || !self.visible) return;
-      if (!self.menu || !self.sameCategories()) self.openMenu();
-      self.render();
+      if (generation !== self.generation) return;
+      // the grid's first page (asked by openMenu) carries the wait on; nothing asked = the wait is over
+      if (self.visible && (!self.menu || !self.sameCategories())) self.openMenu();
+      if (ticket !== null) self.wait.finish(ticket);
+      if (self.visible) self.render();
     });
   };
 
@@ -202,10 +213,11 @@
   ArchiveScreen.prototype.enterGrid = function () {
     var show = this.menu.grid.show;
     if (show === 'search') this.zone = 'field';
-    else if (this.grid.items.length) this.zone = 'grid';
+    else if (this.shown().items.length) this.zone = 'grid';
     else if (M.sorts(this.menu).length) this.zone = 'sorts';
     else return;
-    if (this.zone === 'grid') this.grid.focus = Math.min(this.grid.focus, this.grid.items.length - 1);
+    var g = this.shown();
+    if (this.zone === 'grid') g.focus = Math.min(g.focus, g.items.length - 1);
   };
 
   /** Back to the menu, on the selected item. */
@@ -249,17 +261,41 @@
     return ['category', r.slug, r.genre || '', r.sort].join(':');
   };
 
-  /** The grid follows the menu's selection (and the search text): loaded anew when it shows something else. */
+  /**
+   * The grid follows the menu's selection (and the search text): loaded anew when it shows something else. The
+   * cards on screen stay (dimmed under the loader, T52) until the new ones are there; a newer choice meanwhile keeps
+   * them too (they are what is on screen), the one waited for is dropped.
+   */
   ArchiveScreen.prototype.syncGrid = function () {
     if (!this.menu) return;
     var key = this.gridKey();
     if (this.grid.key === key) return;
-    if (this.grid.lines) this.grid.lines.clear();
-    this.grid = emptyGrid(key);
+    var old = this.grid;
     var r = M.request(this.menu);
+    var loads = r.kind === 'category' || (r.kind === 'search' && this.search.query !== null);
+    if (loads && !this.stale && old.lines && old.items.length) {
+      this.stale = old; // its built lines stay in the track
+    } else if (old.lines) {
+      old.lines.clear();
+    }
+    this.grid = emptyGrid(key);
+    if (!loads) {
+      this.wait.cancel(); // nothing to wait for: an older answer is dropped, its loader goes
+      this.dropStale();
+    }
     if (r.kind === 'continue') this.grid.items = this.app.resumeStore.continueRow();
-    else if (r.kind === 'category') this.loadPage(1);
-    else if (this.search.query !== null) this.loadPage(1);
+    else if (loads) this.loadPage(1);
+  };
+
+  /** The grid on screen: the old cards while new ones load (T52: still focused and opened), else the grid. */
+  ArchiveScreen.prototype.shown = function () {
+    return this.stale || this.grid;
+  };
+
+  /** The old cards kept on screen while new ones load go (the new ones, or an error, are there). */
+  ArchiveScreen.prototype.dropStale = function () {
+    if (this.stale && this.stale.lines) this.stale.lines.clear();
+    this.stale = null;
   };
 
   /** Page `page` of the grid's filter (a category, a sub-genre, our recordings or the search). */
@@ -270,11 +306,13 @@
     if (!client || (g.loading && page > 1)) return;
     var r = M.request(this.menu);
     var token = ++g.token;
+    var ticket = this.wait.begin(L.kindOfPage(page));
     var query = this.search.query;
     g.loading = true;
     var call = r.kind === 'search' ? client.search(query, page) : client.category(r.slug, r.sort, r.genre, page);
+    var newest = function () { return self.grid === g && g.token === token && self.wait.current(ticket); };
     call.then(function (answer) {
-      if (self.grid !== g || g.token !== token) return;
+      if (!newest()) return;
       if (r.kind === 'category' && r.slug !== M.RECORDINGS && page === 1 && (!r.genre || answer.genres.length)) {
         self.menu = M.withGenres(self.menu, r.slug, answer.genres); // the sub-menu's items
       }
@@ -285,10 +323,12 @@
       g.notice = answer.error;
       g.attribution = answer.attribution;
     }, function (e) {
-      if (self.grid !== g || g.token !== token) return;
+      if (!newest()) return;
       g.error = e.userMessage || A.FAILED;
     }).then(function () {
-      if (self.grid !== g || g.token !== token) return;
+      if (!newest()) return;
+      self.wait.finish(ticket);
+      self.dropStale(); // the new cards (or the error) instead of the old ones
       g.loading = false;
       if (!g.items.length && self.zone === 'grid') self.zone = M.sorts(self.menu).length ? 'sorts' : 'menu';
       if (self.app.tab === 'archive' && self.visible) self.render();
@@ -302,7 +342,7 @@
   };
 
   ArchiveScreen.prototype.isContinue = function () {
-    return this.grid.key === 'continue';
+    return this.shown().key === 'continue';
   };
 
   ArchiveScreen.prototype.model = function (item) {
@@ -312,8 +352,16 @@
   /** The grid built around the focus only: lines of 3 cards. */
   ArchiveScreen.prototype.renderGrid = function () {
     var self = this;
-    var g = this.grid;
     var view = $('ar-grid');
+    if (this.stale) {
+      // the old cards stay as built under the loader, and keep their focus
+      this.stale.lines.sync(this.zone === 'grid' ? Math.floor(this.stale.focus / GRID_COLS) : null);
+      view.classList.toggle('empty', false);
+      view.querySelector('.ar-note').textContent = '';
+      this.renderLoading();
+      return;
+    }
+    var g = this.grid;
     var track = view.firstChild;
     var rows = Math.ceil(g.items.length / GRID_COLS);
     if (!g.lines) {
@@ -345,16 +393,28 @@
     view.classList.toggle('empty', !g.items.length);
     var note = view.querySelector('.ar-note');
     note.textContent = this.gridNote();
+    this.renderLoading();
+  };
+
+  /** The grid's loader (T52): over the dimmed cards for new ones, small below the last row for the next page. */
+  ArchiveScreen.prototype.renderLoading = function () {
+    var view = $('ar-grid');
+    var place = this.app.dvbConfig ? this.wait.place() : 'none';
+    var shown = this.stale || this.grid;
+    view.classList.toggle('stale', !!this.stale);
+    view.classList.toggle('waiting', place === 'over');
+    Cards.loader(view, 'over', place === 'over');
+    Cards.loader(view.firstChild, 'below', place === 'below', Math.ceil(shown.items.length / GRID_COLS) * GRID_STEP_Y);
   };
 
   /** The line under (or instead of) the cards: an error, loading, the empty text. */
   ArchiveScreen.prototype.gridNote = function () {
     var g = this.grid;
     if (g.error) return g.error;
-    if (!this.menu) return this.cats.error || 'Načítám…';
+    if (!this.menu) return this.cats.error || ''; // loading: the loader (T52)
     var searching = this.menu.grid.show === 'search';
     if (searching && this.search.query === null) return '';
-    if (g.loading) return g.items.length ? 'Načítám další…' : 'Načítám…';
+    if (g.loading) return ''; // the loader over the grid or below its last row (T52)
     return g.items.length ? '' : M.emptyText(this.menu);
   };
 
@@ -393,7 +453,7 @@
 
   /** The cards visible on screen now (the grid's visible lines). */
   ArchiveScreen.prototype.visibleCards = function () {
-    var g = this.grid;
+    var g = this.stale || this.grid;
     if (this.isContinue()) return []; // this TV's own entries: no TMDb data
     var top = g.lines ? g.lines.top : 0;
     var visible = g.lines ? g.lines.visible : GRID_VISIBLE;
@@ -407,7 +467,7 @@
   ArchiveScreen.prototype.renderTmdb = function () {
     var on = !!this.app.dvbConfig && !this.page.isOpen() && this.visibleCards().some(A.showsTmdb);
     $('ar-tmdb').classList.toggle('hidden', !on);
-    $('ar-tmdb').lastChild.textContent = on ? this.grid.attribution || A.ATTRIBUTION : '';
+    $('ar-tmdb').lastChild.textContent = on ? (this.stale || this.grid).attribution || A.ATTRIBUTION : '';
   };
 
   ArchiveScreen.prototype.isActive = function () {
@@ -418,7 +478,7 @@
     if (this.page.isOpen()) return this.page.applyFocus();
     if (!this.app.dvbConfig) return;
     var active = this.isActive();
-    var g = this.grid;
+    var g = this.shown();
     var zone = this.zone;
     this.renderMenu();
     $('ar-search').classList.toggle('focused', active && zone === 'field');
@@ -517,7 +577,7 @@
       $('ar-search').blur();
       this.runSearch();
       this.zone = 'field';
-      if ((key === 'down' || key === 'done' || key === 'enter') && this.grid.items.length) this.zone = 'grid';
+      if ((key === 'down' || key === 'done' || key === 'enter') && this.shown().items.length) this.zone = 'grid';
       this.render();
       return true;
     }
@@ -551,7 +611,7 @@
       case 'up':
         return false;
       case 'down':
-        if (this.grid.items.length) this.zone = 'grid';
+        if (this.shown().items.length) this.zone = 'grid';
         break;
       case 'left':
         if (this.sortFocus > 0) this.sortFocus--;
@@ -577,7 +637,7 @@
       case 'up':
         return false;
       case 'down':
-        if (this.grid.items.length) this.zone = 'grid';
+        if (this.shown().items.length) this.zone = 'grid';
         break;
       case 'left':
         this.toMenu();
@@ -592,7 +652,7 @@
   };
 
   ArchiveScreen.prototype.onGridKey = function (key) {
-    var g = this.grid;
+    var g = this.shown();
     var col = g.focus % GRID_COLS;
     switch (key) {
       case 'up':
@@ -666,7 +726,8 @@
 
   /** The focused "Pokračovat" card's entry, or null. */
   ArchiveScreen.prototype.continueItem = function () {
-    return this.isContinue() && this.zone === 'grid' ? this.grid.items[this.grid.focus] || null : null;
+    var g = this.shown();
+    return this.isContinue() && this.zone === 'grid' ? g.items[g.focus] || null : null;
   };
 
   ArchiveScreen.prototype.playContinue = function () {
@@ -690,7 +751,7 @@
 
   /** "Pokračovat ve sledování" read again (an entry removed, a position saved), the focus kept where it can be. */
   ArchiveScreen.prototype.refreshContinue = function () {
-    if (!this.isContinue()) return;
+    if (this.grid.key !== 'continue') return; // not the old cards kept while others load
     var g = this.grid;
     g.items = this.app.resumeStore.continueRow();
     g.focus = Math.max(0, Math.min(g.focus, g.items.length - 1));

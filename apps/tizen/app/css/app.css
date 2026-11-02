@@ -1313,6 +1313,62 @@ main {
   bottom: 20px;
 }
 
+/*
+ * Loading is always visible (spec/apps.md T52): a ring in the accent colour (64 px on the TV, half below a list's
+ * last row) over the part that waits for the gateway (archive-cards.js Cards.loader), shown after 150 ms (JS); the
+ * part's old content stays, dimmed. Plain `animation` + `@keyframes` (unprefixed since Chromium 43; Tizen 4.0 = 56).
+ */
+.loader {
+  --loader-size: 64px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.loader::before {
+  content: '';
+  box-sizing: border-box;
+  width: var(--loader-size);
+  height: var(--loader-size);
+  border-radius: 50%;
+  border: calc(var(--loader-size) / 10) solid rgba(255, 255, 255, 0.16);
+  border-top-color: var(--accent);
+  animation: loader-spin 0.8s linear infinite;
+}
+
+@keyframes loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* over the part (the grid, the episode list) */
+.loader-over {
+  top: 0;
+  bottom: 0;
+}
+
+/* the next page: small, below the last row (inside the list's track; `top` from JS) */
+.loader-below {
+  --loader-size: 32px;
+  height: 76px;
+}
+
+/* the show page while it opens: in place of the page, under the head the card already fills */
+.loader-sh-opening {
+  top: 0;
+  bottom: 0;
+}
+
+.waiting > .ar-track {
+  opacity: 0.35;
+}
+
 /* Player */
 #player {
   position: absolute;

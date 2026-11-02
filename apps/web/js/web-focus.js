@@ -121,7 +121,8 @@
     { match: '.ar-card', focus: function (app, el) {
       var archive = app.screens.archive;
       archive.zone = 'grid';
-      archive.grid.focus = Number(el.dataset.index);
+      // the grid on screen: the old cards stay choosable while new ones load (T52)
+      (archive.stale || archive.grid).focus = Number(el.dataset.index);
       app.zone = 'content';
     }, long: function (app) {
       var archive = app.screens.archive;

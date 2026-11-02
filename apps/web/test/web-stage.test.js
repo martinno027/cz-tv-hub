@@ -29,12 +29,15 @@ test('"Otočte telefon na šířku.": an upright phone or a stage under 600 TV p
 });
 
 test('apply: stage transform and height, the overlay, the fit kept for the input', () => {
-  const stage = { style: {} };
+  const props = {};
+  const stage = { style: { setProperty: (k, v) => { props[k] = v; } } };
   const classes = new Set();
   const overlay = { textContent: '', classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)) } };
   assert.equal(S.apply(stage, overlay, { innerWidth: 1440, innerHeight: 900 }), false);
   assert.equal(stage.style.transform, 'translate(0px, 0px) scale(0.75)');
   assert.equal(stage.style.height, '1200px');
+  // the scale for what web.css sizes in screen px (the T52 loader: 40 px on screen = 53.3 stage px here)
+  assert.equal(props['--web-scale'], '0.75');
   assert.deepEqual(S.last, S.fit(1440, 900));
   assert.ok(!classes.has('visible'));
   S.apply(stage, overlay, { innerWidth: 390, innerHeight: 844 });

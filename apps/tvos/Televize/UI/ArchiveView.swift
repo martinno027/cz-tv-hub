@@ -3,7 +3,8 @@ import SwiftUI
 
 /// What the Archiv tab pushes: a show page.
 enum ArchiveRoute: Hashable {
-    case show(id: String)
+    /// `title`: the card's, shown at once while the page loads (T52).
+    case show(id: String, title: String? = nil)
 }
 
 /// The Archiv tab (spec/apps.md "Archiv"): iVysílání and our recordings from the gateway's `/dvb/archive`, as a menu on
@@ -30,8 +31,8 @@ struct ArchiveView: View {
             .navigationDestination(for: ArchiveRoute.self) { route in
                 if let client = model.archiveClient {
                     switch route {
-                    case .show(let id):
-                        ShowPageView(client: client, id: id)
+                    case .show(let id, let title):
+                        ShowPageView(client: client, id: id, knownTitle: title)
                     }
                 }
             }
@@ -110,7 +111,7 @@ private struct ArchiveBrowser: View {
                 ArchiveMenuScreen(client: client, menu: menu, categoriesError: categoriesError, open: open)
                     .id(generation)
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                CategoriesLoader()
             }
         }
         .onChange(of: opens) { _, _ in
@@ -160,6 +161,19 @@ private struct ArchiveBrowser: View {
     #endif
 }
 
+/// The categories on their way (the first opening): the loader after 150 ms (T52).
+private struct CategoriesLoader: View {
+    @State private var state = LoadingState()
+    @State private var shown = false
+
+    var body: some View {
+        ZStack { if shown { LoaderRing() } }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear { if !state.isWaiting { _ = state.begin() } }
+            .loaderDelay(state, shown: $shown)
+    }
+}
+
 /// Where the focus is in the tab: a menu item, the search field, the grid (its cards and chips); nil = outside the tab's
 /// content (the tab bar).
 enum ArchiveFocus: Hashable {
@@ -200,6 +214,8 @@ private struct ArchiveMenuScreen: View {
     @State private var pendingFocus: ArchiveFocus?
     /// The last arrow press inside the tab's content (the tab bar's presses do not come here).
     @State private var lastMove: ContinuousClock.Instant?
+    /// The grid's first page has waited 150 ms: the loader over it, the cards shown dimmed (T52).
+    @State private var gridLoader = false
 
     private struct GridKey: Equatable {
         let grid: ArchiveGridContent
@@ -219,11 +235,14 @@ private struct ArchiveMenuScreen: View {
                 menuColumn
                 gridArea(grid, query: query)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    // centred in the visible grid, not in the (long) list of cards
+                    .overlay { if gridLoader, grid != .continueWatching { LoaderRing() } }
             }
             if tmdb {
                 ArchiveAttribution(text: paging.attribution)
             }
         }
+        .loaderDelay(paging.loading, shown: $gridLoader)
         .onExitCommand(perform: exitAction(grid))
         .onMoveCommand { _ in lastMove = .now }
         .onChange(of: focus) { old, new in
@@ -391,8 +410,16 @@ private struct ArchiveMenuScreen: View {
         .focusSection()
     }
 
-    @ViewBuilder
+    /// The listed cards, or what stands for them; while a new list loads they stay, dimmed under the loader.
     private func pagedCards(_ grid: ArchiveGridContent) -> some View {
+        VStack(alignment: .leading, spacing: 30) {
+            pagedContent(grid)
+        }
+        .dimmedWhileLoading(gridLoader)
+    }
+
+    @ViewBuilder
+    private func pagedContent(_ grid: ArchiveGridContent) -> some View {
         if let notice = paging.notice {
             Text(notice).font(.headline).foregroundStyle(.secondary).accessibilityIdentifier("archive.notice")
         }
@@ -402,10 +429,12 @@ private struct ArchiveMenuScreen: View {
             if paging.loaded {
                 Text(grid.emptyText).font(.headline).foregroundStyle(.secondary).accessibilityIdentifier("archive.empty")
             } else {
-                ProgressView().frame(maxWidth: .infinity)
+                // nothing shown yet: room for the loader (T52)
+                Color.clear.frame(height: 400)
             }
         } else {
             ArchiveGrid(cards: paging.cards, focus: $focus, open: { away = true; open($0) }, nearEnd: paging.loadMore).equatable()
+            NextPageLoader(state: paging.more)
         }
     }
 
@@ -446,9 +475,13 @@ private struct ArchiveMenuScreen: View {
         case .continueWatching:
             paging.reset()
         case .search:
-            // results after 0.5 s without typing, at least 2 characters
-            paging.reset()
-            guard let query else { return }
+            // results after 0.5 s without typing, at least 2 characters; the last results stay while typing and
+            // are dimmed under the loader from the pause on (T52)
+            guard let query else {
+                paging.reset()
+                return
+            }
+            paging.stopWaiting()
             do { try await Task.sleep(for: ArchiveRules.searchDebounce) } catch { return }
             let client = client
             await paging.load { page in try await client.archiveSearch(query, page: page) }
@@ -456,7 +489,8 @@ private struct ArchiveMenuScreen: View {
             guard let slug = grid.slug else { return }
             let genre: String? = if case .category(_, let genre) = grid { genre } else { nil }
             let client = client, sort = sort ?? grid.sorts.first ?? .popular
-            await paging.load { page in try await client.archiveCategory(slug, sort: sort, genre: genre, page: page) }
+            guard await paging.load({ page in try await client.archiveCategory(slug, sort: sort, genre: genre, page: page) })
+            else { return }
             if case .category = grid, genre == nil, !paging.genres.isEmpty {
                 genres[slug] = paging.genres
                 menu.setGenres(paging.genres, for: slug)
@@ -466,7 +500,8 @@ private struct ArchiveMenuScreen: View {
 }
 
 /// Pages of cards (a search or a category): the first page, then more as the focus nears the end. A new `load`
-/// drops answers still on their way for the previous one.
+/// keeps the cards shown (dimmed under the loader, T52) until its first page comes and drops answers still on their
+/// way for the previous one.
 @MainActor
 @Observable
 final class ArchivePager {
@@ -480,13 +515,26 @@ final class ArchivePager {
     private(set) var notice: String?
     /// The first page could not be loaded.
     private(set) var failure: String?
+    /// A first page on its way (the loader over the grid).
+    private(set) var loading = LoadingState()
+    /// A next page on its way (the small loader below the last row).
+    private(set) var more = LoadingState()
     @ObservationIgnored private var nextPage: Int?
     @ObservationIgnored private var fetch: Fetch?
-    @ObservationIgnored private var generation = 0
-    @ObservationIgnored private var loadingMore = false
 
+    /// The cards shown stay, undimmed, but nothing is waited for (a search being typed, T52).
+    func stopWaiting() {
+        loading.cancel()
+    }
+
+    /// Nothing listed, nothing waited for.
     func reset() {
-        generation += 1
+        loading.cancel()
+        clear()
+    }
+
+    private func clear() {
+        more.cancel()
         cards = []
         genres = []
         loaded = false
@@ -494,36 +542,41 @@ final class ArchivePager {
         failure = nil
         nextPage = nil
         fetch = nil
-        loadingMore = false
     }
 
-    func load(_ fetch: @escaping Fetch) async {
-        reset()
-        self.fetch = fetch
-        let generation = generation
+    /// The first page of a new list; true when its answer (or error) is the one shown, false when a newer load
+    /// replaced it or it was cancelled.
+    @discardableResult
+    func load(_ fetch: @escaping Fetch) async -> Bool {
+        // the cards shown stay until the answer, but no longer page (their next page is another list's)
+        more.cancel()
+        nextPage = nil
+        let ticket = loading.begin()
         do {
             let page = try await fetch(1)
-            guard generation == self.generation else { return }
+            guard loading.finish(ticket) else { return false }
+            clear()
+            self.fetch = fetch
             apply(page)
             notice = page.error
-        } catch is CancellationError {
-            return
         } catch {
-            guard generation == self.generation else { return }
+            // cancelled: a newer load replaces it (its loader stays), or the grid is left and loads again on return
+            if error is CancellationError || Task.isCancelled { return false }
+            guard loading.finish(ticket) else { return false }
+            clear()
             failure = AppModel.message(for: error)
         }
         loaded = true
+        return true
     }
 
     /// The next page, if there is one and none is on its way.
     func loadMore() {
-        guard !loadingMore, let next = nextPage, let fetch else { return }
-        loadingMore = true
-        let generation = generation
+        guard !more.isWaiting, !loading.isWaiting, let next = nextPage, let fetch else { return }
+        let ticket = more.begin()
         Task {
             let page = try? await fetch(next)
-            guard generation == self.generation else { return }
-            loadingMore = false
+            guard more.finish(ticket) else { return }
             if let page { apply(page) }
         }
     }
@@ -654,7 +707,7 @@ struct ArchiveGrid: View, Equatable {
     var body: some View {
         LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 50) {
             ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
-                Button { open(.show(id: card.id)) } label: { ArchiveCardView(card: card).equatable() }
+                Button { open(.show(id: card.id, title: card.title)) } label: { ArchiveCardView(card: card).equatable() }
                     .buttonStyle(.card)
                     .focused(focus, equals: .grid(card.id))
                     .accessibilityIdentifier("archive.card.\(card.id)")

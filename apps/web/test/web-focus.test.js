@@ -98,6 +98,12 @@ test('one click acts in the Archiv: a menu item, a card; a click on nothing know
   assert.equal(app.screens.archive.zone, 'grid');
   assert.equal(F.act(app, node(['.ar-note']), false, ok), false);
   assert.deepEqual(sends, ['enter', 'enter']);
+  // T52: while new cards load, the old ones on screen stay clickable: the click focuses the grid on screen
+  app.screens.archive.stale = { focus: 0 };
+  F.act(app, node(['.ar-card'], null, { dataset: { index: '3' } }), false, ok);
+  assert.equal(app.screens.archive.stale.focus, 3);
+  assert.equal(app.screens.archive.grid.focus, 17); // not the grid still waited for
+  assert.deepEqual(sends, ['enter', 'enter', 'enter']);
 });
 
 test('one click acts on the show page year and month chips (T32): that chip focused, then OK', () => {

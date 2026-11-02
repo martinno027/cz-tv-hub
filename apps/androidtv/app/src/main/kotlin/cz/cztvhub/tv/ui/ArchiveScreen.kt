@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -77,12 +78,14 @@ import cz.cztvhub.core.PlayRequest
 import cz.cztvhub.core.ResumeCard
 import cz.cztvhub.core.ResumeRules
 import cz.cztvhub.core.archive.ArchiveCard
+import cz.cztvhub.core.archive.ArchiveGrid
 import cz.cztvhub.core.archive.ArchiveMenu
 import cz.cztvhub.core.archive.ArchiveMessages
 import cz.cztvhub.core.archive.ArchiveRules
 import cz.cztvhub.core.archive.ArchiveSort
 import cz.cztvhub.core.archive.CardSource
 import cz.cztvhub.core.archive.GridContent
+import cz.cztvhub.core.archive.LoaderPlace
 import cz.cztvhub.core.archive.MenuItem
 import cz.cztvhub.core.archive.MenuState
 import cz.cztvhub.core.archive.SearchBack
@@ -131,7 +134,8 @@ fun ArchiveScreen(viewModel: ArchiveViewModel, main: MainViewModel, onPlay: Play
     var removing by remember { mutableStateOf<ContinueItem?>(null) }
 
     val state = menu ?: run {
-        CenteredMessage(stringResource(R.string.loading))
+        // T52: the categories load, nothing to show yet: the ring alone (after the delay).
+        CenteredLoader(Modifier.fillMaxSize())
         return
     }
     val requesters = remember { HashMap<String, FocusRequester>() }
@@ -402,6 +406,7 @@ private fun Grid(
     key: (Int) -> Any,
     onLeftEdge: () -> Unit,
     onFocused: (Int) -> Unit = {},
+    more: Boolean = false,
     item: @Composable (Int, Modifier) -> Unit,
 ) {
     LazyVerticalGrid(
@@ -416,6 +421,8 @@ private fun Grid(
                 .let { if (index % GRID_COLUMNS == 0) it.leftEdge(onLeftEdge) else it }
             item(index, modifier)
         }
+        // T52: the next page's small ring below the last row.
+        if (more) item(key = "more", span = { GridItemSpan(maxLineSpan) }) { MoreLoader() }
     }
 }
 
@@ -632,20 +639,29 @@ private fun CardGrid(
     onRetry: () -> Unit,
     onLeftEdge: () -> Unit,
 ) {
-    when {
-        grid.cards.isEmpty() && grid.loading -> CenteredMessage(stringResource(R.string.loading))
-        grid.cards.isEmpty() && grid.error != null -> CenteredMessage(grid.error) {
-            Button(onClick = onRetry, modifier = Modifier.leftEdge(onLeftEdge)) { Text(stringResource(R.string.retry)) }
-        }
-        grid.cards.isEmpty() -> CenteredMessage(empty)
-        else -> Grid(
-            grid.cards.size,
-            key = { grid.cards[it].id },
-            onLeftEdge = onLeftEdge,
-            onFocused = { if (it >= grid.cards.size - ArchiveRules.PAGE_AHEAD) onMore() },
-        ) { index, modifier ->
-            val card = grid.cards[index]
-            ShowCard(card, images, imageOf, modifier) { onOpen(card) }
+    // T52: new content keeps the old cards (or text) dimmed under the ring; the next page adds a small ring below.
+    val place = rememberLoaderPlace(grid.wait)
+    val error = grid.error
+    LoadingBox(place, Modifier.fillMaxSize()) {
+        when {
+            grid.cards.isEmpty() && error != null -> CenteredMessage(error) {
+                Button(onClick = onRetry, modifier = Modifier.leftEdge(onLeftEdge)) { Text(stringResource(R.string.retry)) }
+            }
+            grid.cards.isEmpty() && !grid.loaded -> Unit
+            grid.cards.isEmpty() -> CenteredMessage(empty)
+            // A replaced grid starts from its top (a fresh list state per replacement).
+            else -> key(grid.listing) {
+                Grid(
+                    grid.cards.size,
+                    key = { grid.cards[it].id },
+                    onLeftEdge = onLeftEdge,
+                    onFocused = { if (it >= grid.cards.size - ArchiveRules.PAGE_AHEAD) onMore() },
+                    more = place == LoaderPlace.BELOW,
+                ) { index, modifier ->
+                    val card = grid.cards[index]
+                    ShowCard(card, images, imageOf, modifier) { onOpen(card) }
+                }
+            }
         }
     }
 }

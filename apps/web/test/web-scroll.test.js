@@ -34,7 +34,8 @@ test('the guide moves its view (px through the stage scale, whole rows), the foc
 test('the Archiv grid: one line per notch (capped step), the next page near the end, focus untouched', () => {
   let loaded = null;
   const lines = { top: 0, rows: 6, visible: 2, synced: 0, sync(row) { assert.equal(row, null); this.synced++; } };
-  const archive = { grid: { focus: 0, lines, nextPage: 2, loading: false }, loadPage: (p) => { loaded = p; }, renderTmdb() {} };
+  const archive = { grid: { focus: 0, lines, nextPage: 2, loading: false }, loadPage: (p) => { loaded = p; }, renderTmdb() {},
+    shown() { return this.grid; } };
   const views = S.views({ screens: { archive } }, {}, () => 1);
   assert.equal(views['#ar-grid'](0, 100), false); // 350 px a line, capped at 120: not yet
   assert.equal(views['#ar-grid'](0, 30), true);
@@ -46,6 +47,21 @@ test('the Archiv grid: one line per notch (capped step), the next page near the 
   assert.equal(archive.grid.focus, 0);
   assert.equal(views['#ar-grid'](0, -1000), true);
   assert.equal(lines.top, 0);
+});
+
+test('the Archiv grid while new cards load (T52): the wheel scrolls the dimmed old cards, no next page for them', () => {
+  let loaded = null;
+  const oldLines = { top: 0, rows: 6, visible: 2, sync() {} };
+  const newLines = { top: 0, rows: 0, visible: 2, sync() {} };
+  const old = { focus: 0, lines: oldLines, nextPage: 2, loading: false };
+  const archive = { grid: { focus: 0, lines: newLines, nextPage: null, loading: true }, loadPage: (p) => { loaded = p; },
+    renderTmdb() {}, shown() { return old; } };
+  const views = S.views({ screens: { archive } }, {}, () => 1);
+  views['#ar-grid'](0, 240);
+  views['#ar-grid'](0, 240);
+  assert.equal(oldLines.top, 4);
+  assert.equal(newLines.top, 0);
+  assert.equal(loaded, null);
 });
 
 test('viewAt: the TV\'s virtual lists; everything else scrolls natively', () => {
