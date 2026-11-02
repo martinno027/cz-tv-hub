@@ -36,10 +36,11 @@ or Poslanecká sněmovna Parlamentu ČR.
 - The household web app in a browser (`/web/`, approved by the user on 2026-11-01, T27): a page from the household's
   gateway cannot ask CT's API itself (CT allows its API only for its own web pages), so the gateway asks the same API
   the apps use, with the same fixed request and the project's honest user agent, and hands CT's answer to the page
-  unchanged, including CT's DRM, licence and blocking answers. Stream links go only to browsers on the home network,
-  never over the tailnet or to anyone else; the browser then plays straight from CT's CDN, and video never passes
-  through the gateway. The links stay at most 60 s in the gateway's memory and are never written or logged. Away from
-  home the web shows the programme and a link to iVysílání instead. The gateway is not a Tailscale exit node for CT
+  unchanged, including CT's DRM, licence and blocking answers. Stream links go to every browser with the app key, at
+  home and away (decided by the user on 2026-11-02, replacing the T27 home-only rule: „brána dá ČT vždycky!!! už
+  jsem řekl! neotravuj mě s tím"); when CT refuses a link, the web shows CT's own error and a link to iVysílání. The
+  browser plays straight from CT's CDN, and video never passes through the gateway. The links stay at most 60 s in
+  the gateway's memory and are never written or logged. The gateway is not a Tailscale exit node for CT
   (that would route CT's video through the household's line and lift CT's Czech-only limit abroad).
 
 ## DVB-T2 (antenna)

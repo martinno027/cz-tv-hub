@@ -35,6 +35,12 @@ if ! sudo test -f /etc/cztvhub/cztvhub.conf; then
 fi
 
 sudo cp deploy/cztvhub.service /etc/systemd/system/cztvhub.service
+# HTTPS on 8443 for the installed web app (T47): a root job puts the Pi's Tailscale certificate into
+# /var/lib/cztvhub/tls/ daily; the gateway serves HTTPS once it is there. Harmless without Tailscale or with HTTPS
+# certificates off in the tailnet: the job fails with the reason, the plain port works as before.
+sudo install -m 0755 deploy/cert.sh /opt/cztvhub/cert.sh
+sudo install -m 0644 deploy/cztvhub-cert.service /etc/systemd/system/cztvhub-cert.service
+sudo install -m 0644 deploy/cztvhub-cert.timer /etc/systemd/system/cztvhub-cert.timer
 
 # The update from /admin (spec/dvb-gateway.md, T33): a path unit for the gateway's request file and a root oneshot
 # that runs this clone's deploy/update.sh as its owner. Only for a git clone with a plain path (it goes into the
@@ -52,6 +58,7 @@ else
 fi
 sudo systemctl daemon-reload
 sudo systemctl enable cztvhub
+sudo systemctl enable --now cztvhub-cert.timer
 if [[ -n ${update_units:-} ]]; then
   sudo systemctl enable --now cztvhub-update.path
   echo "update from /admin: installed (clone $repo, owner $owner)"
@@ -61,6 +68,13 @@ source deploy/health.sh
 restarted=$(date '+%Y-%m-%d %H:%M:%S')
 sudo systemctl restart cztvhub
 wait_for_health "$(service_port /etc/cztvhub/cztvhub.conf)" 30 "$restarted"
+# The certificate now (the service made /var/lib/cztvhub); the gateway picks it up within a minute. Its reason is
+# printed when it cannot: not a failed install.
+if sudo timeout 300 bash /opt/cztvhub/cert.sh; then
+  echo "https: certificate in place; the web app also answers on https://<MagicDNS name>:8443/web/"
+else
+  echo "https: off (reason above); the plain port is not affected" >&2
+fi
 # Written only once the service answers: the commit of the last install that worked, for /admin's version line
 # and the update's "nothing new" check (a failed install is tried again by the next update).
 commit=$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)

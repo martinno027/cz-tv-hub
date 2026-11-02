@@ -1,19 +1,21 @@
 """Tiny HTTP server: playlist + per-channel redirect to a fresh signed stream URL.
 
 With DVB enabled in the config it also serves the ``/dvb/*`` gateway (spec/dvb-gateway.md),
-and with ``[admin] password`` the channel administration at ``/admin``.
+and with ``[admin] password`` the channel administration at ``/admin``. With the Tailscale certificate in
+``/var/lib/cztvhub/tls/`` the same handler also answers HTTPS on port 8443 (tls.py, T47).
 """
 from __future__ import annotations
 
 import http.server
 import re
 import socketserver
+import ssl
 import sys
 import traceback
 import urllib.parse
 from typing import TYPE_CHECKING
 
-from . import logsafe
+from . import logsafe, tls
 from .api import StreamError, StreamResolver
 from .channels import BY_ID
 from .dvb.profiles import MAX_BODY  # the largest body: a profile's 64 KB settings plus its wrapper
@@ -60,7 +62,8 @@ def make_handler(resolver: StreamResolver, gateway: DvbGateway | None = None, ad
                 return self._send(200, b"ok\n")
             if path in ("/playlist.m3u", "/ct.m3u"):
                 host = self.headers.get("Host") or "127.0.0.1"
-                body = build_playlist(f"http://{host}").encode("utf-8")
+                scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
+                body = build_playlist(f"{scheme}://{host}").encode("utf-8")
                 return self._send(200, body, "audio/x-mpegurl; charset=utf-8")
             match = STREAM_RE.match(path)
             if match and match.group(1) in BY_ID:
@@ -177,19 +180,36 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def serve(host: str, port: int, resolver: StreamResolver | None = None, gateway: DvbGateway | None = None,
-          admin: AdminSite | None = None, web: WebSite | None = None):
-    server = Server((host, port), make_handler(resolver or StreamResolver(), gateway, admin, web))
+          admin: AdminSite | None = None, web: WebSite | None = None, https_port: int = tls.HTTPS_PORT,
+          tls_dir=tls.TLS_DIR):
+    handler = make_handler(resolver or StreamResolver(), gateway, admin, web)
+    server = Server((host, port), handler)
+    https = https_listener(host, https_port, tls_dir, handler)
     if gateway is not None:
         gateway.start()
     dvb = ", DVB gateway: /dvb/" if gateway is not None else ""
     dvb += ", admin: /admin" if admin is not None else ""
     dvb += ", web: /web/" if web is not None and web.enabled else ""
     print(f"cz-tv-hub listening on {host}:{port}  (playlist: /playlist.m3u{dvb})", flush=True)
+    https.start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        https.stop()
         if gateway is not None:
             gateway.stop()
+
+
+def https_listener(host: str, port: int, tls_dir, handler, log=print, retry: float = tls.RETRY_SECONDS):
+    """The HTTPS listener for ``handler`` (the plain port's handler class): off until the certificate is there."""
+    server_class = tls.https_server_class(Server)
+
+    def make_server(address, files):
+        server = server_class(address, handler)
+        server.tls = files
+        return server
+
+    return tls.HttpsListener(host, port, tls.TlsFiles(tls_dir, log=log), make_server, log=log, retry=retry)

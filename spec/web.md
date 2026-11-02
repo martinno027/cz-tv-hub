@@ -82,7 +82,9 @@ zobrazení")
   `display: standalone`, dark theme colour, icons 192/512 px and a maskable one, from the app's icon) and
   `<meta name="apple-mobile-web-app-capable">` + `apple-touch-icon`, so Chrome/Edge "Vytvořit zástupce → Otevřít jako
   okno" and Safari "Přidat do Docku" (macOS) / "Přidat na plochu" (iOS) open Televize in its own window without the
-  address bar. Over plain HTTP (the Pi on the LAN or the tailnet) browsers do not offer a real "install"; no
+  address bar. Over plain HTTP (port 8098) browsers do not offer a real "install"; over HTTPS on 8443 with the
+  Pi's Tailscale certificate (T47, `spec/dvb-gateway.md`) they do (Chrome/Edge "Nainstalovat"), alongside the T46
+  own window (⧉), which stays. No
   service worker, no offline cache (nothing to cache; video never cached). Nastavení → Server gets one line on how
   ("Vlastní okno bez lišty: v Chrome ⋮ → Uložit a sdílet → Vytvořit zástupce → Otevřít jako okno; v Safari Soubor →
   Přidat do Docku."). In such a window, the app's own ⛶ still toggles full screen; leaving the window = closing it.
@@ -109,16 +111,11 @@ zobrazení")
   checked 2026-11-01: no `Access-Control-Allow-Origin` for any other origin). So the web asks **the gateway**, which
   calls the same ČT API the apps call and passes ČT's answer through unchanged (`spec/dvb-gateway.md` "ČT for the
   web"). The schedule (guide) works everywhere.
-- **Playing**: **only on the home network, enforced by the gateway** (legal-guard 2026-11-01): it hands out ČT's
-  stream answers only to browsers on the home LAN, never over the tailnet. ČT's signed URLs are meant for the IP
-  that asked (`skipIpAddressCheck=false`, never tested from a second IP), so the project does not rely on ČT to
-  enforce it. ČT's CDN allows any origin (`Access-Control-Allow-Origin: *`, checked 2026-11-01). Away from home (or
-  at home through the tailnet address) the player shows "ČT jde v prohlížeči přehrát jen doma. Mimo domov použijte
-  aplikaci Televize nebo iVysílání." with **Otevřít v iVysílání**. Video is never relayed through the gateway (hard
-  rule). Using the Pi as a Tailscale exit node is **not** part of T27 and would need its own legal review: it would
-  route ČT's video through the household's line, make ČT's IP-bound URLs work away from home and lift ČT's
-  Czech-only limit abroad.
-- **Gateway errors**: the gateway's own `{"error": …}` answers (401 wrong key, 403 not at home, 502 ČT down) are
+- **Playing**: **always, at home and away** (owner 2026-11-02: „brána dá ČT vždycky“, replacing the T27
+  home-only rule): the gateway hands ČT's stream answer to every web client with the key; the browser plays the
+  signed CDN URL itself (ČT's CDN allows any origin). If ČT refuses an IP-bound URL, the player shows ČT's own
+  error with **Otevřít v iVysílání**. Video is never relayed through the gateway (hard rule).
+- **Gateway errors**: the gateway's own `{"error": …}` answers (401 wrong key, 403 worker key, 502 ČT down) are
   turned by the web transport into ČT's error shape with the gateway's text; ČT's own answers pass unchanged.
 - **Otevřít v iVysílání**: on ČT programme pages by the shared rule (programmes that have started) and in the ČT
   player's error, as on Apple TV/Android TV (the Archiv show page: not in T27);

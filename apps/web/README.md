@@ -40,8 +40,7 @@ node --test apps/tizen/test/*.test.js    # Samsung zůstává zelený
 
 Ukázka v prohlížeči (jen fixtury, nikdy skutečná ČT ani brána): server, který mapuje `/web/` → `apps/web/`,
 `/web/app/` → `apps/tizen/app/` a `/web/fixtures/` → `spec/fixtures/`, pak `http://localhost:<port>/web/?demo`.
-Parametry ukázky jsou ty ze Samsungu (`apps/tizen/README.md`), navíc `?demo&ct=away` = brána odpoví jako mimo
-domov (403 a její text u živého vysílání i archivu ČT). `js/build-info.js` (řádek verze) zapisuje instalace
+Parametry ukázky jsou ty ze Samsungu (`apps/tizen/README.md`). `js/build-info.js` (řádek verze) zapisuje instalace
 brány; bez něj „vývojová verze (web)“.
 
 ## Third-party

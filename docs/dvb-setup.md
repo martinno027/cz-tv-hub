@@ -290,13 +290,14 @@ Aktualizaci může spustit jen ten, kdo zná heslo `/admin`. Tlačítko nainstal
 
 - Port 8098 **nikdy nepřesměrovávejte na routeru** a nepoužívejte Tailscale Funnel ani sdílení zařízení
   s jinými účty. Jiná domácnost (např. příbuzní na chalupě) potřebuje vlastní tuner.
-- V Tailscale (Access controls) povolte přístup k Raspberry jen členům domácnosti, např.:
+- V Tailscale (Access controls) povolte přístup k Raspberry jen členům domácnosti, např. (8443 je HTTPS pro web
+  nainstalovaný jako aplikace, kapitola 6a):
 
 ```json
 {
   "tagOwners": {"tag:tv": ["autogroup:admin"]},
   "acls": [
-    {"action": "accept", "src": ["group:domacnost"], "dst": ["tag:tv:8098"]}
+    {"action": "accept", "src": ["group:domacnost"], "dst": ["tag:tv:8098,8443"]}
   ],
   "groups": {"group:domacnost": ["clen1@example.com", "clen2@example.com"]}
 }
@@ -398,11 +399,28 @@ zapnutá Anténa (`[dvb]`); `install.sh` ji nainstaluje do `/opt/cztvhub/web`.
    i klávesnicí (šipky, Enter = OK, Esc nebo Backspace = Zpět, číslice = číslo kanálu, mezerník = pauza).
    Telefon otočte na šířku.
 
-**ČT jde v prohlížeči přehrát jen doma.** TV průvodce ČT funguje všude, ale živé vysílání i archiv ČT web přehraje
-jen na zařízení připojeném do domácí sítě. Přes Tailscale (i doma, když stránku otevřete adresou z Tailscale
-`100.…`) ukáže „ČT jde v prohlížeči přehrát jen doma. Mimo domov použijte aplikaci Televize nebo iVysílání.“
-a tlačítko **Otevřít v iVysílání**. Důvod: odkaz na vysílání ČT vydá ČT pro adresu, ze které se Raspberry ptá,
-a brána ho dává jen zařízením z domácí sítě; video ČT přes Raspberry nikdy neposílá.
+**Web jako aplikace (vlastní okno bez lišty prohlížeče).** Tlačítko pro vlastní okno ve webu funguje jako dosud,
+na `http://` i `https://`. Navíc lze web **nainstalovat** (Chrome/Edge: ikona instalace v adresním řádku, Safari:
+Sdílet → Přidat na plochu / do Docku); prohlížeče to nabízejí jen na zabezpečené adrese (HTTPS). Raspberry ji umí
+na portu **8443** s certifikátem z Tailscale:
+
+1. V administraci Tailscale zapněte **DNS → MagicDNS** a **DNS → HTTPS Certificates** (jednou pro celý tailnet).
+   Certifikáty vydává Let's Encrypt a jejich jména jsou ve veřejném seznamu certifikátů: jméno Raspberry
+   a tailnetu tak bude vidět, přístup k Raspberry tím ale nikdo nezíská.
+2. Na Raspberry spusťte `bash server/deploy/install.sh` (nebo počkejte na denní obnovu `cztvhub-cert.timer`).
+   Vypíše `cert: <jméno>.<tailnet>.ts.net installed …`; když to nejde, vypíše důvod a `https: off …` a web na
+   portu 8098 běží dál beze změny.
+3. Na počítači nebo telefonu se zapnutým Tailscale otevřete `https://<jméno-raspberry>.<tailnet>.ts.net:8443/web/`
+   (celé jméno ukáže `tailscale status` nebo administrace Tailscale u Raspberry) a web nainstalujte.
+4. Na nové adrese zadejte v **Nastavení → Server** znovu **Klíč**: prohlížeč si ho pamatuje pro každou adresu zvlášť.
+
+Adresa s `.ts.net` funguje jen v tailnetu (i doma s aplikací Tailscale), z internetu ne. Certifikát se obnovuje
+sám; brána nový certifikát převezme bez restartu. Ověření na Raspberry: `systemctl status cztvhub-cert.service`
+a `journalctl -u cztvhub | grep "https:"` (`https: listening on 0.0.0.0:8443 …`).
+
+**ČT na webu hraje všude**, doma i mimo domov (přes Tailscale): TV průvodce, živé vysílání i archiv ČT. Když ČT
+některou adresu odmítne, ukáže se chyba ČT a tlačítko **Otevřít v iVysílání**. Video ČT přes Raspberry nikdy
+neposílá: prohlížeč ho bere přímo od ČT.
 
 **Anténa je v kódování H.265 (HEVC).** Přehraje ji Safari (Mac, iPhone, iPad) a Chrome nebo Edge na počítači, který
 HEVC umí (většina novějších). Kde to prohlížeč neumí (často Firefox), web místo černého obrazu napíše „Tento

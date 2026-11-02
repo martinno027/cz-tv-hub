@@ -1,0 +1,13 @@
+# Daily run of cztvhub-cert.service: `tailscale cert` hands out a new certificate when the old one nears its expiry
+# (Let's Encrypt, 90 days); on the other days the files stay as they are.
+[Unit]
+Description=cz-tv-hub: daily Tailscale HTTPS certificate renewal
+
+[Timer]
+OnBootSec=5min
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
