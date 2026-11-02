@@ -316,6 +316,43 @@ TVHeadend is the only state, so hiding a channel there by hand has the same effe
   reads nothing it wrote). The status file holds no secrets. Whoever can push to `main` on GitHub decides what
   root runs on the Pi — as with the manual `git pull && install.sh`, now one click away.
 
+## Connection manual from `/admin` (T49, owner 2026-11-02: „tlačítko, které vytvoří txt soubor s manuálem pro připojení k danému serveru")
+- **What**: tab **„Návod"** on `/admin` with the button **„Stáhnout návod pro připojení (TXT)"**: a plain-text
+  manual (Czech, UTF-8 without BOM, LF line ends) that tells someone how to connect every variant to **this** gateway,
+  with the app key filled in, so the admin can hand it to whoever should have access.
+- **Route**: `POST /admin/api/manual` (admin login, `X-Cztvhub-Admin: 1`, same origin, as every admin action; body
+  ignored; a POST, so a link or `<img>` on a foreign page cannot trigger it and the key is never in a URL) → `200`
+  `text/plain; charset=utf-8`, `Content-Disposition: attachment; filename="televize-pripojeni.txt"`,
+  `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. Other methods `405`. Logged
+  `admin: connection manual downloaded` (the journal's time is the when; there is one admin login, so no who; never
+  the key, an address or the text). The page fetches it and saves it as `televize-pripojeni.txt` (a blob link; the
+  page's CSP forbids forms).
+- **What it holds** (`dvb/manual.py`: `gather()` collects a small `ManualInfo`, the pure `manual_text()` writes it):
+  - first line a single warning: the file contains the key, give it only to people who should have access;
+  - the date (Prague) and the gateway version (the commit of `/opt/cztvhub/install.json`, as the „Aktualizace" tab;
+    „neznámá" without it);
+  - **addresses**: home LAN = the Pi's mDNS name `<hostname>.local` (from `socket.gethostname()`, first label, only
+    `[a-z0-9-]`; avahi advertises that name) and its private IPv4 LAN addresses (the source address the kernel
+    picks for an outgoing route plus what the hostname resolves to, private ranges only, loopback and Tailscale's
+    100.64.0.0/10 left out; no packet is sent), port `[server] port`; tailnet = `Self.DNSName` (trailing dot
+    removed, the `cert.sh` pattern) and `Self.TailscaleIPs` from `tailscale status --json` (a subprocess with a 5 s
+    timeout, an answer over 4 MB ignored, only those fields read and checked; no `tailscale`, an error, a timeout, `BackendState` other
+    than `Running` or no name → the section says „Tailscale na Raspberry nebylo zjištěno" with the reason and the
+    tailnet variants say they need it); HTTPS = `https://<DNSName>:8443/web/` only when the certificate pair of
+    `tls.py` is in `/var/lib/cztvhub/tls/`, else a note that HTTPS is off and how to switch it on (Tailscale admin
+    DNS → HTTPS Certificates, then `sudo systemctl start cztvhub-cert.service`);
+  - **the app key** `[dvb] key` (what Nastavení → Server „Klíč brány" takes). **Never** the admin password, the
+    ad-break worker key, the TMDb key (config or `/admin`), the TVHeadend password or a profile password;
+  - **steps per variant**, with the apps' own labels: Apple TV, Android TV (address + key, „Uložit a ověřit";
+    „Připojovat přes Tailscale" with the QR login or „Přihlásit klíčem" with an auth key the reader creates in the
+    Tailscale admin console, Settings → Keys — none is put in the file), Samsung TV (home LAN only), web at home,
+    web through the tailnet (the Tailscale app on that computer), web over HTTPS installed as an app (Chrome/Edge
+    „Nainstalovat", Safari „Přidat do Docku"), the Kodi add-on (needs neither the gateway nor the key) and the PVR
+    playlist `/playlist.m3u` (ČT live only, home LAN only, no key).
+- Security (SECURITY-REVIEW "Secrets"): this is a way the app key leaves the Pi: only to the logged-in admin, POST
+  with the admin header, `no-store`, logged without the key. What the admin does with the file is the owner's
+  decision (who may have access, T12).
+
 ## Profiles (T08, `src/cztvhub/dvb/profiles.py`)
 A household member can keep the TV apps' settings in a **profile** on the Pi and load them on any TV by signing in
 with name + password. Only settings travel (channel order/hidden/sources and the other Nastavení switches, below),
