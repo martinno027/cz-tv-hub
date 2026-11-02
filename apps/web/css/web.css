@@ -83,6 +83,58 @@ body.web #stage.section-open #screen-settings h1.page-title {
   margin-left: 0;
 }
 
+/* Own window (T46): ⧉ „Samostatné okno" before ⛶ in the tab bar; in the popup ⧈ „Zpět do prohlížeče" */
+.web-window {
+  font-size: 26px;
+  line-height: 1;
+  padding: 12px 18px;
+  margin-left: 24px;
+  border-radius: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.web-osd-row .web-window {
+  margin-left: 0;
+  margin-right: 16px;
+}
+
+.web-window.web-window-back {
+  border: 2px solid var(--muted);
+}
+
+/* The tab that gave the app to the popup: one line over the whole page (unscaled, outside the stage) */
+#web-elsewhere {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 22px;
+  text-align: center;
+}
+
+#web-elsewhere.visible {
+  display: flex;
+}
+
+#web-elsewhere .web-elsewhere-text {
+  margin: 0;
+}
+
+#web-elsewhere .button {
+  font-size: 20px;
+  padding: 12px 28px;
+  cursor: pointer;
+}
+
 /* Mute (spec/apps.md "Mute (T34)"): 🔊/🔇 before the fullscreen button; the Samsung's yellow-key button is not shown */
 .web-mute {
   font-size: 34px;
@@ -108,6 +160,7 @@ body.web .ch-btn:hover,
 body.web .ar-menu-item:hover,
 body.web .audio-item:hover,
 body.web .web-fullscreen:hover,
+body.web .web-window:hover,
 body.web .web-mute:hover,
 body.web .web-back-link:hover {
   background: var(--surface-hi);

@@ -2,8 +2,9 @@
  * The web page's own controls and wiring (spec/web.md "Input (T29)", "Layout (T31)", "Fullscreen"): a "‹ Zpět"
  * link inside the headers that need one (a Nastavení section, the Archiv show page, the player bar; the programme page
  * has its own Zpět button, the Archiv sub-menu its "‹ <category>" item), the fullscreen button at the right end of the tab bar and in the player bar,
- * the mute button (🔊/🔇, spec/apps.md "Mute (T34)") before it in the player bar, and the input, history
- * and fullscreen glue. No strip or overlay over the TV layout.
+ * the mute button (🔊/🔇, spec/apps.md "Mute (T34)") before it in the player bar, the own-window button ⧉/⧈ before
+ * ⛶ in the tab bar with the tab's „běží v samostatném okně" line (T46, web-window.js), and the input, history and
+ * fullscreen glue. No strip or overlay over the TV layout (the T46 line covers the page only while a popup has it).
  */
 (function (root) {
   'use strict';
@@ -57,13 +58,20 @@
     var show = doc.getElementById('show');
     show.insertBefore(el(doc, 'div', 'web-back-link', BACK), show.firstChild);
     var top = doc.getElementById('top');
+    top.appendChild(el(doc, 'div', 'web-window web-window-top hidden'));
     top.appendChild(el(doc, 'div', 'web-fullscreen web-fullscreen-top'));
+    var line = el(doc, 'div', 'web-elsewhere');
+    line.id = 'web-elsewhere';
+    line.appendChild(el(doc, 'p', 'web-elsewhere-text', CT.WebWindow.ELSEWHERE));
+    line.appendChild(el(doc, 'div', 'button web-elsewhere-return', CT.WebWindow.RETURN));
+    doc.body.appendChild(line);
     var osd = doc.getElementById('osd');
     var row = el(doc, 'div', 'web-osd-row');
     row.appendChild(el(doc, 'div', 'web-back-link', BACK));
     var right = el(doc, 'div', 'web-osd-buttons');
     var mute = el(doc, 'div', 'web-mute');
     right.appendChild(mute);
+    right.appendChild(el(doc, 'div', 'web-window web-window-player hidden'));
     right.appendChild(el(doc, 'div', 'web-fullscreen web-fullscreen-player'));
     row.appendChild(right);
     osd.insertBefore(row, osd.firstChild);
@@ -98,8 +106,10 @@
       }, 0);
     };
     CT.WebDnd.install(doc, app); // Kanály: drag and drop (T31)
+    var own = ownWindow(doc, win, app);
     var input = CT.WebInput.install(doc, app, {
       history: win.history,
+      window: own,
       scale: function () { return CT.WebStage.last ? CT.WebStage.last.scale : 1; },
       onChange: sync
     });
@@ -140,7 +150,34 @@
     if (win.MutationObserver) new win.MutationObserver(syncShowBack).observe(doc.getElementById('sh-buttons'), { childList: true });
     // capture: also the first key, which only shows the focus (web-input.js stops it before the app)
     doc.addEventListener('keydown', function () { setTimeout(function () { revealFocus(doc, app); }, 0); }, true);
-    return { tracker: tracker, input: input };
+    return { tracker: tracker, input: input, window: own };
+  }
+
+  /**
+   * The own window (T46): the controller, its button and line; while the line is up the keyboard only knows
+   * Enter/Space („Vrátit sem"), so nothing plays under it (registered before web-input.js's own key handler).
+   */
+  function ownWindow(doc, win, app) {
+    var own = new CT.WebWindow.Controller(win, {
+      stopPlayer: function () {
+        if (app.player && app.player.isOpen()) app.player.close();
+      },
+      render: function (c) {
+        CT.WebWindow.render(c, Array.prototype.slice.call(doc.querySelectorAll('.web-window')),
+          doc.getElementById('web-elsewhere'));
+      },
+      toast: function (text) { app.toast(text); },
+      playing: function () { return playing(app.player); },
+      play: function (what) { playHere(app, what); }
+    });
+    doc.addEventListener('keydown', function (e) {
+      if (!own.elsewhere || e.ctName) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // the browser's shortcuts stay
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) own.returnHere();
+    }, true);
+    return own.start();
   }
 
   /**
@@ -191,5 +228,64 @@
     }
   }
 
-  CT.WebPage = { BACK: BACK, adapt: adapt, renderMute: renderMute, wire: wire, reopen: reopen, relayout: relayout, needsBackLink: needsBackLink, hint: hint, playerHint: playerHint };
+  /**
+   * What plays now, for the popup to take over (T46): the request and, once the stream is there, the position as the
+   * app keeps it when it goes to the background (player.js suspend: a timeline's point, a recording's/archive's
+   * position, nothing for live). Null without a player.
+   */
+  function playing(player) {
+    if (!player || !player.isOpen() || !player.request) return null;
+    var out = { request: player.request, resumeMs: null, timelineAt: null };
+    if (!player.target) return out; // still loading: from where the request itself starts
+    try {
+      out.timelineAt = player.tl ? player.tl.continueAt() : null;
+      out.resumeMs = player.resumePosition();
+    } catch (e) {
+      out.timelineAt = null;
+      out.resumeMs = null;
+    }
+    return out;
+  }
+
+  /** Replaces `obj[name]` for its next call only (`fn(original, args)`), then puts the original back. */
+  function once(obj, name, fn) {
+    var own = Object.prototype.hasOwnProperty.call(obj, name);
+    var original = obj[name];
+    obj[name] = function () {
+      if (own) obj[name] = original;
+      else delete obj[name];
+      return fn(original, Array.prototype.slice.call(arguments));
+    };
+  }
+
+  /**
+   * In the popup: play what the tab handed over, through the player's own "continue at" path (player.js onError:
+   * `timelineAt` + `load(…, resumePosition())`), so the planner decides: a timeline window around the point, a
+   * recording/archive/timeshift at the position, live as live. The player's first load is that one (no second
+   * request to ČT or the gateway). When the planner cannot open the timeline window there any more, the request
+   * plays as it says (its own start).
+   */
+  function playHere(app, what) {
+    if (!what || !what.request) return;
+    var player = app.player;
+    var planner = app.planner;
+    var at = what.timelineAt || null;
+    var resumeMs = typeof what.resumeMs === 'number' ? what.resumeMs : null;
+    if (at || resumeMs !== null) {
+      once(player, 'load', function (load) { // open()'s load, with the position
+        player.timelineAt = at;
+        return load.call(player, false, resumeMs);
+      });
+      if (at) {
+        once(planner, 'timelineWindow', function (timelineWindow, args) { // a window that is gone → the start
+          return timelineWindow.apply(planner, args).then(null, function () {
+            return planner.plan(what.request, false);
+          });
+        });
+      }
+    }
+    app.play(what.request);
+  }
+
+  CT.WebPage = { playing: playing, playHere: playHere, BACK: BACK, adapt: adapt, ownWindow: ownWindow, renderMute: renderMute, wire: wire, reopen: reopen, relayout: relayout, needsBackLink: needsBackLink, hint: hint, playerHint: playerHint };
 })(typeof window !== 'undefined' ? window : global);

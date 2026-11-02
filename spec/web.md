@@ -88,6 +88,22 @@ zobrazení")
   Přidat do Docku."). In such a window, the app's own ⛶ still toggles full screen; leaving the window = closing it.
 - The manifest and icons are static files under `/web/` (CSP: `manifest-src 'self'`).
 
+## Own window (T46, owner 2026-11-02: „tlačítko na zobrazení jen samotného okna")
+- A button **„Samostatné okno"** (icon ⧉) next to ⛶ in the tab bar and in the player bar opens Televize in a **popup window**
+  (`window.open(location, 'televize', 'popup,width=…,height=…')` sized like the current window): browsers show such a
+  window without tabs, toolbar or bookmarks (Chrome/Edge: only a slim title/URL strip; Safari: the title bar). The
+  original tab stops its player and shows „Televize běží v samostatném okně." with **„Vrátit sem"**.
+- In the popup the same button reads **„Zpět do prohlížeče"** (icon ⧈): it closes the popup and the original tab takes
+  over again (focus, the „běží v okně" line gone; playback is not restarted automatically). Closing the popup by the
+  window's own ✕ does the same.
+- Where a popup is refused (blocker, iPhone/iPad which open a tab instead): the button is hidden on phones and
+  tablets; elsewhere a refused popup says „Prohlížeč samostatné okno zablokoval – povolte vyskakovací okna pro tuto
+  stránku." The popup keeps ⛶. Opening it from the player moves playback: the popup starts the same channel/programme
+  (at the same position for recordings/archive; from its start when that position can no longer be opened), the
+  tab stops. For Anténa live the tuner is released when the tab stops, so the popup may briefly see „Tuner je
+  obsazený" (not checked with a real tuner). Every normal tab of the page shows the „běží v okně"
+  line (nothing plays twice). Coordination via `BroadcastChannel('televize')` (same origin), no storage needed.
+
 ## ČT (internet channels) on the web
 - The browser cannot ask ČT itself: ČT's API answers browsers only for pages from `ceskatelevize.cz` (CORS,
   checked 2026-11-01: no `Access-Control-Allow-Origin` for any other origin). So the web asks **the gateway**, which

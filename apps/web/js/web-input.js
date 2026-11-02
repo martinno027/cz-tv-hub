@@ -56,6 +56,7 @@
 
   /**
    * Wires the page: `doc` = document, `app` = CT.App, `opts` = {history: the browser's history (Back links),
+   * window: the own-window controller (web-window.js, T46; optional),
    * scale() → the stage's scale, onChange() after anything that may open or close a layer}. Returns the handlers.
    */
   function install(doc, app, opts) {
@@ -236,6 +237,9 @@
     /** One click/tap on `target`: what it means where it is. */
     function click(target) {
       var on = function (selector) { return target.closest ? target.closest(selector) : null; };
+      var own = opts.window;
+      if (own && own.elsewhere) return on('.web-elsewhere-return') ? own.returnHere() : undefined; // T46
+      if (on('.web-window') && own) return own.toggle();
       if (on('.web-fullscreen')) return fullscreen();
       if (on('.web-mute') && playerOpen()) return muteClick();
       if (on('.web-back-link')) return opts.history.back();
