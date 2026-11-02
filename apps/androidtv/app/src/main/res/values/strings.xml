@@ -51,7 +51,7 @@
     <string name="profile_sign_in_button">Přihlásit</string>
     <string name="profile_create_button">Vytvořit</string>
     <!-- T37 (spec/apps.md "Sign-in note"): under the profile forms and the gateway status; SignInNoteTest checks it. -->
-    <string name="signin_log_note">Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení). Záznam vidí jen správce a po 90 dnech se smaže. Co sledujete, se nezaznamenává.</string>
+    <string name="signin_log_note">Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení). Záznam vidí jen správce a po 90 dnech se smaže.</string>
     <string name="profile_saved">Nastavení je uložené v profilu</string>
     <string name="profile_waiting">Čeká na uložení — brána není dostupná</string>
     <string name="profile_sign_out">Odhlásit</string>

@@ -96,11 +96,30 @@ or Poslanecká sněmovna Parlamentu ČR.
   created, sign-out and sessions ended on `/admin`.
 - Each entry holds only the time, the event, the profile name (for profile events), the address the gateway saw,
   the kind of network (home network, Tailscale, local, other) and the app's platform and version, or for the web
-  a coarse browser and system. Never what is watched, never positions, passwords, tokens, typed names or full
-  browser identifiers, and the gateway keeps no per-request log of any kind.
+  a coarse browser and system. Never what is watched (that is only the separate watch log below, off by default),
+  never positions, passwords, tokens, typed names or full browser identifiers, and the gateway keeps no per-request
+  log of any kind.
 - The log stays on the Raspberry Pi's disk (newest 1 000 entries, at most 90 days, older entries deleted at every
   start), is visible only on `/admin`, can be deleted there (logged) and is never downloadable, exported, backed up,
   committed or shared. The apps and the web tell users about it next to sign-in and in Nastavení → Server.
+
+## Watch log (approved by the user on 2026-11-02, T53)
+The owner's approval, word for word: „Schvaluji log sledování (T53, 2026-11-02): brána pro správce zaznamenává
+každé přehrávání (začátek, délku, profil, zařízení jako v T37, zdroj, kanál, pořad, režim) a na /admin ukazuje právě
+probíhající sledování s časem začátku a běžící délkou; jen metadata, nikdy video, pozice ani nic pro TMDb; jen na
+disku Pi, nejvýš 5 000 záznamů a 30 dní, nikdy ke stažení, exportu ani sdílení; ve výchozím stavu vypnuto, vypnutí
+záznam smaže; bez upozorňování uživatelů a bez volby na zařízení, jen věta „Co sledujete, se nezaznamenává" z
+aplikací zmizí."
+- Off by default; the administrator switches it on in `/admin`, switching it off deletes it (logged).
+- One entry per playback session — start, duration, profile, device (as the sign-in log), source, channel,
+  programme, mode — reported by the apps and the web to the household gateway only; sessions in progress are kept
+  in memory, one line is written when a session ends. Never video, positions or anything for TMDb; never sent to
+  ČT, the Chamber or anyone else; never in the system journal.
+- On the Raspberry Pi's disk only, newest 5 000 entries and at most 30 days, visible only on `/admin`, deletable
+  there (logged); never downloadable, exported, backed up, committed or shared. Playback never depends on it.
+- Viewing habits can reveal sensitive things (politics, religion); keep it to your own household's needs. If other
+  households use your gateway, their viewing is in it too: data-protection rules may apply to you (not legal
+  advice).
 
 ## Publishing and use
 - The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,

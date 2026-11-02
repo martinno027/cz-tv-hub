@@ -16,6 +16,7 @@ import cz.cztvhub.core.dvb.ClientHeader
 import cz.cztvhub.core.dvb.DvbClient
 import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.dvb.DvbRepository
+import cz.cztvhub.core.dvb.ExecutorWatchRunner
 import cz.cztvhub.core.dvb.UrlConnectionDvbTransport
 import cz.cztvhub.core.profile.ProfileClient
 import cz.cztvhub.core.profile.UrlConnectionProfileTransport
@@ -83,6 +84,12 @@ class TvApp : Application() {
         // "?" = built without git (versionCode then falls back to 1, which is not a real build number).
         BuildConfig.BUILD_NUMBER.takeUnless { it == "?" },
     )
+
+    /**
+     * The one background thread of the watch reports (T53): every player queues its `start`/`beat`/`stop` there, so
+     * the `stop` of a closed player still goes out and playback never waits for the gateway.
+     */
+    val watchRunner by lazy { ExecutorWatchRunner() }
 
     /** "Pokračovat": remembered positions, on this device only. */
     val resume by lazy { ResumeStore(ResumePrefs(this)) }

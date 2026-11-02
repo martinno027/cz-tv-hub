@@ -2,9 +2,9 @@ package cz.cztvhub.core.dvb
 
 /**
  * `X-Cztvhub-Client` (T37, spec/dvb-gateway.md "Sign-in log"): which app and version connects or signs in. Sent
- * **only** on the profile requests (`/dvb/profiles*`, `/dvb/profile*`, [cz.cztvhub.core.profile.ProfileClient]) and
- * `GET /dvb/status` ([DvbClient.status]); never on other gateway requests (never on playback), never to ČT or the
- * Chamber's CDN.
+ * **only** on the profile requests (`/dvb/profiles*`, `/dvb/profile*`, [cz.cztvhub.core.profile.ProfileClient]),
+ * `GET /dvb/status` ([DvbClient.status]) and the watch reports `POST /dvb/watch` ([WatchReporter], T53); never on
+ * other gateway requests (never on playback), never to ČT or the Chamber's CDN.
  */
 object ClientHeader {
     const val NAME = "X-Cztvhub-Client"

@@ -11,7 +11,7 @@ import re
 WORDS = frozenset({
     "dvb", "ct", "live", "recording", "hls", "v", "m", "timeline", "details", "image", "w342", "vod", "schedule",
     "archive", "show", "category", "recordings", "icon", "profile", "profiles", "login", "logout", "status",
-    "channels", "epg", "defaults", "ads", "jobs", "breaks", "thumb",
+    "channels", "epg", "defaults", "ads", "jobs", "breaks", "thumb", "watch",
 })
 EXTENSIONS = frozenset({".m3u8", ".ts", ".m4s", ".mp4", ".jpg", ".png"})
 ID_PREFIXES = ("/dvb/", "/ct/")

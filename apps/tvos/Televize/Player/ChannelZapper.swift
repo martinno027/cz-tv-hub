@@ -92,7 +92,8 @@ final class ChannelZapper {
             let source = try await start.resolve()
             // A later press took over.
             guard !stopped, targetKey == key else { return }
-            controller.switchLive(to: source, resolve: start.resolve, liveTitle: start.liveTitle, offAir: start.offAir)
+            controller.switchLive(to: source, resolve: start.resolve, liveTitle: start.liveTitle, offAir: start.offAir,
+                                  watch: start.watch)
             playingKey = key
         } catch let error as CTError where error.code == PSPStreams.offAirCode {
             // A Chamber stream that is not on: the banner says "Nevysílá se" with the message; the old picture

@@ -354,14 +354,34 @@ pokusů“ s jejich počtem; neúspěšných přihlášení z jedné adresy nejv
 neúspěšných přihlášení“), vytvoření profilu, odhlášení a odhlášení televizí z administrace (nové heslo, smazaný
 profil). U záznamu je čas, profil, adresa a druh sítě (domácí síť, Tailscale, lokální, **jiná** – ta je zvýrazněná a
 znamená adresu mimo domácí síť a tailnet, brána tam nemá být vidět) a aplikace s verzí, u webu prohlížeč a systém
-(např. „Chrome · macOS“). Neukládá se, co kdo sleduje, hesla, napsaná jména ani celé označení prohlížeče. Záznam je
+(např. „Chrome · macOS“). Neukládá se sem, co kdo sleduje (to je zvláštní záznam Sledování níže), hesla, napsaná
+jména ani celé označení prohlížeče. Záznam je
 jen na disku Raspberry (`/var/lib/cztvhub/signin-log.jsonl`), drží nejnovějších 1 000 záznamů nejvýš 90 dní,
 starší se mažou samy (i při každém startu služby) a **Smazat záznamy** ho smaže celý; stáhnout ani exportovat se
 nedá. Aplikace a web to uživatelům říkají u přihlášení a v Nastavení → Server: „Připojení a přihlášení se
-zaznamenává (kdy, odkud a z jakého zařízení). Záznam vidí jen správce a po 90 dnech se smaže. Co sledujete, se
-nezaznamenává.“ Do journalu (`journalctl -u cztvhub`) brána nezapisuje jednotlivé požadavky, jen chyby (stav a cestu
+zaznamenává (kdy, odkud a z jakého zařízení). Záznam vidí jen správce a po 90 dnech se smaže.“ Do journalu (`journalctl -u cztvhub`) brána nezapisuje jednotlivé požadavky, jen chyby (stav a cestu
 bez parametrů, bez adresy) a ani v nich, ani v řádcích o startu živého vysílání není, který kanál nebo nahrávka to
 byla.
+
+**Sledování** (záložka v administraci, **ve výchozím stavu vypnuté**): přepínač **Zaznamenávat sledování**. Když je
+zapnutý, aplikace a web hlásí bráně každé přehrávání a v záložce je vidět:
+- **Právě se sleduje** – co se teď přehrává: zařízení (aplikace s verzí, u webu prohlížeč a systém; síť a adresa),
+  profil, zdroj (ČT, Sněmovna, Anténa), kanál, pořad, režim (živě, zpětně, archiv, nahrávka, časová osa), **od**
+  kdy a **jak dlouho** – délka v prohlížeči každou sekundu přibývá, seznam se sám obnovuje každých 15 sekund;
+- pod tím **historie** od nejnovějších po 50 na stránku, s výběrem podle profilu, zařízení a kanálu, a tlačítko
+  **Smazat záznamy** (s potvrzením).
+
+Jedno přehrávání je jeden záznam: zapíše se, až skončí (zavřením přehrávače, přepnutím kanálu, odchodem
+z aplikace, nebo když zařízení 3 minuty nic nehlásí – pak se počítá do posledního hlášení); kratší než 5 sekund se
+nezapisuje. Pořad bere brána z vlastního programu antény (u nahrávky její název), u ČT z programu, který už má
+v paměti, jinak ten, který poslala aplikace (nejvýš 200 znaků). Neukládá se obraz, místo v pořadu ani nic pro TMDb.
+Záznam je jen na disku Raspberry (`/var/lib/cztvhub/watch-log.jsonl`), drží nejnovějších 5 000 záznamů nejvýš 30
+dní, starší se mažou samy (i při každém startu služby); stáhnout ani exportovat se nedá a do journalu se nic
+z hlášení nepíše. **Vypnutím se záznam celý smaže** (i rozkoukaná sledování; zapíše se `admin: watch log off,
+deleted (n entries)`), smazání tlačítkem se zapíše jako `admin: watch log deleted (n entries)`. Uživatelé se
+o záznamu v aplikacích nedozvídají a na zařízení ho vypnout nejde – zapínejte ho jen pro potřeby své domácnosti;
+když bránu používají i jiné domácnosti, je v něm i jejich sledování (viz `docs/legal-notes.md`). Hlášení posílají
+aplikace jen bráně (nikdy ČT, Sněmovně ani TMDb), s klíčem v hlavičce, a přehrávání na nich nikdy nečeká.
 
 **Výchozí kanály domácnosti**: v administraci na záložce **Výchozí kanály** nastavíte pořadí, skryté kanály
 a zapnuté zdroje, které se ukážou na každé televizi bez přihlášeného profilu, kde nikdo kanály neměnil. Nejrychleji

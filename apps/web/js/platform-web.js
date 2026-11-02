@@ -89,6 +89,15 @@
   };
   /** A hidden tab or a minimised window keeps playing; nothing re-resolves on return (spec/web.md T41). */
   P.backgroundPlayback = true;
+  /**
+   * Watch reports (T53): a hidden tab plays on, so it is still watching (no stop on `hidden`); the last stop of a
+   * closing page goes with fetch keepalive and the same headers (the gateway takes reports only with the bearer key).
+   */
+  P.watchFinalSend = function (send) {
+    return function (request) {
+      return CT.Watch.finalSend({ fetch: typeof root.fetch === 'function' ? root.fetch.bind(root) : null, send: send })(request);
+    };
+  };
   P.versionSuffix = ' (web)';
 
   function el(tag, id, cls, text) {

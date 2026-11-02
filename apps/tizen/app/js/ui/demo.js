@@ -13,6 +13,8 @@
  * `?demo&profile=offline` = reading and saving a profile fail as if the gateway were down (login still works).
  * "Kanály" household default: /dvb/defaults answers from memory (ČT24 first, ČT art hidden, version 1);
  * `?demo&defaults=none` = no default (version 0). Change CT.Demo.defaults from the console and open Nastavení.
+ * `?demo&watch` = the gateway keeps the watch log (T53): POST /dvb/watch is answered 204 and kept in
+ * CT.Demo.watchReports (and logged to the console), never sent anywhere.
  * Programme page: /dvb/details answers from memory, a synthetic match (rating, original title, a generated poster)
  * for every Anténa "Film: …" programme and "no match" for everything else (CT programmes included).
  * Archiv: /dvb/archive… answers from spec/fixtures/dvb/dvb_archive_{categories,category,search,show_series,show_movie}.json
@@ -195,8 +197,18 @@
     return answer(200, { name: owner.name, settings: owner.settings, version: owner.version, updated: new Date().toISOString() });
   }
 
+  // `?demo&watch`: the gateway keeps the watch log (T53); the reports land in CT.Demo.watchReports (and the console)
+  var WATCH_LOG = /[?&]watch\b/.test(root.location.search);
+  var watchReports = [];
+
   function transport(request) {
     var url = request.url;
+    if (/\/dvb\/watch$/.test(url) && request.method === 'POST') {
+      var report = { at: new Date().toISOString(), url: url, headers: request.headers, body: JSON.parse(request.body) };
+      watchReports.push(report);
+      if (root.console) root.console.log('watch report', JSON.stringify(report.body));
+      return Promise.resolve({ status: 204, body: '' });
+    }
     if (/\/dvb\/profiles?(\/|$)/.test(url)) return profileApi(request);
     if (/\/dvb\/defaults$/.test(url)) return answer(200, defaults);
     if (/\/dvb\/details\?/.test(url)) return details(url);
@@ -216,6 +228,7 @@
       return load('dvb/dvb_status.json').then(function (r) {
         var body = JSON.parse(r.body);
         body.thumbnails = true; // the demo "gateway" offers thumbnails (synthetic, see blobTransport)
+        body.watchLog = WATCH_LOG;
         return { status: r.status, body: JSON.stringify(body) };
       });
     }
@@ -726,6 +739,8 @@
     profiles: profiles,
     /** The fake gateway's household default, e.g. `CT.Demo.defaults.channelPrefs = null; CT.Demo.defaults.version += 1`. */
     defaults: defaults,
+    /** `?demo&watch`: every POST /dvb/watch the app sent ({at, url, headers, body}), nothing leaves the PC. */
+    watchReports: watchReports,
     /** Playback URL of a Chamber stream in the demo: local and absent (nothing plays, nothing leaves the PC). */
     pspPlayUrl: function (stream) {
       return 'demo-psp-' + stream.id + '.m3u8';

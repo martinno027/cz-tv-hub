@@ -27,9 +27,10 @@ function recorder(answer) {
   return { seen, transport };
 }
 
-test('the note says what is logged, word for word (spec/apps.md "Sign-in note (T37)")', () => {
+test('the note says what is logged, word for word (spec/apps.md "Sign-in note (T37)", T53 without its last sentence)', () => {
   assert.equal(H.NOTE, 'Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení). ' +
-    'Záznam vidí jen správce a po 90 dnech se smaže. Co sledujete, se nezaznamenává.');
+    'Záznam vidí jen správce a po 90 dnech se smaže.');
+  assert.ok(!/sledujete/.test(H.NOTE), 'T53: „Co sledujete, se nezaznamenává." is no longer true');
 });
 
 test('value: "<platform>/<version> (<build>)", accepted by the gateway', () => {
@@ -53,10 +54,10 @@ test('value: a development build (no build info) or "?" parts still name the pla
   assert.equal(H.value('', global.CT_BUILD_INFO), null);
 });
 
-test('applies: GET /dvb/status and the profile routes only', () => {
-  const yes = [['GET', '/dvb/status'], ['POST', '/dvb/profiles'], ['POST', '/dvb/profiles/login'], ['GET', '/dvb/profile'],
+test('applies: GET /dvb/status, POST /dvb/watch (T53) and the profile routes only', () => {
+  const yes = [['GET', '/dvb/status'], ['POST', '/dvb/watch'], ['post', '/dvb/watch'], ['POST', '/dvb/profiles'], ['POST', '/dvb/profiles/login'], ['GET', '/dvb/profile'],
     ['PUT', '/dvb/profile'], ['POST', '/dvb/profile/logout'], ['get', '/dvb/status']];
-  const no = [['POST', '/dvb/status'], ['GET', '/dvb/statusx'], ['GET', '/dvb/channels'], ['GET', '/dvb/epg?date=2026-11-01'],
+  const no = [['POST', '/dvb/status'], ['GET', '/dvb/watch'], ['POST', '/dvb/watchx'], ['POST', '/dvb/watch/1'], ['GET', '/dvb/statusx'], ['GET', '/dvb/channels'], ['GET', '/dvb/epg?date=2026-11-01'],
     ['GET', '/dvb/live/ct1.m3u8'], ['GET', '/dvb/recording/r1.m3u8'], ['GET', '/dvb/recording/r1/breaks'],
     ['GET', '/dvb/timeline/r1'], ['GET', '/dvb/defaults'], ['GET', '/dvb/archive'], ['GET', '/dvb/thumb/r1.jpg'],
     ['GET', '/dvb/ct/live/CH_1'], ['GET', '/dvb/ct/vod/1'], ['GET', '/dvb/ct/schedule?channels=ct1&date=2026-11-01'],

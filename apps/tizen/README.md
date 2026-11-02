@@ -93,7 +93,9 @@ Nastavení. Stránka pořadu dostane v ukázce podrobnosti z paměti: anténní 
 (hodnocení, původní název, vygenerovaný plakát), ostatní pořady shodu nemají. Archiv odpovídá ze sdílených
 vzorků `spec/fixtures/dvb/dvb_archive_*.json`, a dokud nejsou, z vymyšlených pořadů v paměti (`?demo&archive=memory`
 je použije vždy, `?demo&archive=ctdown` předvede nedostupné iVysílání): kategorie mají 3 stránky, seriály 3 řady a „Nahráno z antény“, jejíž první díl otevře ukázkovou
-lištu antény. Ukázka si pamatuje stav v `localStorage` prohlížeče; čistý start = `localStorage.clear()`.
+lištu antény. `?demo&watch` = brána má zapnutý log sledování (T53): hlášení `POST /dvb/watch` (start, každou
+minutu beat, stop) ukázka jen zapíše do konzole a do `CT.Demo.watchReports`, nic neodchází z počítače.
+Ukázka si pamatuje stav v `localStorage` prohlížeče; čistý start = `localStorage.clear()`.
 
 ## Instalace do televize (bez obchodu Samsung)
 

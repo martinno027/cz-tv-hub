@@ -71,6 +71,11 @@ final class PlayerController {
     private var audioGroup: AVMediaSelectionGroup?
     /// The app's one mute state (spec/apps.md "Mute (T34)"); this player takes it on creation.
     let mute: PlayerMute?
+    /// Watch reports to the gateway (spec/dvb-gateway.md "Watch log (T53)"): `start` when this player starts, `stop`
+    /// when it stops; never awaited.
+    private let watch: WatchReporter?
+    private var watchStart: WatchStart?
+    private var watchHandle: Int?
 
     /// `resolve` fetches a fresh source (new signed URL / new gateway session) after a failure.
     /// `adBreaks` is given only for finished recordings: it enables the "Přeskočit reklamu" button.
@@ -82,9 +87,12 @@ final class PlayerController {
          progress: (target: ResumeTarget, store: ResumeStore)? = nil,
          progressAt: (store: ResumeStore, at: @MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)? = nil,
          title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
-         offAir: (@MainActor () -> Void)? = nil, mute: PlayerMute? = nil) {
+         offAir: (@MainActor () -> Void)? = nil, mute: PlayerMute? = nil,
+         watch: WatchReporter? = nil, watchStart: WatchStart? = nil) {
         self.source = source
         self.mute = mute
+        self.watch = watch
+        self.watchStart = watchStart
         self.offAir = offAir
         self.title = title ?? PlayerTitle(title: source.title)
         self.liveTitle = liveTitle
@@ -105,6 +113,7 @@ final class PlayerController {
         startLiveTitle()
         startAdBreaks()
         startProgressSaving()
+        reportStart()
         #if DEBUG
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 5, preferredTimescale: 1), queue: .main) { [player] time in
             let date = player.currentItem?.currentDate().map { "\($0)" } ?? "-"
@@ -118,7 +127,8 @@ final class PlayerController {
     /// Zapping (live only): plays another channel's already resolved live stream in this player; `resolve` and
     /// `liveTitle` belong to the new channel from now on (re-resolve after a failure, info bar title).
     func switchLive(to source: PlaybackSource, resolve: @escaping @MainActor () async throws -> PlaybackSource,
-                    liveTitle: @escaping @MainActor () async -> PlayerTitle, offAir: (@MainActor () -> Void)? = nil) {
+                    liveTitle: @escaping @MainActor () async -> PlayerTitle, offAir: (@MainActor () -> Void)? = nil,
+                    watch watchStart: WatchStart? = nil) {
         guard started, !stopped, self.source.mode == .live, source.mode == .live else { return }
         titleTask?.cancel()
         self.source = source
@@ -130,6 +140,8 @@ final class PlayerController {
         applyAudioPreference(language: nil, describesVideo: false)
         load(source, resume: nil)
         startLiveTitle()
+        // the old channel's session ends, the new channel's starts
+        restartWatch(watchStart)
     }
 
     /// Timeline playback: plays another window of the channel's recording in this player, from
@@ -154,6 +166,8 @@ final class PlayerController {
     /// Safe to call more than once (fatal error, then the screen disappearing).
     func stop() {
         stopped = true
+        if let watchHandle { watch?.stop(watchHandle) }
+        watchHandle = nil
         saveProgress()
         if let progressObserver { player.removeTimeObserver(progressObserver) }
         progressObserver = nil
@@ -180,6 +194,20 @@ final class PlayerController {
         mute?.detach(player)
         player.pause()
         player.replaceCurrentItem(with: nil)
+    }
+
+    private func reportStart() {
+        guard let watch, let watchStart else { return }
+        watchHandle = watch.start(watchStart)
+    }
+
+    /// Another channel or timeline window in this player: the old session's `stop`, then the new one's `start`.
+    func restartWatch(_ next: WatchStart?) {
+        guard started, !stopped else { return }
+        if let watchHandle { watch?.stop(watchHandle) }
+        watchHandle = nil
+        watchStart = next
+        reportStart()
     }
 
     // MARK: mute ("Mute (T34)", spec/apps.md)

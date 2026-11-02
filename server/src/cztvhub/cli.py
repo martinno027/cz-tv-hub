@@ -41,9 +41,11 @@ def _stacks_on_sigusr1() -> None:
 
 def cmd_serve(args):
     cfg = _config(args)
+    from .dvb import watchlog
     from .dvb.signinlog import trim_file
 
     trim_file(cfg.dvb.state_dir)  # at every start, also without [dvb] (spec "Sign-in log": 1 000 entries, 90 days)
+    watchlog.trim_file(cfg.dvb.state_dir)  # the same for the watch log (5 000, 30 days; switch off = deleted)
     gateway = admin = web = None
     if cfg.dvb.enabled:
         from .dvb.gateway import DvbGateway
