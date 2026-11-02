@@ -323,7 +323,8 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
   list **without seasons pages too** (`nextPage` → `?page=n` with the same year/month); `periods` that do not make
   sense (a year not in its own list, not numbers) = no chips, the episodes are shown as they come; a month not in
   a non-empty `months` = that year's newest month (since T32).
-  **Years only (T51)**: when the answer's `months` is empty (`month` null: a year of at most 100 episodes), the
+  **Years only (T51)**: when the answer has `wholeYear: true` (the gateway's form: a year of at most 100 episodes,
+  with one month for older app builds) or `months` empty, the year is shown whole (`month` null); the
   month row is not shown and the list holds the whole year, newest first, paged; selecting such a year needs no
   month (`selectYear` of `[]` = none); `months` empty or missing with any `month` = the year shown whole (`month`
   null), not "no periods". The same in all apps and the web (`archive_cases.json` "periods").

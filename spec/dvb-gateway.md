@@ -693,7 +693,7 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     is dropped from the cached list (with every newer year up to the episode just before where it would start) and
     the answer moves to the next **older** year with episodes (repeated; none older → the next newer). The answer's
     `years` holds only years not yet known to be empty, and the selected year with more than 100 episodes always has `months`
-    (`[]` + `month: null` only for a year shown whole, T51). `?year=` of a year already known to be empty (a stale chip) answers for the nearest
+    (a year shown whole has `wholeYear: true`, T51). `?year=` of a year already known to be empty (a stale chip) answers for the nearest
     year with episodes the same way, its `month` dropped (that year's newest), not `400`.
     ČT's API has no date filter (checked 2026-11-01: `year`, `dateFrom`, `month` … are validation errors; `limit`
     at most 100), but its list is ordered by date. The newest year comes from the first chunk (`orderBy: newest`,
@@ -711,8 +711,12 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     **Months only where a year has many episodes (T51, owner 2026-11-02: „u Hydepark civilizace je v kazdem
     mesici 2 dily, coz je malo … v tomto pripade staci delit jen na roky … at uzivatel nemusi extreme klikat“)**:
     a year with **at most 100** episodes (`YEAR_MONTHS_MIN` = 101, the same 100 as the list threshold: one ČT
-    chunk, a few pages in the app) is shown **whole**: `"months": []`, `"month": null`, the year's episodes newest
-    first, paged as today. Only a year with more than 100 episodes (daily programmes) gets `months` and a selected
+    chunk, a few pages in the app) is shown **whole**: `"wholeYear": true`, `"months": [M]`, `"month": M` (M = the
+    year's newest month with an episode), the year's episodes newest first, paged as today. **Why one month and not
+    `[]`** (T51 follow-up, 2026-11-02): app builds from before T51 reject `months: []` and drop the whole `periods`,
+    so they showed no years at all (seen by the owner on Hyde Park Civilizace); with one month they show the year
+    chips and a single month chip, and every request of theirs (`?year=&month=M`) gets the whole year. Apps from T51
+    on read `wholeYear: true` as a year shown whole (no month row, no `month` sent) and still accept `months: []`. Only a year with more than 100 episodes (daily programmes) gets `months` and a selected
     `month` as above. The decision is per year (a show can be daily in one year and weekly in another); it is known
     once the year has been read (the year is read whole anyway, up to 30 chunks). `?month=` for a year shown whole
     is ignored (a stale chip), not `400` (a malformed `month` — not 1–12, or without `year` — stays `400`, checked

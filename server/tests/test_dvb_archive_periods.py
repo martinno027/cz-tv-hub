@@ -316,8 +316,9 @@ class PeriodsRulesTest(Base):
         self.show()
         group = self.show(year=2011)["groups"][0]  # the episode where 2011 would start is of 2009
         self.assertEqual((group["periods"]["year"], group["periods"]["years"]), (2009, [2013, 2009]))
-        # 60 a year: shown whole (T51), also after landing from an empty year
-        self.assertEqual((group["periods"]["months"], group["periods"]["month"], len(group["episodes"])), ([], None, 20))
+        # 60 a year: shown whole (T51), also after landing from an empty year; its one month = its newest (20 December)
+        self.assertEqual((group["periods"]["months"], group["periods"]["month"], group["periods"].get("wholeYear"),
+                          len(group["episodes"])), ([12], 12, True, 20))
         self.assertEqual(group["episodes"][0]["aired"], "2009-12-20T18:00:00Z")
 
     def test_an_empty_oldest_year_moves_to_the_next_newer_one(self):
@@ -395,38 +396,77 @@ class PeriodsRulesTest(Base):
                                 datetime(2025, 12, 1, 18, tzinfo=timezone.utc))
                 self.make(sorted(dates))
                 periods = self.show(year=2024)["groups"][0]["periods"]
-                self.assertEqual((periods["months"], periods["month"]), (case["months"], case["month"]))
+                if case["months"]:
+                    self.assertEqual((periods["months"], periods["month"]), (case["months"], case["month"]))
+                    self.assertNotIn("wholeYear", periods)
+                else:  # the gateway's form of a year shown whole: wholeYear, one month for builds before T51
+                    self.assertEqual((periods["months"], periods["month"], periods["wholeYear"]), ([12], 12, True))
 
     @staticmethod
     def gateway_shaped(periods):
-        """What the gateway sends: these four keys, newest first, the year among the years, and a month among the
-        months, or none with no months (a year shown whole, T51)."""
-        return isinstance(periods, dict) and list(periods) == ["years", "year", "months", "month"] \
+        """What the gateway sends: these four keys, newest first, the year among the years, and a month among
+        non-empty months; a year shown whole (T51) also has ``"wholeYear": true`` and exactly one month (the
+        follow-up: builds from before T51 drop ``months: []``), a year with months has no ``wholeYear`` key."""
+        if not isinstance(periods, dict):
+            return False
+        whole = "wholeYear" in periods
+        keys = ["years", "year", "months", "month"] + (["wholeYear"] if whole else [])
+        return list(periods) == keys and (not whole or periods["wholeYear"] is True) \
             and all(type(v) is int for v in periods["years"]) and periods["years"] == sorted(periods["years"], reverse=True) \
             and periods["year"] in periods["years"] and isinstance(periods["months"], list) \
             and all(type(m) is int and 1 <= m <= 12 for m in periods["months"]) \
             and periods["months"] == sorted(periods["months"], reverse=True) \
-            and (periods["month"] in periods["months"] if periods["months"] else periods["month"] is None)
+            and len(periods["months"]) >= 1 and (len(periods["months"]) == 1 if whole else True) \
+            and periods["month"] in periods["months"]
+
+    @staticmethod
+    def pre_t51_chips(periods):
+        """The rule of app builds from before T51 (spec/apps.md as of T32): chips only when ``months`` is a
+        non-empty list and ``month`` is in it, else the whole ``periods`` is dropped (no years at all)."""
+        return isinstance(periods, dict) and isinstance(periods.get("years"), list) \
+            and periods.get("year") in periods["years"] and isinstance(periods.get("months"), list) \
+            and bool(periods["months"]) and periods.get("month") in periods["months"]
 
     def test_golden_chips_have_the_gateway_shape(self):
         self.make(udalosti()[-300:])
         ours = [self.show()["groups"][0]["periods"]]
         self.hydepark()
         ours.append(self.show()["groups"][0]["periods"])
-        self.assertEqual((ours[0]["months"][:1], ours[1]["months"]), ([11], []))
+        self.assertEqual((ours[0]["months"][:1], ours[1]["months"], ours[1]["wholeYear"]), ([11], [10], True))
+        self.assertNotIn("wholeYear", ours[0])
         for periods in ours:
             self.assertTrue(self.gateway_shaped(periods), periods)
         # the golden chips also hold what the apps must survive (T51: months missing, not months, a month with
         # empty months); the gateway-shaped ones cover both kinds the gateway sends
         shaped = [c["periods"] for c in GOLDEN["periods"]["chips"] if self.gateway_shaped(c["periods"])]
-        self.assertTrue(any(p["months"] for p in shaped))
-        self.assertTrue(any(not p["months"] for p in shaped))
-        self.assertFalse(self.gateway_shaped({"years": [2026], "year": 2026, "months": [], "month": 3}))
+        self.assertTrue(any("wholeYear" not in p for p in shaped))
+        self.assertTrue(any(p.get("wholeYear") is True for p in shaped))
+        for bad in ({"years": [2026], "year": 2026, "months": [], "month": 3},
+                    {"years": [2026], "year": 2026, "months": [], "month": None},  # T51's first form: no longer sent
+                    {"years": [2026], "year": 2026, "months": [], "month": None, "wholeYear": True},
+                    {"years": [2026], "year": 2026, "months": [10, 9], "month": 10, "wholeYear": True},
+                    {"years": [2026], "year": 2026, "months": [10], "month": 10, "wholeYear": False}):
+            self.assertFalse(self.gateway_shaped(bad), bad)
+
+    def test_builds_from_before_t51_keep_the_year_chips(self):
+        """The owner saw no years at all on "Hydepark Civilizace" in an app from before T51: it dropped
+        ``months: []``. The gateway's whole-year answer passes that old rule; T51's first form did not."""
+        self.hydepark()
+        whole = self.show()["groups"][0]["periods"]
+        self.assertTrue(self.pre_t51_chips(whole), whole)
+        self.assertEqual(whole["years"], list(range(2026, 2014, -1)))  # every year chip
+        self.assertFalse(self.pre_t51_chips(dict(whole, months=[], month=None)))  # the rule can fail
+        # every request of such a build (its year chip plus the one month it shows) gets the whole year
+        plain = self.show(year=2019)["groups"][0]
+        old = self.show(year=2019, month=self.show(year=2019)["groups"][0]["periods"]["month"])["groups"][0]
+        self.assertEqual(old, plain)
+        self.assertEqual(plain["nextPage"], 2)
 
 
 class YearsOnlyTest(Base):
     """T51 (owner 2026-11-02: "Hydepark Civilizace" has two episodes a month): a year of at most 100 episodes is
-    shown whole, without months; only a year with more gets month chips. Decided per year."""
+    shown whole, without month chips (``wholeYear``, one month for builds before T51); only a year with more gets
+    month chips. Decided per year."""
 
     @staticmethod
     def whole(expected, year):
@@ -436,7 +476,8 @@ class YearsOnlyTest(Base):
         expected = self.hydepark()
         answer, count = self.requests(self.show)
         periods, aired, next_page = self.month_of(answer)
-        self.assertEqual(periods, {"years": list(range(2026, 2014, -1)), "year": 2026, "months": [], "month": None})
+        self.assertEqual(periods, {"years": list(range(2026, 2014, -1)), "year": 2026, "months": [10], "month": 10,
+                                   "wholeYear": True})
         self.assertEqual(aired, self.whole(expected, 2026)[:20])
         self.assertEqual((aired[0], aired[-1], next_page), ("2026-10-21T20:00:00Z", "2026-01-07T20:00:00Z", None))
         self.assertEqual(count, 4)  # show, page 1, oldest, the first chunk (2026 and 2025 in it): as with months
@@ -465,15 +506,16 @@ class YearsOnlyTest(Base):
         self.assertEqual(self.show(page=3, year=2019)["groups"][0]["episodes"], [])
 
     def test_100_a_year_whole_101_months(self):
-        for count, months in ((100, []), (101, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1])):
+        for count, months in ((100, [12]), (101, [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1])):
             with self.subTest(count=count):
                 dates = spread(count, datetime(2024, 1, 3, 18, tzinfo=timezone.utc), datetime(2024, 12, 28, 18, tzinfo=timezone.utc))
                 dates += spread(150, datetime(2025, 1, 3, 18, tzinfo=timezone.utc), datetime(2025, 12, 28, 18, tzinfo=timezone.utc))
                 self.make(dates)
                 periods, aired, _ = self.month_of(self.show(year=2024))
                 self.assertEqual(periods["months"], months)
-                self.assertEqual(periods["month"], months[0] if months else None)
-                if months:
+                self.assertEqual(periods["month"], 12)
+                self.assertEqual(periods.get("wholeYear"), True if count == 100 else None)
+                if count == 101:
                     self.assertEqual(aired, truth(dates)[2024][12])  # December's few, not the year's 20
                     self.assertEqual(len(self.all_episodes(2024, 12)), len(truth(dates)[2024][12]))
                 else:
@@ -489,11 +531,12 @@ class YearsOnlyTest(Base):
         default = self.month_of(self.show())[0]
         self.assertEqual((default["year"], default["month"], default["months"]), (2026, 10, list(expected[2026])))
         weekly, aired, next_page = self.month_of(self.show(year=2025, month=10))  # a month chip from 2026: ignored
-        self.assertEqual((weekly["year"], weekly["months"], weekly["month"], next_page), (2025, [], None, 2))
+        self.assertEqual((weekly["year"], weekly["months"], weekly["month"], weekly["wholeYear"], next_page),
+                         (2025, [12], 12, True, 2))
         self.assertEqual(aired, self.whole(expected, 2025)[:20])
         self.assertEqual(len(self.all_episodes(2025, None)), 52)
         daily = self.month_of(self.show(year=2024))[0]
-        self.assertEqual((daily["months"], daily["month"]), (list(range(12, 0, -1)), 12))
+        self.assertEqual((daily["months"], daily["month"], "wholeYear" in daily), (list(range(12, 0, -1)), 12, False))
         with self.assertRaises(ac.BadPeriod):  # a daily year still checks its months
             self.show(year=2024, month=13)
         self.assertEqual(default["years"], [2026, 2025, 2024])
@@ -542,14 +585,15 @@ class RouteTest(unittest.TestCase):
         _, body = self.get({})
         group = body["groups"][0]
         self.assertEqual(group["periods"], {"years": [2026, 2025, 2024], "year": 2026,
-                                            "months": list(range(10, 0, -1)), "month": 10})
+                                            "months": list(range(10, 0, -1)), "month": 10})  # no wholeYear key
         self.assertEqual((len(group["episodes"]), group["nextPage"]), (20, 2))
         _, second = self.get({"page": "2"})
         self.assertEqual([e["title"] for e in second["groups"][0]["episodes"]][-1], "Večerní zpravodaj 01. 10. 2026")
         self.assertIsNone(second["groups"][0]["nextPage"])
         # 2024 has 42 episodes (20 November to 31 December): the whole year, newest first, paged (T51)
         _, older = self.get({"year": "2024"})
-        self.assertEqual((older["groups"][0]["periods"]["months"], older["groups"][0]["periods"]["month"]), ([], None))
+        self.assertEqual(older["groups"][0]["periods"], {"years": [2026, 2025, 2024], "year": 2024, "months": [12],
+                                                         "month": 12, "wholeYear": True})
         whole = []
         for page in (1, 2, 3):
             _, part = self.get({"year": "2024", "page": str(page)})
@@ -565,6 +609,7 @@ class RouteTest(unittest.TestCase):
         _, daily = self.get({"year": "2025"})  # 365 episodes: months
         self.assertEqual((daily["groups"][0]["periods"]["months"], daily["groups"][0]["periods"]["month"]),
                          (list(range(12, 0, -1)), 12))
+        self.assertNotIn("wholeYear", daily["groups"][0]["periods"])
 
     def test_never_an_empty_month(self):
         _, body = self.get({"year": "2025"})

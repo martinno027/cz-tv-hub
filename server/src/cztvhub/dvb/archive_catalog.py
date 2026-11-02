@@ -6,7 +6,7 @@ household's own recordings, in ČT's categories, one card per normalised title (
   20 shows per row. Nothing of ČT's is stored on disk.
 - An episode list of more than 100 gets year/month periods (T32, ``EpisodePeriods``): ČT has no date filter, so a
   year is found by bisection over its date-ordered list and read in chunks of 100, all kept for the show TTL. A
-  year of at most 100 episodes is shown whole, without months (T51).
+  year of at most 100 episodes is shown whole, without month chips (T51: ``wholeYear``, one month for older app builds).
 - Our recordings are ended programmes of the continuous recording (the gateway passes them in); the same cleaned
   title is one show. Their categories come from the stored TMDb match or the DVB genre, computed per answer and
   never stored (golden ``spec/fixtures/archive_cases.json``).
@@ -976,8 +976,9 @@ class ArchiveCatalog:
     def _periods(self, ident: str, season: str | None, year: int | None, month: int | None,
                  page: int) -> tuple[list[dict], bool, dict] | None:
         """(the month's page of episodes, more, ``periods``) or None when the list has none; BadPeriod for a year
-        or month it does not have. A year of at most 100 episodes: its page of the whole year, ``months`` [] and
-        ``month`` None, any ``month`` ignored (T51). Default: the newest year, a year's newest month; a year found
+        or month it does not have. A year of at most 100 episodes: its page of the whole year, ``wholeYear`` True with
+        ``months`` [M] and ``month`` M (M = its newest month, for app builds from before T51), any ``month``
+        ignored (T51). Default: the newest year, a year's newest month; a year found
         empty (also one asked for again from a stale chip): the next older year with episodes, else the next newer."""
         index = self.ct.periods(ident, season)
         years = index.years()
@@ -1004,7 +1005,15 @@ class ArchiveCatalog:
         if sum(map(len, by_month.values())) < YEAR_MONTHS_MIN:
             # T51: few episodes a year (a weekly show) is one list, newest first; a month from a stale chip is
             # ignored. Months are newest first and each newest first, so joined they are the year newest first.
-            episodes, months, month = [e for eps in by_month.values() for e in eps], [], None
+            # One month (the newest), not []: builds from before T51 drop periods with months [] and then show
+            # no years at all; with [M] they show the year chips, and any month they send gets the whole year.
+            newest = next(iter(by_month))
+            episodes = [e for eps in by_month.values() for e in eps]
+            start = (page - 1) * EPISODE_PAGE
+            more = page < MAX_EPISODE_PAGES and len(episodes) > start + EPISODE_PAGE
+            return episodes[start:start + EPISODE_PAGE], more, {"years": index.years(), "year": year,
+                                                                "months": [newest], "month": newest,
+                                                                "wholeYear": True}
         else:
             if month is None:
                 month = next(iter(by_month))

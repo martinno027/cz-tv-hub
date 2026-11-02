@@ -1,5 +1,6 @@
 'use strict';
-// spec/apps.md "Archiv" → show page, "Years only (T51)": a year whose answer has `months: []` / `month: null` hides the
+// spec/apps.md "Archiv" → show page, "Years only (T51)": a year whose answer has `wholeYear: true` (the gateway's form,
+// one month next to it for older builds) or `months: []` / `month: null` hides the
 // month row, the remote's up/down never lands on it, the year chip asks for ?year= alone and its next page too.
 // The show page (ui/show.js, shared by the web) on a minimal DOM; the answers go through the real parser.
 const test = require('node:test');
@@ -60,6 +61,8 @@ require('../app/js/ui/show.js');
 // the golden year shown whole as the gateway sends it: 2026, 2025 → 2025, `months: []`, `month: null`
 const WHOLE = cases.periods.chips.filter((c) => c.periods && Array.isArray(c.periods.months) && !c.periods.months.length &&
   c.periods.month === null)[0].periods;
+// the gateway's own form of the same year (T51 follow-up): `wholeYear: true` with its one month
+const GATEWAY = cases.periods.chips.filter((c) => c.periods && c.periods.wholeYear === true)[0].periods;
 const MONTHLY = { years: WHOLE.years, year: WHOLE.years[0], months: [3, 2, 1], month: 3 };
 
 function episodes(tag, n) {
@@ -94,8 +97,9 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 const hidden = (id) => document.getElementById(id).classList.contains('hidden');
 const chipLabels = (id) => document.getElementById(id).childNodes.map((c) => c.textContent);
 
-test('a year shown whole (T51): no month row, the list takes the year, up/down skip the month row', async () => {
-  const { show, queries } = page(answer(WHOLE, 'y2025'), () => answer(WHOLE, 'y2025p2'));
+for (const [form, whole] of [['months: []', WHOLE], ['wholeYear: true', GATEWAY]]) test('a year shown whole (T51, ' + form + '): no month row, the list takes the year, up/down skip the month row', async () => {
+  assert.equal(whole.year, 2025);
+  const { show, queries } = page(answer(whole, 'y2025'), () => answer(whole, 'y2025p2'));
   show.open({ id: 'ct:1', title: 'Pořad', kind: 'series', source: 'ct' });
   await tick();
   assert.deepEqual(chipLabels('sh-years'), ['2026', '2025']);

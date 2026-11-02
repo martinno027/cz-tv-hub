@@ -51,7 +51,8 @@
    * A ČT group's `periods` (T32) → {years, year, months, month} or null (no chips). The selected year has to be one
    * of the years; a month missing or not listed is the year's newest (the rule of a year alone). `months` empty or
    * missing = a year shown whole (T51): year chips, no month (`month` null, whatever was sent); a list of months none
-   * of which is one (13, "3") = broken, no chips.
+   * of which is one (13, "3") = broken, no chips. `wholeYear: true` (the gateway's form: one month next to it for app
+   * builds from before T51) = the year shown whole too, its months ignored; anything else in `wholeYear` = not set.
    */
   function parsePeriods(o) {
     if (!isObject(o)) return null;
@@ -59,7 +60,9 @@
     var months = wholes(o, 'months', 1, 12);
     var rawMonths = o.months;
     if (rawMonths != null && !Array.isArray(rawMonths)) return null; // not a list: unknown, no chips
-    if (years.indexOf(o.year) < 0 || (J.arr(o, 'months').length && !months.length)) return null;
+    if (years.indexOf(o.year) < 0) return null;
+    if (o.wholeYear === true) return { years: years, year: o.year, months: [], month: null };
+    if (J.arr(o, 'months').length && !months.length) return null;
     return { years: years, year: o.year, months: months, month: months.indexOf(o.month) >= 0 ? o.month : Archive.selectYear(months) };
   }
 
