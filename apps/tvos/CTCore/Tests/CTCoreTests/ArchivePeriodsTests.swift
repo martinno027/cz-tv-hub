@@ -22,7 +22,7 @@ final class ArchivePeriodsTests: XCTestCase {
 
     func testGoldenChips() throws {
         let cases = try XCTUnwrap(golden()["chips"] as? [[String: Any]])
-        XCTAssertEqual(cases.count, 8)
+        XCTAssertEqual(cases.count, 9)
         for item in cases {
             let name = item["name"] as! String
             // the golden periods go through the parser, as the gateway's would
@@ -105,6 +105,16 @@ final class ArchivePeriodsTests: XCTestCase {
         XCTAssertEqual(ArchiveParser.periods(["years": [2026, 2025], "year": 2025, "month": 3]), whole, "no months key")
         XCTAssertEqual(ArchiveParser.periods(["years": [2026, 2025], "year": 2025, "months": NSNull(), "month": 3]), whole,
                        "months null")
+        // the gateway's form (T51 follow-up): wholeYear true with one month for pre-T51 builds = the year shown whole
+        let gateway: [String: Any] = ["years": [2026, 2025], "year": 2025, "months": [10], "month": 10, "wholeYear": true]
+        XCTAssertEqual(ArchiveParser.periods(gateway), whole, "wholeYear drops the compatibility month")
+        XCTAssertEqual(ArchiveParser.periods(gateway.merging(["months": "10"]) { $1 }), whole,
+                       "wholeYear decides, whatever the months")
+        XCTAssertEqual(ArchiveParser.periods(gateway.merging(["wholeYear": false]) { $1 }),
+                       ArchivePeriods(years: [2026, 2025], year: 2025, months: [10], month: 10), "wholeYear false = months")
+        XCTAssertEqual(ArchiveParser.periods(gateway.merging(["wholeYear": "true"]) { $1 })?.month, 10,
+                       "only a JSON true is a year shown whole")
+        XCTAssertNil(ArchiveParser.periods(gateway.merging(["year": 2024]) { $1 }), "the chosen year is still checked")
         let chips = ArchivePeriodRules.chips(whole)
         XCTAssertEqual(chips.years.filter(\.selected).map(\.value), [2025])
         XCTAssertTrue(chips.months.isEmpty)

@@ -125,6 +125,17 @@ class ArchivePeriodsTest {
         assertNull("months not a list = unknown, no chips", p("""{"years": [2026], "year": 2026, "months": 5, "month": 5}"""))
         assertEquals("months null = missing", ArchivePeriods(listOf(2026), 2026, emptyList(), null), p("""{"years": [2026], "year": 2026, "months": null}"""))
         assertNull("years only still needs a listed year", p("""{"years": [2026], "year": 2025, "months": [], "month": null}"""))
+        // T51 follow-up: `wholeYear: true` (the gateway's form, one month kept for old builds) = the year shown whole.
+        val wholeYear = ArchivePeriods(listOf(2026, 2025), 2025, emptyList(), null)
+        assertEquals("wholeYear with one month", wholeYear, p("""{"years": [2026, 2025], "year": 2025, "months": [10], "month": 10, "wholeYear": true}"""))
+        assertEquals("wholeYear wins over several months", wholeYear, p("""{"years": [2026, 2025], "year": 2025, "months": [10, 3], "month": 3, "wholeYear": true}"""))
+        assertEquals("wholeYear with empty months", wholeYear, p("""{"years": [2026, 2025], "year": 2025, "months": [], "wholeYear": true}"""))
+        assertNull("wholeYear still needs a listed year", p("""{"years": [2026], "year": 2025, "months": [10], "month": 10, "wholeYear": true}"""))
+        val months = ArchivePeriods(listOf(2026, 2025), 2025, listOf(10), 10)
+        assertNotEquals(wholeYear, months)
+        assertEquals("wholeYear false = months as sent", months, p("""{"years": [2026, 2025], "year": 2025, "months": [10], "month": 10, "wholeYear": false}"""))
+        assertEquals("wholeYear as a string is not true", months, p("""{"years": [2026, 2025], "year": 2025, "months": [10], "month": 10, "wholeYear": "true"}"""))
+        assertEquals("wholeYear 1 is not true", months, p("""{"years": [2026, 2025], "year": 2025, "months": [10], "month": 10, "wholeYear": 1}"""))
         assertNull("not an object", p("[2026]"))
         assertEquals("an unlisted month is the year's newest", 11, p("""{"years": [2026], "year": 2026, "months": [11, 10], "month": 4}""")?.month)
         val group = ArchiveParser.parseShow(200, show("""{"years": [2026], "year": 2026, "months": [11], "month": 11}""")).groups
@@ -175,6 +186,20 @@ class ArchivePeriodsTest {
         c.archiveShow("ct:10000000009", page = 2, year = group.periods?.year, month = group.periods?.month)
         val base = "http://10.0.2.2:18098/dvb/archive/show/ct:10000000009"
         assertEquals(listOf("$base?year=2025&page=1", "$base?year=2025&page=2"), seen)
+    }
+
+    /** T51 follow-up: the gateway's form (`wholeYear` with one month) sends no `month` on the next page. */
+    @Test fun theGatewaysWholeYearFormSendsNoMonth() {
+        val periods = """{"years": [2026, 2025], "year": 2025, "months": [10], "month": 10, "wholeYear": true}"""
+        val group = ArchiveParser.parseShow(200, show(periods)).groups.first()
+        assertTrue("no month row", ArchiveRules.monthChips(group.periods).isEmpty())
+        val seen = ArrayList<String>()
+        val c = DvbClient(DvbConfig("http://10.0.2.2:18098", "dev-key-dev-key-dev-key-dev-key-0000")) { url, _ ->
+            seen += url
+            HttpResponse(200, show(periods))
+        }
+        c.archiveShow("ct:10000000009", page = 2, year = group.periods?.year, month = group.periods?.month)
+        assertEquals(listOf("http://10.0.2.2:18098/dvb/archive/show/ct:10000000009?year=2025&page=2"), seen)
     }
 
     @Test fun requestsForAnotherYearOrMonth() {

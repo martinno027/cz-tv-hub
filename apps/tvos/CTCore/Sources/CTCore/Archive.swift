@@ -503,6 +503,8 @@ public enum ArchiveParser {
     /// order kept; the chosen year must be in the list, else no chips (the episodes still show). A month that is
     /// missing or not listed falls back to the year's newest (`ArchivePeriodRules.selectYear`, spec/apps.md).
     /// `"months": []` (or null, or left out) is a year shown whole (T51): year chips, no month, any `month` dropped.
+    /// `"wholeYear": true` is the gateway's form of the same (T51 follow-up): it also sends one month for app builds
+    /// from before T51, which rejected `months: []`; that month is dropped here, so no month row and no `?month`.
     static func periods(_ value: Any?) -> ArchivePeriods? {
         guard let item = value as? [String: Any] else { return nil }
         func ints(_ value: Any?, _ range: ClosedRange<Int>) -> [Int] {
@@ -515,6 +517,7 @@ public enum ArchiveParser {
         guard let year = number(item["year"]).map({ Int($0) }), years.contains(year) else { return nil }
         // T51 (lead's decision for all apps): `"months": []`, null or left out = a year shown whole, whatever
         // `month` says; another type, or a list none of which is a month (13, "3"), stays unknown: no chips
+        if item["wholeYear"] as? Bool == true { return ArchivePeriods(years: years, year: year, months: [], month: nil) }
         let listed: [Any]
         switch item["months"] {
         case nil, is NSNull: listed = []

@@ -178,9 +178,16 @@ object ArchiveParser {
      * missing or unlisted month is the year's newest ([ArchiveRules.selectYear]). No months (T51: `[]` or no key, a
      * year shown whole) means no month: `month` null, and a month sent anyway is dropped (the gateway ignores
      * `?month=` there too). Months that hold no valid month at all (`[13, "3"]`, not a list) are unknown: no periods.
+     * `wholeYear: true` (the gateway's form since the T51 follow-up: one month for builds from before T51) is a year
+     * shown whole whatever `months` holds: months empty, `month` null, so no month row and no `month` sent. Only the
+     * JSON boolean `true` counts; anything else falls back to `months` as above.
      */
     private fun periods(o: JsonObject): ArchivePeriods? {
         val years = o.ints("years").filter { it in 1800..3000 }.distinct().sortedDescending()
+        if (o.bool("wholeYear")) {
+            val year = o.int("year")?.takeIf { it in years } ?: return null
+            return ArchivePeriods(years, year, emptyList(), null)
+        }
         val rawMonths = o["months"]?.takeIf { it !is JsonNull }
         if (rawMonths != null && rawMonths !is JsonArray) return null
         val months = o.ints("months").filter { it in 1..12 }.distinct().sortedDescending()

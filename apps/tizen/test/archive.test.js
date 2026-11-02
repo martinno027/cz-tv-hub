@@ -556,10 +556,25 @@ test('periods: a year shown whole has no month (T51)', () => {
   assert.equal(golden.length, 1);
   // the golden cases' variants (a month next to no months, no months key, months none of which is one) pass the chips
   // test above through the parser; here what the parser makes of them
-  const variants = cases.periods.chips.filter((c) => c.periods && /T51/.test(c.name) && c !== golden[0]);
+  // the gateway's form (T51 follow-up): `wholeYear: true` with one month for app builds from before T51
+  const gateway = cases.periods.chips.filter((c) => c.periods && c.periods.wholeYear === true);
+  assert.equal(gateway.length, 1);
+  assert.deepEqual(p(gateway[0].periods), { years: [2026, 2025], year: 2025, months: [], month: null });
+  assert.equal(gateway[0].periods.months.length, 1); // the month it carries is dropped, not kept
+  const variants = cases.periods.chips.filter((c) => c.periods && /T51/.test(c.name) && c !== golden[0] && c !== gateway[0]);
   assert.equal(variants.length, 4);
   variants.forEach((c) => assert.deepEqual(p(c.periods), c.years.length ? { years: [2026, 2025], year: 2026, months: [], month: null } : null, c.name));
   assert.deepEqual(p(golden[0].periods), { years: [2026, 2025], year: 2025, months: [], month: null });
+  // only a real `true` is the flag: without it the same one month is a year with months (T32)
+  const flagged = { years: [2026, 2025], year: 2026, months: [10], month: 10 };
+  assert.deepEqual(p(flagged), { years: [2026, 2025], year: 2026, months: [10], month: 10 });
+  assert.deepEqual(p(Object.assign({}, flagged, { wholeYear: false })).months, [10]);
+  assert.deepEqual(p(Object.assign({}, flagged, { wholeYear: 'true' })).months, [10]);
+  assert.deepEqual(p(Object.assign({}, flagged, { wholeYear: true })), { years: [2026, 2025], year: 2026, months: [], month: null });
+  // a year not listed stays broken with the flag too
+  assert.equal(p({ years: [2026], year: 2024, months: [1], month: 1, wholeYear: true }), null);
+  // the next page of the gateway's whole year asks for the year alone, never its one month
+  assert.equal(A.showQuery(null, 2, { year: 2025, month: p(gateway[0].periods).month }), '?year=2025&page=2');
   // a stale month next to an empty list is dropped, as the gateway ignores ?month= for such a year; no months key
   // at all is the same (the lead's decision for all apps)
   const whole2026 = { years: [2026, 2025], year: 2026, months: [], month: null };

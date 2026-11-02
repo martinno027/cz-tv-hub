@@ -328,8 +328,9 @@
   /**
    * The generated periods of a long show (T32): {years, year, months, month} for ?year=&month= (a year alone = its
    * newest month, none = the newest year), null when the year or month is not listed (the gateway's 400). A year
-   * shown whole (T51: weekly, at most 100 episodes, here 2005–2011 of the generated shows) has `months: []`,
-   * `month: null`, and a month asked for it is ignored as the gateway does.
+   * shown whole (T51: weekly, at most 100 episodes, here 2005–2011 of the generated shows) comes in the gateway's
+   * form, `wholeYear: true` with its newest month as `months: [12]`, `month: 12` (for builds from before T51), and a
+   * month asked for it is ignored as the gateway does.
    */
   function demoPeriods(year, month, sample) {
     var all = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
@@ -342,7 +343,8 @@
     var y = year === null ? years[0] : Number(year);
     if (years.indexOf(y) < 0) return null;
     var months = monthsOf(y);
-    if (!months.length) return { years: years, year: y, months: [], month: null };
+    // the weekly episodes of demoYearEpisodes end in December: that is the year's newest month
+    if (!months.length) return { years: years, year: y, months: [12], month: 12, wholeYear: true };
     var m = month === null ? months[0] : Number(month);
     return months.indexOf(m) < 0 ? null : { years: years, year: y, months: months, month: m };
   }
@@ -364,7 +366,7 @@
   /** A daily episode of that month (Prague evening), newest first, `per` (15) a page; a year shown whole: weekly. */
   function demoMonthEpisodes(season, periods, page, per) {
     per = per || 15;
-    if (!periods.month) {
+    if (periods.wholeYear) {
       var weekly = demoYearEpisodes(season, periods.year);
       return { episodes: weekly.slice((page - 1) * per, page * per), nextPage: weekly.length > page * per ? page + 1 : null };
     }
