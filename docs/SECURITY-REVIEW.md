@@ -68,11 +68,20 @@ of "done".
 - Tailscale inside the apps (`apps/tailnet`): the bridge listens on `127.0.0.1` only and forwards only to the
   gateway `host:port` from the app's settings; Tailscale's log upload is compiled out (`ts_omit_logtail`) and disabled.
   *Wrong:* the bridge on `0.0.0.0`, a target taken from the request, or logs leaving the TV.
-- ČT stream answers (`/dvb/ct/live`, `/dvb/ct/vod`) go only to peers on the home LAN (`dvb/ctweb.py home_lan`:
-  RFC 1918, link-local, ULA, loopback; the tailnet `100.64.0.0/10` and `fd7a:115c:a1e0::/48` excluded; IPv4-mapped
-  IPv6 judged as IPv4), checked before ČT is asked (legal limit, tested with mutations). *Wrong:* a reverse proxy in
-  front of the gateway (`tailscale serve`, nginx): every tailnet request then comes from `127.0.0.1` and passes as
-  home.
+- ČT stream answers (`/dvb/ct/live`, `/dvb/ct/vod`) go to every client with the app key, at home and away (owner
+  2026-11-02, replacing the T27 home-LAN rule); only the fixed requests of `api.py` reach ČT (channel ids from
+  `channels.py`, digit-only idecs), ČT's answer is passed on unchanged and kept at most 60 s in memory. *Wrong:* a
+  stream answer without the app key or to the worker key, a client parameter or header forwarded to ČT, a signed URL
+  in a log or on disk.
+
+- HTTPS on 8443 (T47, `tls.py`): the **same handler** as 8098, so every route has the same key, worker-key,
+  `/admin` and web rules; only the transport differs (TLS 1.2+, the Tailscale certificate of the Pi's MagicDNS name,
+  which resolves only inside the tailnet; no Funnel, no `tailscale serve`, so the peer address stays the real one for
+  the sign-in log). Off while `/var/lib/cztvhub/tls/` has no loadable pair; a broken renewal keeps the old pair.
+  The tailnet ACL has to allow 8443 like 8098. *Wrong:* a second handler or route table for HTTPS, a plain-HTTP
+  answer or redirect on 8443, `tailscale serve`/Funnel in front of it, 8443 forwarded on the router. Known and
+  accepted: Let's Encrypt certificates are in the public Certificate Transparency logs, so the Pi's MagicDNS name
+  and the tailnet name are public (not reachable from outside).
 
 ### What leaves the Pi
 
@@ -125,6 +134,12 @@ of "done".
 
 - Keys and passwords only in `/etc/cztvhub/cztvhub.conf` (0600, user `cztvhub`) and the platform keychains / encrypted
   prefs on the TVs. *Wrong:* a key in a log line, a URL, a playlist, a committed file or a screenshot in the repo.
+- The HTTPS private key only in `/var/lib/cztvhub/tls/key.pem` (0600, owner `cztvhub`, directory 0750), written by
+  the root job `cztvhub-cert.service` running root's copy `/opt/cztvhub/cert.sh` (not the clone, not a path the
+  gateway user can write); the name comes from `tailscale status --json` (checked against a strict pattern), never
+  from a request. *Wrong:* the key with wider bits, in the journal (load errors log only the reason), in the repo
+  (tests make their certificates with `openssl` at run time; `check_public.py` refuses committed private keys), or
+  root running a script from a directory the gateway user owns.
 - The apps' Tailscale node state (its private keys) only in the Keychain / encrypted prefs, passed to the bridge in
   memory; a Tailscale auth key typed on the TV is used once and never stored. *Wrong:* `tailscaled.state` or the key
   in a plain file, preferences or a log line.

@@ -75,7 +75,9 @@ or the button on `/admin` (`update.sh`, below). `install.sh` also installs `cztv
 `cztvhub-update.service` (rendered from `deploy/cztvhub-update.service.in` with the clone's absolute path and owner;
 only for a git clone whose path is `/[A-Za-z0-9._/-]+`, else it prints "update from /admin: not installed (…)") and
 writes `/opt/cztvhub/install.json` (the commit, once the service answers). Run as root (by the update) it sets git's
-`safe.directory` for the clone.
+`safe.directory` for the clone. It also installs `/opt/cztvhub/cert.sh` + `cztvhub-cert.service`/`.timer` (HTTPS on
+8443, below), enables the timer and runs the script once after the service answers; when that fails it prints the
+reason and "https: off (reason above)", which does not fail the install.
 
 After the restart `install.sh` waits up to 30 s for `/health` (`server/deploy/health.sh`; the service first loads
 the index of the continuous recording, which grows with every recorded day) and prints "running on port … (ready
@@ -87,6 +89,31 @@ Can go wrong: `install-dvb.sh` asks for a TVHeadend admin name and password (int
 127.0.0.1 only — the script checks it and warns. Before T07 the check waited only 1 s and reported `curl: (7) Failed
 to connect` for a service that was fine a moment later. "web: not installed" means `apps/web/index.html` is missing in
 the clone (or staging failed, its reason is printed above); the old `/opt/cztvhub/web` then stays.
+
+</details>
+
+<details>
+<summary><code>sudo bash /opt/cztvhub/cert.sh</code> — the Tailscale certificate for HTTPS on 8443 (T47; daily by <code>cztvhub-cert.timer</code>)</summary>
+
+Asks `tailscale` for the certificate of the Pi's own MagicDNS name (`Self.DNSName` of `tailscale status --json`,
+trailing dot removed) and puts it into `/var/lib/cztvhub/tls/` as `cert.pem` + `key.pem` (owner `cztvhub`, key 0600,
+directory 0750); the files are replaced only when tailscale hands out a different certificate. The gateway checks
+the files at every new HTTPS connection and loads a changed pair without a restart; before the first pair exists
+it looks every minute and starts the HTTPS port once it is there (`https: listening on …:8443`). Run by
+`cztvhub-cert.service` (root, oneshot) from `cztvhub-cert.timer` (daily, 5 min after boot, missed runs caught up)
+and once by `install.sh`. By hand: `sudo systemctl start cztvhub-cert.service; journalctl -u cztvhub-cert -n 20`,
+or the script itself, which prints its reason. Tests: `bash server/deploy/cert.test.sh` (fake `tailscale` and
+`chown` on PATH, temp dir; never the real Pi); the listener: `server/tests/test_tls.py` (certificates made with
+`openssl` at run time, skipped with the reason without it).
+
+Can go wrong (each prints `cert: …` and exits 1; the plain port 8098 is never affected, HTTPS stays off or keeps
+the old pair): `tailscale is not installed`; `tailscale status failed: …` (tailscaled not running);
+`not running here (state NeedsLogin)` (`sudo tailscale up`); `no MagicDNS name` (MagicDNS off in the Tailscale
+admin console); `tailscale cert for … failed: …` with tailscale's text (HTTPS Certificates not enabled in the
+admin console, or Let's Encrypt unreachable); `/var/lib/cztvhub does not exist yet` (the service never started).
+In the gateway's journal: `https: off (no certificate in /var/lib/cztvhub/tls …)`, `https: off (port 8443: Address
+already in use)`, `https: certificate in … does not load (…)` (a mismatched or broken pair; the previous one stays).
+The browser cannot reach `https://…:8443` while the Tailscale ACL allows only 8098.
 
 </details>
 

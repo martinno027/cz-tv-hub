@@ -772,16 +772,35 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
   segments taken to be on the same host — check during a broadcast, O008). Behind a reverse proxy
   (`tailscale serve`, nginx) every request would look like loopback = home: not supported (SECURITY-REVIEW), `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: no-referrer`. `/web` redirects to `/web/`.
+- **HTTPS for the installed web app (T47; owner 2026-11-02: an own window without any browser bar)**: browsers
+  offer "Install" (a window with no address strip) only on a secure origin. The gateway can additionally serve
+  **HTTPS on port 8443** with the Pi's **Tailscale certificate** for its MagicDNS name (`cztvhub.<tailnet>.ts.net`),
+  with **the same request handler** as 8098, so the same routes and rules (8098 stays for the TV apps, Kodi and the
+  LAN; the T46 popup window works on either, within its own origin). Nothing to configure (port 8443, directory
+  `/var/lib/cztvhub/tls/`, defaults in `tls.py`): **off while `cert.pem` + `key.pem` there are missing or do not
+  load** (a feature with a missing value is off; logged once as `https: off (…)`); the gateway looks again every
+  minute and starts the port once they are there, without a restart. TLS 1.2 or newer, HTTP/1.1; the handshake runs
+  in the connection's own thread; nothing plain is answered on 8443. The pair is checked at every new connection
+  and loaded again when a file changed (renewal); a pair that does not load (half-written, mismatched) leaves the
+  previous one in use. A root job (`cztvhub-cert.service` + a daily timer, installed by `install.sh`, also via
+  `install-dvb.sh`) runs root's copy `/opt/cztvhub/cert.sh`: `tailscale cert` for `Self.DNSName` of `tailscale
+  status --json` (trailing dot removed) into `/var/lib/cztvhub/tls/` (key 0600, owner `cztvhub`, directory 0750),
+  replacing the files only when the certificate changed; nothing else gets the key. Without Tailscale, MagicDNS or
+  HTTPS certificates it exits with the reason and nothing else changes. The owner enables "HTTPS certificates" once
+  in the Tailscale admin console and allows port 8443 in the tailnet ACL (RASPBERRY step). No Funnel, no `tailscale
+  serve`, no public port: the name resolves only inside the tailnet (it is public in Certificate Transparency logs,
+  as every Let's Encrypt name). The installed app opens `https://cztvhub.<tailnet>.ts.net:8443/web/`; its manifest's
+  `start_url`/`scope` are relative to the origin (`/web/`), the CSP names only `https:` hosts besides `'self'`.
+  The browser keeps the key per origin, so the key is entered once more on the https address.
 - **ČT for the web** (app key as for every `/dvb/*`, worker key `403`): the gateway calls the same ČT API the apps
   call, from the Pi, and answers **ČT's status and JSON body unchanged** (the web reuses the Samsung parsers), with
   the honest user agent of `api.py`; nothing else of the request is forwarded (no client headers, no cookies):
   - `GET /dvb/ct/live/<CH_n>` → ČT `playlist-live … /channel/<CH_n>` (`CH_n` from `channels.py` only, else `404`);
   - `GET /dvb/ct/vod/<idec>` → ČT `playlist-vod … /media/external/<idec>` (`idec` only as real idecs look, digits,
     checked on the whole schedule feed when building; else `400`);
-  - **live and vod only for clients on the home LAN** (the peer address in the private IPv4/IPv6 ranges, **not**
-    the tailnet `100.64.0.0/10` / `fd7a:115c:a1e0::/48`, not loopback through a proxy): otherwise `403 {"error":
-    "ČT jde v prohlížeči přehrát jen doma. …"}` without asking ČT (legal-guard 2026-11-01: the "home only" limit is
-    the gateway's, not ČT's IP check; a legal limit, so tested with a mutation). The schedule is open on both;
+  - **live and vod for every client with the app key, at home and away** (owner 2026-11-02: „brána dá ČT
+    vždycky“, replacing the T27 home-LAN-only rule). ČT's own answer decides: an IP-bound URL that ČT
+    refuses away from home shows ČT's error in the player. The schedule as before;
   - `GET /dvb/ct/schedule?channels=<slug,…>&date=YYYY-MM-DD` → ČT GraphQL with the **fixed** schedule query of
     `api.py` (`channels` 1–6 of the known GraphQL names, `date` within the guide range of 7 days back and 2 ahead,
     else `400`). Never a client-supplied query.

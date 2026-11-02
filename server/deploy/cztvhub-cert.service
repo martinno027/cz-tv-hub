@@ -1,0 +1,14 @@
+# The Pi's Tailscale HTTPS certificate for the gateway's port 8443 (spec/dvb-gateway.md "HTTPS for the installed web
+# app", T47). Installed by install.sh, started by cztvhub-cert.timer. As root: only root may ask tailscaled for the
+# certificate; the script hands it to the service user (deploy/cert.sh). Fails with the reason when HTTPS
+# certificates are not enabled in the tailnet; the gateway's plain port is not affected.
+[Unit]
+Description=cz-tv-hub: Tailscale HTTPS certificate for port 8443
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/cztvhub/cert.sh
+TimeoutStartSec=5min
+PrivateTmp=true

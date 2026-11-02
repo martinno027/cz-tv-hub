@@ -20,6 +20,7 @@ jobs:
       - run: shellcheck -x scripts/*.sh scripts/lib/*.sh server/deploy/*.sh
       - run: bash server/deploy/health.test.sh
       - run: bash server/deploy/update.test.sh  # T33: the fixed update script (temp git repos, fake install.sh)
+      - run: bash server/deploy/cert.test.sh  # T47: the Tailscale certificate for HTTPS (fake tailscale)
       - run: ./scripts/merge-dev-main.test.sh
 
   server:
