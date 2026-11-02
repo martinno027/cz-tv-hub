@@ -174,14 +174,19 @@ object ArchiveParser {
 
     /**
      * `periods` (T32): years and months as whole numbers (years 1800–3000, months 1–12), duplicates dropped, newest
-     * first. A selected year the list does not hold, or no year or month at all, means no periods (the episodes still
-     * show); a missing or unlisted month is the year's newest ([ArchiveRules.selectYear]).
+     * first. A selected year the list does not hold, or no year at all, means no periods (the episodes still show); a
+     * missing or unlisted month is the year's newest ([ArchiveRules.selectYear]). No months (T51: `[]` or no key, a
+     * year shown whole) means no month: `month` null, and a month sent anyway is dropped (the gateway ignores
+     * `?month=` there too). Months that hold no valid month at all (`[13, "3"]`, not a list) are unknown: no periods.
      */
     private fun periods(o: JsonObject): ArchivePeriods? {
         val years = o.ints("years").filter { it in 1800..3000 }.distinct().sortedDescending()
+        val rawMonths = o["months"]?.takeIf { it !is JsonNull }
+        if (rawMonths != null && rawMonths !is JsonArray) return null
         val months = o.ints("months").filter { it in 1..12 }.distinct().sortedDescending()
+        if (months.isEmpty() && !(rawMonths as? JsonArray).isNullOrEmpty()) return null
         val year = o.int("year")?.takeIf { it in years } ?: return null
-        val month = o.int("month")?.takeIf { it in months } ?: ArchiveRules.selectYear(months) ?: return null
+        val month = o.int("month")?.takeIf { it in months } ?: ArchiveRules.selectYear(months)
         return ArchivePeriods(years, year, months, month)
     }
 

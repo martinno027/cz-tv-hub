@@ -4,7 +4,8 @@
  * · year · kind · countries · episode count), the TMDb rating, description, creators; a film gets the T15 buttons
  * (Pokračovat od … / Přehrát / Zpět), a series the season chips and its episodes (each Přehrát or Pokračovat od …,
  * not playable ones dimmed), and "Nahráno z antény" lists our recorded episodes. A ČT list of more than 100 episodes
- * comes a month at a time: year and month chips under the season chips (T32). The episode list is built around
+ * comes a month at a time: year and month chips under the season chips (T32); a year of at most 100 episodes comes
+ * whole, with no month row (T51). The episode list is built around
  * the focus only. Return closes it; after the player the buttons and positions are recomputed.
  */
 (function (root) {
@@ -16,7 +17,7 @@
 
   var EP_STEP = 76;
   var EP_VISIBLE = 5;
-  var EP_VISIBLE_PERIODS = 4; // with the year and month chips
+  var EP_VISIBLE_PERIODS = 4; // with the year (and month) chips: a year row alone frees 60 px, less than a line
   var ZONES = ['buttons', 'seasons', 'years', 'months', 'episodes']; // top to bottom
   var PAGE_AHEAD = 4; // the next page of episodes is asked for this many episodes before the end
 
@@ -248,7 +249,7 @@
     return { years: periods.years, year: this.choice.year, months: periods.months, month: this.choice.month };
   };
 
-  /** Year and month chips (T32) under the season chips; the focus leaves a row that is gone. */
+  /** Year and month chips (T32) under the season chips (no month row for a year shown whole, T51); the focus leaves a row that is gone. */
   ShowPage.prototype.renderPeriods = function () {
     var chips = A.periodChips(this.periods());
     [['sh-years', chips.years], ['sh-months', chips.months]].forEach(function (row) {
@@ -266,6 +267,8 @@
     this.monthFocus = Math.min(this.monthFocus, Math.max(0, chips.months.length - 1));
     if (!chips.years.length && (this.zone === 'years' || this.zone === 'months')) {
       this.zone = this.hasSeasons() ? 'seasons' : this.buttons.length ? 'buttons' : 'none';
+    } else if (!chips.months.length && this.zone === 'months') {
+      this.moveZoneTo('years'); // a year shown whole (T51) has no month row to stay on
     }
   };
 
@@ -415,7 +418,7 @@
     return group ? group.season : null;
   };
 
-  /** OK on a year chip (a year alone: the gateway answers with its newest month) or a month chip. */
+  /** OK on a year chip (a year alone: the gateway answers with its newest month, or the year whole, T51) or a month chip. */
   ShowPage.prototype.choosePeriod = function () {
     var chips = A.periodChips(this.periods());
     var period;

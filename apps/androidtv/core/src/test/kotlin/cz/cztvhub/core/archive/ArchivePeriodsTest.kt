@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -52,11 +53,13 @@ class ArchivePeriodsTest {
     @Test fun chipsFollowTheGoldenCases() {
         val cases = golden.getValue("chips").jsonArray
         assertTrue(cases.size >= 3)
+        assertTrue("a rejected periods object is among the cases (T51)", cases.any { it.jsonObject.getValue("periods") !is JsonNull && it.jsonObject.getValue("years").jsonArray.isEmpty() })
         for (case in cases) {
             val o = case.jsonObject
             val name = o.getValue("name").jsonPrimitive.content
             val periods = o.getValue("periods").takeIf { it !is JsonNull }?.let { parsed(it) }
-            if (o.getValue("periods") !is JsonNull) assertTrue("$name: parsed", periods != null)
+            // Every case goes through the parser; chips expected = periods parsed, none = rejected (unknown stays unknown).
+            if (o.getValue("periods") !is JsonNull) assertEquals("$name: parsed", o.getValue("years").jsonArray.isNotEmpty(), periods != null)
             assertEquals("$name years", labels(o.getValue("years")), ArchiveRules.yearChips(periods).map { it.label to it.selected })
             assertEquals("$name months", labels(o.getValue("months")), ArchiveRules.monthChips(periods).map { it.label to it.selected })
         }
@@ -77,11 +80,15 @@ class ArchivePeriodsTest {
             val o = case.jsonObject
             val months = o.getValue("months").jsonArray.map { it.jsonPrimitive.int }
             val name = o.getValue("name").jsonPrimitive.content
-            assertEquals(name, o.getValue("month").jsonPrimitive.int, ArchiveRules.selectYear(months))
+            val month = o.getValue("month").jsonPrimitive.intOrNull
+            assertEquals(name, month, ArchiveRules.selectYear(months))
             // The same rule decides when an answer names a year but no month (or one it does not list).
             val noMonth = ArchiveParser.parseShow(200, show("""{"years": [2026, 2025], "year": 2025, "months": ${months.reversed()}}"""))
-            assertEquals("$name, answer without month", o.getValue("month").jsonPrimitive.int, noMonth.groups.first().periods?.month)
+            val periods = noMonth.groups.first().periods
+            assertTrue("$name: still periods (year chips)", periods != null)
+            assertEquals("$name, answer without month", month, periods?.month)
         }
+        assertTrue("a year shown whole is among the cases (T51)", golden.getValue("selectYear").jsonArray.any { it.jsonObject.getValue("month") is JsonNull })
         assertNull(ArchiveRules.selectYear(emptyList()))
     }
 
@@ -109,7 +116,15 @@ class ArchivePeriodsTest {
         )
         assertNull("the selected year must be listed", p("""{"years": [2026], "year": 2020, "months": [1], "month": 1}"""))
         assertNull("no year", p("""{"years": [2026], "months": [1], "month": 1}"""))
-        assertNull("no months", p("""{"years": [2026], "year": 2026, "months": [], "month": 1}"""))
+        // T51: no months = the year shown whole, no month (a month sent anyway is dropped, like the gateway's `?month=`).
+        assertEquals("years only", ArchivePeriods(listOf(2026, 2025), 2025, emptyList(), null), p("""{"years": [2026, 2025], "year": 2025, "months": [], "month": null}"""))
+        assertEquals("years only, no month key", ArchivePeriods(listOf(2026), 2026, emptyList(), null), p("""{"years": [2026], "year": 2026, "months": []}"""))
+        assertEquals("years only, months key missing", ArchivePeriods(listOf(2026), 2026, emptyList(), null), p("""{"years": [2026], "year": 2026}"""))
+        assertEquals("a month without months is dropped", ArchivePeriods(listOf(2026), 2026, emptyList(), null), p("""{"years": [2026], "year": 2026, "months": [], "month": 1}"""))
+        assertNull("only invalid months = unknown, no chips", p("""{"years": [2026], "year": 2026, "months": [0, 13, "5"], "month": 5}"""))
+        assertNull("months not a list = unknown, no chips", p("""{"years": [2026], "year": 2026, "months": 5, "month": 5}"""))
+        assertEquals("months null = missing", ArchivePeriods(listOf(2026), 2026, emptyList(), null), p("""{"years": [2026], "year": 2026, "months": null}"""))
+        assertNull("years only still needs a listed year", p("""{"years": [2026], "year": 2025, "months": [], "month": null}"""))
         assertNull("not an object", p("[2026]"))
         assertEquals("an unlisted month is the year's newest", 11, p("""{"years": [2026], "year": 2026, "months": [11, 10], "month": 4}""")?.month)
         val group = ArchiveParser.parseShow(200, show("""{"years": [2026], "year": 2026, "months": [11], "month": 11}""")).groups
@@ -132,6 +147,34 @@ class ArchivePeriodsTest {
         assertEquals(listOf("226000000002", "226000000002"), appended.groups[0].episodes.map { it.idec })
         assertEquals("a later page keeps the period", 10, appended.groups[0].periods?.month)
         assertNull("page 1 without periods drops the chips", ArchiveRules.withSeasonPage(replaced, noPeriods, null, append = false).groups[0].periods)
+    }
+
+    /** T51: a year of at most 100 episodes is listed whole: year chips, no month row, its pages under `?year=` alone. */
+    @Test fun aYearShownWholeHasNoMonthRowAndPagesByYear() {
+        val periods = """{"years": [2026, 2025], "year": 2025, "months": [], "month": null}"""
+        val whole = ArchiveParser.parseShow(200, show(periods))
+        val group = whole.groups.first()
+        assertTrue("still the iVysílání group", ArchiveRules.isCtGroup(group.copy(episodes = emptyList())))
+        assertEquals(listOf("2026" to false, "2025" to true), ArchiveRules.yearChips(group.periods).map { it.label to it.selected })
+        assertTrue("no month row", ArchiveRules.monthChips(group.periods).isEmpty())
+        assertNull(group.periods?.month)
+        assertEquals("pages as today", 2, group.nextPage)
+        // The next page of the whole year keeps the year chips and adds its episodes.
+        val page2 = ArchiveParser.parseShow(200, show(periods).replace("226000000001", "226000000002"))
+        val appended = ArchiveRules.withSeasonPage(whole, page2, null, append = true)
+        assertEquals(listOf("226000000001", "226000000002"), appended.groups[0].episodes.map { it.idec })
+        assertEquals(group.periods, appended.groups[0].periods)
+
+        val seen = ArrayList<String>()
+        val c = DvbClient(DvbConfig("http://10.0.2.2:18098", "dev-key-dev-key-dev-key-dev-key-0000")) { url, _ ->
+            seen += url
+            HttpResponse(200, show(periods))
+        }
+        // What the page sends: a year chip (month null), then the next page with the shown periods' month (null).
+        c.archiveShow("ct:10000000009", year = 2025, month = null)
+        c.archiveShow("ct:10000000009", page = 2, year = group.periods?.year, month = group.periods?.month)
+        val base = "http://10.0.2.2:18098/dvb/archive/show/ct:10000000009"
+        assertEquals(listOf("$base?year=2025&page=1", "$base?year=2025&page=2"), seen)
     }
 
     @Test fun requestsForAnotherYearOrMonth() {

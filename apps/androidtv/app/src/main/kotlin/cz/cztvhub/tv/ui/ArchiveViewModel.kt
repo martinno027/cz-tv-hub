@@ -47,7 +47,8 @@ data class ArchiveGrid(
 
 /**
  * An open show page; [season] the season chip shown, its episodes replace the show's first group. [year]/[month] the
- * period chips chosen (T32; [month] null while a year chosen alone loads), kept while the page is open.
+ * period chips chosen (T32; [month] null while a year chosen alone loads, and for a year shown whole, T51), kept while
+ * the page is open.
  */
 data class ShowState(
     val card: ArchiveCard,
@@ -359,7 +360,7 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
         loadEpisodes(state, season, year = null, month = null, more = false)
     }
 
-    /** A year chip (T32): its newest month (the gateway picks it), page 1. */
+    /** A year chip (T32): `?year=` alone, the gateway picks its newest month or lists it whole (T51), page 1. */
     fun loadYear(year: Int) {
         val state = _show.value ?: return
         if (state.year == year) return
