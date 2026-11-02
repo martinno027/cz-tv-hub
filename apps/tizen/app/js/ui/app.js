@@ -114,6 +114,7 @@
       this.profile = this.makeProfile();
       this.household = this.makeHousehold();
       if (!this.profile.signedIn()) this.showPrefs(this.household.effective(), true);
+      this.watch = this.makeWatch();
       this.player = new CT.Player(this);
       this.programme = new CT.ProgrammePage(this);
       this.numberEntry = new CT.NumberEntry(function (n) { self.playNumber(n); });
@@ -130,6 +131,7 @@
         else if (key && self.tab === 'archive') self.screens.archive.onKeyUp(key);
       });
       this.watchVisibility(document);
+      this.watchPageHide(root);
       this.fitStage();
       root.addEventListener('resize', function () { self.fitStage(); });
 
@@ -151,6 +153,21 @@
     watchVisibility: function (doc) {
       var self = this;
       doc.addEventListener('visibilitychange', function () { self.onVisibility(doc.hidden); });
+    },
+
+    /**
+     * The page goes away (the web: the tab or window closed or reloaded, the popup of T46 closed; Samsung: the app
+     * exits): the watch session in progress ends with the platform's last send. A hidden page is not this: Samsung's
+     * player stops through suspend(), the web plays on in the background (T41), which is still watching.
+     */
+    watchPageHide: function (win) {
+      var self = this;
+      win.addEventListener('pagehide', function () { self.player.reportStop(true); });
+      // back from the browser's back/forward cache with the player still open: a session of its own
+      win.addEventListener('pageshow', function (e) {
+        var player = self.player;
+        if (e && e.persisted && player.isOpen() && player.target) player.reportStart(player.request, player.target);
+      });
     },
 
     onVisibility: function (hidden) {
@@ -190,6 +207,23 @@
           self.toast(CT.Profile.MESSAGES.SIGNED_OUT);
           self.screens.settings.profileSignedOut();
         }
+      });
+    },
+
+    /**
+     * Watch reports (spec/apps.md "Watch reports (T53)"): to this gateway only, a 5 s transport of its own (never the
+     * app's 20 s one, nothing waits for it); the platform may send the last stop of a closing page another way (the
+     * web: fetch keepalive). Off until a status check says `watchLog: true`.
+     */
+    makeWatch: function () {
+      var self = this;
+      var send = CT.Demo.enabled ? CT.Demo.transport : CT.xhrTransport(CT.Watch.TIMEOUT_MS);
+      return new CT.Watch.Reporter({
+        config: function () { return self.dvbConfig; },
+        send: send,
+        sendFinal: CT.Platform.watchFinalSend && !CT.Demo.enabled ? CT.Platform.watchFinalSend(send) : null,
+        profileToken: function () { return self.profile.signedIn() ? self.profile.token : null; },
+        client: function () { return CT.ClientHeader.current(); }
       });
     },
 
@@ -296,6 +330,7 @@
       this.dvbChannels = [];
       this.dvbState = config ? { channels: [], onAir: {}, error: null } : null;
       this.dvbThumbs = false;
+      this.watch.setEnabled(false); // until this gateway's status says otherwise
       if (CT.Platform.onGatewayConfig) CT.Platform.onGatewayConfig(config);
       this.images.clear('gw');
       this.screens.archive.reset();
@@ -312,16 +347,23 @@
       this.fetchDefaults();
     },
 
-    /** Whether the gateway offers thumbnails (asked on setup and every few minutes; off when it does not answer). */
+    /**
+     * The gateway's status (on setup and every few minutes): whether it offers thumbnails and keeps the watch log
+     * (T53); both off when it does not answer.
+     */
     checkThumbs: function () {
       var self = this;
       var repo = this.dvbRepo;
       if (!repo) return;
       this.thumbsCheckedAt = Date.now();
       repo.client.status().then(function (st) {
-        if (self.dvbRepo === repo) self.setDvbThumbs(st.thumbnails);
+        if (self.dvbRepo !== repo) return;
+        self.setDvbThumbs(st.thumbnails);
+        self.watch.setEnabled(st.watchLog);
       }, function () {
-        if (self.dvbRepo === repo) self.setDvbThumbs(false);
+        if (self.dvbRepo !== repo) return;
+        self.setDvbThumbs(false);
+        // the watch log keeps the last answer (initially off): a missed check must not end sessions (T53)
       });
     },
 

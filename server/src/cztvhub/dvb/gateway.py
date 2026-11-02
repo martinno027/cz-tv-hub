@@ -20,6 +20,7 @@ from typing import Any, Callable, Mapping
 
 from .. import api as ct_api
 from .. import logsafe
+from ..channels import BY_ID as CT_BY_ID
 from ..channels import CHANNELS as CT_CHANNELS
 from ..config import Config
 from . import archive_catalog as catalog
@@ -41,7 +42,10 @@ from .epgstore import EpgHistory, merge_past
 from . import profiles as prof
 from .defaults import DefaultsStore
 from .profiles import ProfileError, ProfileStore
-from .signinlog import SigninLog
+from .signinlog import SigninLog, client_info
+from .signinlog import network as signinlog_network
+from . import watchlog
+from .defaults import PSP_STREAMS
 from .thumbs import Settings, Thumbnails, ThumbsBusy
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
 
@@ -52,6 +56,8 @@ BREAKS_RE = re.compile(rf"^/dvb/recording/({UUID})/breaks$")
 THUMB_RE = re.compile(rf"^/dvb/recording/({UUID})/thumb\.jpg$")
 TIMELINE_RE = re.compile(rf"^/dvb/timeline/({UUID})(\.m3u8)?$")
 JOBS_PATH = "/dvb/ads/jobs"
+WATCH_PATH = "/dvb/watch"  # watch reports (spec "Watch log", T53)
+PSP_NAMES = {key.split(":", 1)[1]: name for key, name in PSP_STREAMS}  # the apps' Chamber stream ids
 PROFILE_PREFIX = "/dvb/profile"  # /dvb/profile, /dvb/profile/logout, /dvb/profiles, /dvb/profiles/login
 PROFILE_HEADER = "X-Cztvhub-Profile"
 COOKIE_NAME = "cztvhub_key"
@@ -128,7 +134,8 @@ class DvbGateway:
                  popen: Callable[..., Any] | None = None, playlist_timeout: float = PLAYLIST_TIMEOUT,
                  log: Callable[[str], None] = print, archive: Archive | None = None,
                  profiles: ProfileStore | None = None, defaults: DefaultsStore | None = None,
-                 signin: SigninLog | None = None):
+                 signin: SigninLog | None = None, watch: watchlog.WatchLog | None = None,
+                 clock: Callable[[], float] = time.monotonic):
         self.cfg = cfg
         self.dvb = cfg.dvb
         tvh = cfg.tvheadend
@@ -149,6 +156,8 @@ class DvbGateway:
         self.defaults = defaults or DefaultsStore(self.dvb.state_dir, log=log)
         # connections and profile events for /admin "Přihlášení" (spec "Sign-in log"); never served on /dvb/*
         self.signin = signin or SigninLog(self.dvb.state_dir, now=now, log=log)
+        # what is watched, for /admin "Sledování" (spec "Watch log"); off by default, never served on /dvb/*
+        self.watch = watch or watchlog.WatchLog(self.dvb.state_dir, self.settings, now=now, clock=clock, log=log)
         # real programme starts from the broadcast's EIT (T14 phase 1: measured only), kept as long as recordings
         self.eit = EitStore(self.dvb.state_dir, lambda: self.archive.max_days(), log=log)
         if archive is None:
@@ -255,6 +264,8 @@ class DvbGateway:
                 return self._worker_route(method, path, query, body)  # never in the sign-in log
             if path.startswith(PROFILE_PREFIX):
                 return self._profile_route(method, path, headers, body, client)
+            if path == WATCH_PATH:
+                return self._watch_route(method, headers, body, client)
             if method == "GET" and path == "/dvb/status":
                 self.signin.connection(client, headers)  # the only other route that reads X-Cztvhub-Client
             if method != "GET":
@@ -403,6 +414,7 @@ class DvbGateway:
             except TvhError as exc:
                 self.log(f"dvb: EPG history: {exc}")
             self.signin.trim()  # nothing older than 90 days waits for the next entry or start
+            self.watch.trim()  # ended sessions written, nothing older than 30 days kept
             if self._collector_stop.wait(EPG_COLLECT_SECONDS):
                 return
 
@@ -430,7 +442,7 @@ class DvbGateway:
             disk = {"freeBytes": 0, "totalBytes": 0}
         return json_response(200, {"enabled": True, "retentionDays": self.archive.max_days(), "tuners": tuners,
                                    "disk": disk, "tvheadendReachable": reachable,
-                                   "thumbnails": self.thumbs.enabled})
+                                   "thumbnails": self.thumbs.enabled, "watchLog": self.watch.enabled})
 
     def channels(self) -> Response:
         return json_response(200, {"channels": [
@@ -915,6 +927,102 @@ class DvbGateway:
     def _profile_logout(self, token: str, _body: bytes, headers: Mapping[str, str], client: str) -> Response:
         self.signin.logout(self.profiles.logout(token), client, headers)
         return Response(204, b"", JSON, {"Cache-Control": "no-store"})
+
+    # -- watch log (watchlog.py) -----------------------------------------------------------
+    def _watch_route(self, method: str, headers: Mapping[str, str], body: bytes, client: str) -> Response:
+        """``POST /dvb/watch``: 204 whenever the key is right (off, unknown session, over a limit: dropped), 400
+        only for a body that is not a report; the body is never logged or answered. The key must come as the
+        bearer header: a report writes the log, and the cookie alone never changes anything (spec/web.md
+        "Security", CSRF: a foreign page could otherwise forge entries)."""
+        scheme, _, key = (headers.get("Authorization") or "").partition(" ")
+        if scheme.lower() != "bearer" or not _same(key.strip(), self.dvb.key):
+            raise HttpError(403, "Hlášení o sledování potřebuje klíč v hlavičce Authorization")
+        if method != "POST":
+            raise HttpError(405, "Nepodporovaná metoda")
+        try:
+            report = watchlog.parse_report(body)
+        except watchlog.BadReport:
+            raise HttpError(400, "Neplatné hlášení o sledování")
+        self.watch.report(report, client, lambda: self._watch_entry(report, headers, client))
+        return Response(204, b"", JSON, {"Cache-Control": "no-store"})
+
+    def _watch_entry(self, report: Mapping[str, Any], headers: Mapping[str, str], client: str) -> dict:
+        """The fixed fields of a new session, in a neutral shape: the profile from its session token, the device
+        as the sign-in log, ``source``/``mode`` from the lists, the channel's name from the gateway's own
+        catalogues, the programme from the gateway's own data where it has it, else the client's title."""
+        entry: dict[str, Any] = {}
+        token = headers.get(PROFILE_HEADER) or ""
+        if token:
+            try:
+                entry["profile"] = self.profiles.get(token)["name"]
+            except ProfileError:
+                pass
+        entry.update(address=client, network=signinlog_network(client))
+        entry.update({k: v for k, v in client_info(headers).items() if v is not None})
+        source = watchlog.neutral(report.get("source"), watchlog.SOURCES)
+        mode = watchlog.neutral(report.get("mode"), watchlog.MODES)
+        raw = report.get("channel") if isinstance(report.get("channel"), str) else ""
+        channel, title = watchlog.UNKNOWN, None
+        try:
+            if source == "ct" and raw in CT_BY_ID:
+                channel = CT_BY_ID[raw].name
+                title = self._watch_ct_title(CT_BY_ID[raw].slug, mode, report.get("idec"))
+            elif source == "psp" and raw in PSP_NAMES:
+                channel = PSP_NAMES[raw]
+            elif source == "dvb":
+                names = {c.uuid: c.name for c in self._channel_list()}  # hidden channels are not offered
+                if raw in names:
+                    channel = names[raw]
+                    title = self._watch_dvb_title(raw, mode, report.get("recording"))
+                elif mode in ("recording", "timeline"):
+                    # Archiv / Pokračovat know only the recording: its own channel and programme (T53 follow-up)
+                    found = self._watch_recording(report.get("recording"))
+                    if found is not None and found[0] in names:
+                        channel, title = names[found[0]], found[1]
+        except TvhError:
+            pass  # TVHeadend down: the channel stays unknown, the client's title is kept
+        entry.update(source=source, mode=mode, channel=channel)
+        title = watchlog.clean_title(title) or watchlog.clean_title(report.get("title"))
+        if title:
+            entry["title"] = title
+        return entry
+
+    def _watch_dvb_title(self, channel: str, mode: str, recording: Any) -> str | None:
+        """The guide's programme now (live) or the recording's title (recording, timeline)."""
+        if mode in ("recording", "timeline"):
+            found = self._watch_recording(recording)
+            return found[1] if found is not None and found[0] == channel else None
+        if mode != "live":
+            return None
+        now = int(self.now())
+        return next((e.title for e in self._programmes(channel, now, now + 1) if e.start <= now < e.stop), None)
+
+    def _watch_recording(self, recording: Any) -> tuple[str, str | None] | None:
+        """(channel id, programme title or None) of a recording: a continuous-recording id ``b<channel>-<start>-
+        <end>`` (title from the EPG programme with exactly those times) or a TVHeadend DVR uuid; None = unknown."""
+        if not isinstance(recording, str) or not re.match(rf"^{UUID}$", recording):
+            return None
+        parsed = parse_recording_id(recording)
+        if parsed:
+            ch, start, end = parsed
+            return ch, next((e.title for e in self._programmes(ch, start, end)
+                             if e.start == start and e.stop == end), None)
+        entry = next((e for e in self.client.dvr_entries("grid") if e.uuid == recording), None)
+        return (entry.channel, entry.title) if entry is not None else None
+
+    def _watch_ct_title(self, slug: str, mode: str, idec: Any) -> str | None:
+        """Only from ČT schedules the gateway already holds (``_ct_schedules``, filled by ``/dvb/details``);
+        never a request to ČT for a report. By ``idec`` when sent, else (live) the programme airing now."""
+        if mode not in ("live", "startover"):
+            return None
+        with self._ct_lock:
+            programmes = [p for (s, _day), (_at, day) in self._ct_schedules.items() if s == slug for p in day]
+        if isinstance(idec, str) and IDEC_RE.match(idec):
+            return next((p.title for p in programmes if p.idec == idec), None)
+        if mode != "live":
+            return None
+        now = datetime.fromtimestamp(self.now(), timezone.utc)
+        return next((p.title for p in programmes if p.start <= now < p.end), None)
 
     # -- ad breaks (spec/ad-breaks.md) -----------------------------------------------------
     def get_breaks(self, dvr_uuid: str) -> Response:

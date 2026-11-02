@@ -58,6 +58,8 @@ final class GuideImageStore {
     }
     /// The viewer flipped the switch (not `applyTVSwitch`): signed in to a profile it is sent to the gateway.
     @ObservationIgnored var onTVSwitchChange: (Bool) -> Void = { _ in }
+    /// Every `/dvb/status` answer read here (the watch log's switch, spec/dvb-gateway.md "Watch log (T53)").
+    @ObservationIgnored var onStatus: (DVBStatus) -> Void = { _ in }
     @ObservationIgnored private var isApplying = false
     /// Bumped when the wanted (focused) image is ready, so the detail shows it.
     private(set) var revision = 0
@@ -100,6 +102,7 @@ final class GuideImageStore {
         if !force, let checked = statusCheckedAt, Date().timeIntervalSince(checked) < Self.statusMaxAge { return }
         statusCheckedAt = Date()
         if let status = try? await client.status() {
+            onStatus(status)
             gatewayAllows = status.thumbnails
             if !gatewayAllows { clearThumbnails() }
         }

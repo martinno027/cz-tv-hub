@@ -142,7 +142,9 @@
         }),
         tvheadendReachable: J.bool(root, 'tvheadendReachable'),
         // gateway switch for programme thumbnails (spec/dvb-gateway.md "Thumbnails"); missing = off
-        thumbnails: J.bool(root, 'thumbnails')
+        thumbnails: J.bool(root, 'thumbnails'),
+        // the gateway's watch log (spec/dvb-gateway.md "Watch log", T53): report playback only while true; missing = off
+        watchLog: J.bool(root, 'watchLog')
       };
     },
 

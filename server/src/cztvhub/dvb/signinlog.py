@@ -3,7 +3,8 @@
 What is written, and only that: connections (``GET /dvb/status`` with the app key, at most once per 12 hours per
 address and platform, at most 20 per address per 24 hours plus one "too many") and the profile events sign-in
 (success, wrong password, unknown name, too many attempts), profile created, sign-out and sessions ended on
-``/admin``. Never what is watched, never a password, token, typed name, request body or full User-Agent.
+``/admin``. Never what is watched (that is the separate, switchable watch log, ``watchlog.py``), never a password,
+token, typed name, request body or full User-Agent.
 
 ``<state_dir>/signin-log.jsonl``: one JSON object per line, mode 0600, the newest 1 000 entries of at most 90 days
 (trimmed when written, daily while running and at every start of the service, also without ``[dvb]``). The dedup
@@ -150,7 +151,7 @@ def keep(entries: list[dict], now: float) -> list[dict]:
 def write_entries(path: Path, entries: list[dict]) -> None:
     """Atomic rewrite with mode 0600 (also when an older file had other bits)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(FILE + ".tmp")
+    tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.fchmod(fd, 0o600)
@@ -169,6 +170,16 @@ def write_entries(path: Path, entries: list[dict]) -> None:
 
 def _line(entry: dict) -> str:
     return json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
+def append_entry(path: Path, entry: dict) -> None:
+    """One line appended, the file created (and kept) with mode 0600. Also the watch log's (watchlog.py)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as fh:
+        if os.fstat(fh.fileno()).st_mode & 0o777 != 0o600:
+            os.fchmod(fh.fileno(), 0o600)
+        fh.write(_line(entry))
 
 
 def trim_file(state_dir: Path, now: float | None = None, log: Callable[[str], None] = print) -> None:
@@ -365,12 +376,7 @@ class SigninLog:
             if self._lines + 1 > MAX_ENTRIES + SLACK or now - (epoch(self._entries[0]["time"]) or 0) > MAX_AGE:
                 self._rewrite(keep(self._entries, now))
                 return
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            with os.fdopen(fd, "a", encoding="utf-8") as fh:
-                if os.fstat(fh.fileno()).st_mode & 0o777 != 0o600:
-                    os.fchmod(fh.fileno(), 0o600)
-                fh.write(_line(entry))
+            append_entry(self.path, entry)
             self._lines += 1
             if len(self._entries) > MAX_ENTRIES:
                 del self._entries[:len(self._entries) - MAX_ENTRIES]

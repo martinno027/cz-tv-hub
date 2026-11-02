@@ -147,6 +147,14 @@ final class TimelineController {
 
     func time(at position: Double) -> Date? { timeline?.map.time(at: position) }
 
+    /// The watch report of the window now playing (spec/dvb-gateway.md "Watch log (T53)"): its id and channel, the
+    /// programme at the start time.
+    var watchStart: WatchStart? {
+        guard let timeline else { return nil }
+        let title = TimelineRules.programmeAt(startTime, in: timeline.programmes).map { timeline.programmes[$0].title }
+        return WatchStart(.dvb(.timeline, recordingID: timeline.id, channelID: timeline.channel, title: title))
+    }
+
     func programme(at position: Double) -> DVBTimeline.Programme? {
         guard let timeline, let time = timeline.map.time(at: position),
               let index = TimelineRules.programmeAt(time, in: timeline.programmes) else { return nil }
@@ -344,6 +352,8 @@ final class TimelineController {
                     guard let self else { throw CancellationError() }
                     return try await self.resolve()
                 }
+                // Another window = a new watch session.
+                controller.restartWatch(watchStart)
                 // The new item applies the start position itself; the playhead waits there until it plays.
                 pendingSeek = nil
                 currentPosition = start

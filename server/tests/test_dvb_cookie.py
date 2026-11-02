@@ -98,7 +98,7 @@ class CookieChangesNothingTest(unittest.TestCase):
                  f"/dvb/timeline/{REC_COMPLETED}", "/dvb/ads/jobs", "/dvb/v/x/index.m3u8", "/dvb/hls/" + "0" * 32 +
                  "/index.m3u8", f"/dvb/icon/{REC_COMPLETED}", "/dvb/ct/live/CH_1", "/dvb/ct/vod/226411010101016",
                  "/dvb/ct/schedule", "/dvb/profiles", "/dvb/profiles/login", "/dvb/profile", "/dvb/profile/logout",
-                 "/dvb/settings", "/dvb/admin"]
+                 "/dvb/watch", "/dvb/settings", "/dvb/admin"]
         for method in ("POST", "PUT", "DELETE", "PATCH"):
             for path in paths:
                 status = self.call(method, path, b"{}", token=token).status

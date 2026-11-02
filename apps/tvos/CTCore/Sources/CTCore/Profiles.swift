@@ -442,6 +442,8 @@ public final class ProfileSyncController {
 
     public var isSignedIn: Bool { state.isSignedIn }
     public var profileName: String? { state.profile }
+    /// The session token while signed in (`X-Cztvhub-Profile` of the watch reports, T53); nil signed out.
+    public var sessionToken: String? { isSignedIn ? credentials.load()?.token : nil }
     public var hasGateway: Bool { api != nil }
 
     /// A new gateway (or none). Removing it while signed in signs out locally first.

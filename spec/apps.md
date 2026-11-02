@@ -514,10 +514,13 @@ restarts included) until **Odhlásit**, or until the gateway says the session is
   - The profile calls carry the app key as the `Authorization: Bearer` header (the gateway refuses the cookie there).
 - **Sign-in note (T37)**: under the buttons of „Přihlásit se" and „Vytvořit profil", and in Nastavení → Server
   under the gateway status, a small line: „Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení).
-  Záznam vidí jen správce a po 90 dnech se smaže. Co sledujete, se nezaznamenává." Without a version/build (a development
+  Záznam vidí jen správce a po 90 dnech se smaže." (T53 dropped „Co sledujete, se nezaznamenává.") Without a version/build (a development
   build) the value is just the platform (`tizen`, `tvos`, …). The profile requests and
   `GET /dvb/status` carry `X-Cztvhub-Client: <platform>/<version> (<build>)` (`tvos`,
-  `androidtv`, `tizen`, `web`) — only those requests (spec/dvb-gateway.md "Sign-in log").
+  `androidtv`, `tizen`, `web`) — only those requests and `POST /dvb/watch` (T53) (spec/dvb-gateway.md "Sign-in log").
+- **Watch reports (T53)**: while `GET /dvb/status` says `"watchLog": true`, every app and the web report playback to
+  the household gateway with `POST /dvb/watch` (start / beat every 60 s / stop, fire-and-forget, never awaited, never
+  to ČT, the Chamber or TMDb; spec/dvb-gateway.md "Watch log"). Nothing is shown to the user.
 - Golden cases: `spec/fixtures/profile_cases.json` (`names`, `passwords`, `document`, `sync`), tested in all three apps
   and, for names/passwords, in the gateway.
 

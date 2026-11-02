@@ -1,7 +1,8 @@
 import XCTest
 @testable import CTCore
 
-/// `X-Cztvhub-Client` (spec/dvb-gateway.md "Sign-in log (T37)"): only on the profile routes and `GET /dvb/status`.
+/// `X-Cztvhub-Client` (spec/dvb-gateway.md "Sign-in log (T37)"): only on the profile routes, `GET /dvb/status` and the
+/// watch reports (`POST /dvb/watch`, T53).
 final class ClientHeaderTests: XCTestCase {
     private let header = "tvos/1.0 (123)"
     private let config = GatewayConfig(baseURL: URL(string: "http://pi.local:8098")!, key: "k")
@@ -26,12 +27,12 @@ final class ClientHeaderTests: XCTestCase {
     func testAppliesOnlyToProfileRoutesAndStatus() {
         let yes: [(String, String)] = [
             ("GET", "/dvb/status"), ("POST", "/dvb/profiles"), ("POST", "/dvb/profiles/login"),
-            ("GET", "/dvb/profile"), ("PUT", "/dvb/profile"), ("POST", "/dvb/profile/logout"),
+            ("GET", "/dvb/profile"), ("PUT", "/dvb/profile"), ("POST", "/dvb/profile/logout"), ("POST", "/dvb/watch"),
         ]
         let no: [(String, String)] = [
             ("POST", "/dvb/status"), ("GET", "/dvb/statuses"), ("GET", "/dvb/channels"), ("GET", "/dvb/epg"),
             ("GET", "/dvb/live/a.m3u8"), ("GET", "/dvb/recording/r.m3u8"), ("GET", "/dvb/timeline/t.m3u8"),
-            ("GET", "/dvb/profilex"), ("GET", "/dvb/defaults"), ("GET", "/dvb/archive"), ("GET", "/x/dvb/status"),
+            ("GET", "/dvb/profilex"), ("GET", "/dvb/watch"), ("POST", "/dvb/watchx"), ("GET", "/dvb/defaults"), ("GET", "/dvb/archive"), ("GET", "/x/dvb/status"),
         ]
         for (method, path) in yes { XCTAssertTrue(ClientHeader.applies(method: method, path: path), "\(method) \(path)") }
         for (method, path) in no { XCTAssertFalse(ClientHeader.applies(method: method, path: path), "\(method) \(path)") }
@@ -62,6 +63,7 @@ final class ClientHeaderTests: XCTestCase {
         await call("profile", sends: true) { _ = try await client.profile(token: "t") }
         await call("save", sends: true) { _ = try await client.saveProfile(token: "t", settings: ProfileDocument()) }
         await call("logout", sends: true) { try await client.logout(token: "t") }
+        await call("watch", sends: true) { try await client.watch(body: Data("{}".utf8), profileToken: nil) }
 
         await call("channels", sends: false) { _ = try await client.channels() }
         await call("epg", sends: false) { _ = try await client.epg(day: BroadcastDay(year: 2026, month: 11, day: 1)) }
@@ -81,7 +83,7 @@ final class ClientHeaderTests: XCTestCase {
         await call("season", sends: false) { _ = try await client.archiveSeason(show: "s", season: "1", page: 1) }
         await call("episodes", sends: false) { _ = try await client.archiveEpisodes(show: "s", query: ArchiveEpisodeQuery(), page: 1) }
         // The two groups really differ (a header on everything or on nothing fails above, and here).
-        XCTAssertEqual(Set(marked), ["status", "login", "create", "profile", "save", "logout"])
+        XCTAssertEqual(Set(marked), ["status", "login", "create", "profile", "save", "logout", "watch"])
         XCTAssertFalse(unmarked.isEmpty)
     }
 
@@ -90,6 +92,13 @@ final class ClientHeaderTests: XCTestCase {
         transport.on("/dvb/status", HTTPResponse(status: 200, body: Data("{}".utf8)))
         _ = try await DVBClient(config: config, transport: transport).status()
         XCTAssertNil(transport.requests.first?.value(forHTTPHeaderField: ClientHeader.field))
+    }
+
+    /// The sign-in note without "Co sledujete, se nezaznamenává." since T53 (spec/apps.md "Sign-in note (T37)").
+    func testNoteWording() {
+        XCTAssertEqual(ClientHeader.note, "Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení). "
+                       + "Záznam vidí jen správce a po 90 dnech se smaže.")
+        XCTAssertFalse(ClientHeader.note.contains("sledujete"))
     }
 
     /// The player's headers for gateway HLS are the key only.

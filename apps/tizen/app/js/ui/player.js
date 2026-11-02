@@ -287,6 +287,7 @@
     this.timelineAt = null; // {id, time}: the timeline window and wall clock to continue at after re-resolving
     this.errorAction = null; // {label, run} under the error shown now (CT.Platform.playErrorAction), OK runs it
     this.mute = new CT.Mute.Session(); // muted or not for the whole app session (spec/apps.md "Mute (T34)")
+    this.watchFor = null; // the request whose watch report is in progress (T53): re-resolving it is the same session
     var cb = {
       onReady: function () {
         self.showHint(self.hintKind); // the platform's hint may depend on the stream (the web: its audio tracks)
@@ -364,6 +365,7 @@
   Player.prototype.switchTo = function (index, delayed) {
     var self = this;
     var item = this.zapList[index];
+    this.reportStop(); // the channel changes: the old session ends now, the new one starts once it plays
     this.request = this.app.liveRequest(item);
     this.lastReResolveAt = 0;
     this.updateTitle();
@@ -459,10 +461,12 @@
       self.useTarget(target);
       var refusal = CT.Platform.refusePlay ? CT.Platform.refusePlay(target) : null;
       if (refusal) {
+        self.reportStop();
         self.backend.close();
         self.showMessage(refusal);
         return;
       }
+      self.reportStart(request, target);
       self.plannedAt = Date.now();
       self.timelineAt = null;
       if (self.tl) self.tl.setWindow(target.timeline);
@@ -479,9 +483,36 @@
       }
     }, function (e) {
       if (token !== self.loadToken) return;
+      self.reportStop(); // nothing plays
       self.showMessage(e && e.userMessage ? e.userMessage : CT.Messages.GENERIC);
       self.offerErrorAction(request, e);
     });
+  };
+
+  // -- watch reports (spec/apps.md "Watch reports (T53)") ------------------------------------------------------
+
+  /**
+   * `request` plays now from `target`: a new session unless it is the one in progress (re-resolving after an error
+   * keeps it; a neighbouring timeline window is a new one, switchTarget). Live titles come from the guide shown.
+   */
+  Player.prototype.reportStart = function (request, target) {
+    var watch = this.app.watch;
+    if (!watch || this.watchFor === request) return;
+    this.watchFor = request;
+    var app = this.app;
+    watch.play(CT.Watch.describe(request, target, {
+      ctOnAir: app.ctState ? app.ctState.onAir : null,
+      dvbOnAir: app.dvbState ? app.dvbState.onAir : null
+    }));
+  };
+
+  /**
+   * The session in progress (if any) ends: closed, another channel, the background, nothing plays any more; `final` =
+   * the page is going away (the platform's last send).
+   */
+  Player.prototype.reportStop = function (final) {
+    this.watchFor = null;
+    if (this.app.watch) this.app.watch.stop(!!final);
   };
 
   /** Under a playback error: the platform's way on (the web: "Otevřít v iVysílání" for CT), OK runs it. */
@@ -517,6 +548,8 @@
   Player.prototype.switchTarget = function (target) {
     this.loadToken++;
     this.stopBreaks();
+    this.reportStop(); // another window = another programme: a session of its own (T53)
+    this.reportStart(this.request, target);
     this.useTarget(target);
     this.plannedAt = Date.now();
     this.timelineAt = null;
@@ -548,6 +581,7 @@
       this.timelineAt = this.tl ? this.tl.continueAt() : null;
       this.load(true, this.resumePosition());
     } else {
+      this.reportStop(); // failed again: nothing plays any more
       this.backend.close();
       this.showMessage(CT.Messages.PLAYBACK);
       if (this.request.kind === 'pspLive') this.explainPsp();
@@ -579,6 +613,7 @@
   Player.prototype.close = function () {
     var request = this.request;
     this.saveProgress();
+    this.reportStop();
     this.loadToken++;
     this.stopBreaks();
     this.backend.close();
@@ -603,6 +638,7 @@
     this.saveProgress();
     this.timelineAt = this.tl ? this.tl.continueAt() : null;
     this.suspendedAt = this.resumePosition();
+    this.reportStop(); // in the background nothing is watched; back in front it is a new session
     this.loadToken++;
     this.stopBreaks();
     this.backend.close();

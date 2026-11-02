@@ -17,7 +17,10 @@ read-only and paginated, with refresh / delete per entry, delete all and the ref
 logged (``admin: tmdb: …``). The store is never downloadable. The tab "Aktualizace" asks the Pi to update itself
 (``update.py``: only a request file; a root systemd unit runs the fixed ``deploy/update.sh``). The tab
 "Přihlášení" shows the sign-in log (``signinlog.py``) read-only, newest first, paginated, filtered by profile;
-"Smazat záznamy" deletes it (logged ``admin: signin log deleted``). It is never downloadable. The tab "Návod" offers
+"Smazat záznamy" deletes it (logged ``admin: signin log deleted``). It is never downloadable. The tab "Sledování"
+(``watchlog.py``, T53) has the watch log's switch (off by default; off deletes the log, logged ``admin: watch log
+off, deleted (n entries)``), the sessions in progress with a ticking duration and the history with filters and
+"Smazat záznamy" (logged); never downloadable. The tab "Návod" offers
 the connection manual (``manual.py``, T49): a TXT with this gateway's addresses and the app key, only as the answer
 to an admin POST (logged ``admin: connection manual downloaded``, never with the key).
 
@@ -56,6 +59,7 @@ TMDB_PATH = "/admin/api/tmdb"
 TMDB_CONFIG_KEY = "Klíč je nastavený v konfiguraci ([tmdb] key v /etc/cztvhub/cztvhub.conf) a platí ten; tady ho změnit nejde."
 UPDATE_PATH = "/admin/api/update"
 SIGNIN_PATH = "/admin/api/signin"
+WATCH_PATH = "/admin/api/watch"
 MANUAL_PATH = "/admin/api/manual"
 TMDB_KEY_MAX = 600  # a store key: ["kind", year, "cleaned title"]
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -63,6 +67,10 @@ MAX_BULK = 500
 MAX_NAME = 64
 TECH_TOKENS = {"HD", "SD", "UHD", "4K", "T2", "HEVC", "H265", "H.265", "DVB-T2"}
 CT_REGIONS = {"PHA", "PRAHA", "JM", "SM", "BRNO", "OSTRAVA"}  # regional variants of ČT1
+
+
+def _entries(n: int) -> str:
+    return f"{n} entr{'y' if n == 1 else 'ies'}"
 
 
 def short_name(name: str) -> str:
@@ -309,6 +317,12 @@ class AdminSite:
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
                 return self._signin(body)
+            if method == "GET" and path == WATCH_PATH:
+                return self._watch_overview(query or {})
+            if method == "POST" and path == WATCH_PATH:
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._watch(body)
             if method == "GET" and path == UPDATE_PATH:
                 return json_response(200, self.updater.overview())
             if method == "POST" and path == UPDATE_PATH:
@@ -320,7 +334,8 @@ class AdminSite:
                     return error(403, "Požadavek z cizí stránky")
                 return self._manual()
             if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles") \
-                    or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH, SIGNIN_PATH, MANUAL_PATH):
+                    or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH, SIGNIN_PATH, WATCH_PATH,
+                                 MANUAL_PATH):
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -574,6 +589,48 @@ class AdminSite:
         removed = self.gateway.signin.delete_all()
         self.gateway.log(f"admin: signin log deleted ({removed} entr{'y' if removed == 1 else 'ies'})")
         return json_response(200, {"deleted": removed})
+
+    # -- tab "Sledování" (watchlog.py) -----------------------------------------------------
+    def _watch_overview(self, query: Mapping[str, str]) -> Response:
+        """The switch, the sessions in progress and one page of the history (filters: profile, device,
+        channel)."""
+        try:
+            page = int(query.get("page") or "1")
+        except ValueError:
+            page = 0
+        if not 1 <= page <= 100000:
+            return error(400, "Neplatná stránka")
+        filters = {}
+        for name, limit in (("profile", 64), ("device", 128), ("channel", 300)):
+            value = query.get(name)
+            if value is not None and not 0 < len(value) <= limit:
+                return error(400, "Neplatný filtr")
+            filters[name] = value
+        watch = self.gateway.watch
+        body = watch.page(page, **filters)
+        body["now"] = watch.now_playing()
+        return json_response(200, body)
+
+    def _watch(self, body: bytes) -> Response:
+        """``POST /admin/api/watch`` {"enabled": bool} (off deletes the log) | {"deleteAll": true}; logged."""
+        try:
+            payload = parse_body(body, 1024)
+        except ProfileError as exc:
+            return json_response(exc.status, exc.payload(), exc.headers)
+        watch, log = self.gateway.watch, self.gateway.log
+        if set(payload) == {"enabled"} and isinstance(payload["enabled"], bool):
+            if payload["enabled"]:
+                watch.set_enabled(True)
+                log("admin: watch log on")
+                return json_response(200, {"enabled": True, "deleted": 0})
+            removed = watch.set_enabled(False)
+            log(f"admin: watch log off, deleted ({_entries(removed)})")
+            return json_response(200, {"enabled": False, "deleted": removed})
+        if set(payload) == {"deleteAll"} and payload["deleteAll"] is True:
+            removed = watch.delete_all()
+            log(f"admin: watch log deleted ({_entries(removed)})")
+            return json_response(200, {"enabled": watch.enabled, "deleted": removed})
+        return error(400, 'Očekávám {"enabled": true|false} nebo {"deleteAll": true}')
 
     # -- tab "TMDb" (tmdbstore.py) ---------------------------------------------------------
     def _tmdb_overview(self, page_param: str | None) -> Response:
@@ -837,6 +894,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
   <button role="tab" id="tab-storage" aria-selected="false">Přehled nahrávek</button>
   <button role="tab" id="tab-profiles" aria-selected="false">Profily</button>
   <button role="tab" id="tab-signin" aria-selected="false">Přihlášení</button>
+  <button role="tab" id="tab-watch" aria-selected="false">Sledování</button>
   <button role="tab" id="tab-defaults" aria-selected="false">Výchozí kanály</button>
   <button role="tab" id="tab-tmdb" aria-selected="false">TMDb</button>
   <button role="tab" id="tab-update" aria-selected="false">Aktualizace</button>
@@ -891,9 +949,35 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
     <span id="signin-delete"></span>
   </div>
   <p class="help">Záznam připojení aplikací a webu k bráně (nejvýš jednou za 12 hodin z jedné adresy a platformy, ať je
-  profil přihlášený, nebo ne) a přihlášení, odhlášení a vytvoření profilů. Neukládá se, co kdo sleduje, hesla ani
-  napsaná jména. Drží se nejnovějších 1 000 záznamů, nejvýš 90 dní; starší se mažou samy. Síť „jiná“ znamená adresu
-  mimo domácí síť a Tailscale – brána by tam neměla být vidět. Seznam se nedá stáhnout ani exportovat.</p>
+  profil přihlášený, nebo ne) a přihlášení, odhlášení a vytvoření profilů. Neukládá se sem, co kdo sleduje (to je
+  zvlášť v záložce Sledování, když je zapnutá), hesla ani napsaná jména. Drží se nejnovějších 1 000 záznamů, nejvýš
+  90 dní; starší se mažou samy. Síť „jiná“ znamená adresu mimo domácí síť a Tailscale – brána by tam neměla být
+  vidět. Seznam se nedá stáhnout ani exportovat.</p>
+</section>
+<section id="watch" hidden>
+  <label class="setting"><input type="checkbox" id="watch-on"> Zaznamenávat sledování</label>
+  <div class="dactions" id="watch-off-confirm" hidden></div>
+  <h3>Právě se sleduje</h3>
+  <table><thead><tr><th>Od</th><th class="n">Jak dlouho</th><th>Profil</th><th>Zařízení</th><th>Zdroj</th>
+    <th>Kanál</th><th>Pořad</th><th>Režim</th></tr></thead><tbody id="watch-now"></tbody></table>
+  <h3>Historie</h3>
+  <div class="filters">
+    <select id="watch-profile" aria-label="Profil"><option value="">Všechny profily</option></select>
+    <select id="watch-device" aria-label="Zařízení"><option value="">Všechna zařízení</option></select>
+    <select id="watch-channel" aria-label="Kanál"><option value="">Všechny kanály</option></select>
+    <span class="count" id="watch-count"></span>
+  </div>
+  <table><thead><tr><th>Začátek</th><th class="n">Délka</th><th>Profil</th><th>Zařízení</th><th>Zdroj</th>
+    <th>Kanál</th><th>Pořad</th><th>Režim</th></tr></thead><tbody id="watch-rows"></tbody></table>
+  <div class="dactions">
+    <button id="watch-prev">Novější</button> <span class="meta" id="watch-pages"></span> <button id="watch-next">Starší</button>
+    <span id="watch-delete"></span>
+  </div>
+  <p class="help">Když je záznam zapnutý, aplikace a web hlásí bráně, co se přehrává: od kdy, jak dlouho, profil,
+  zařízení, zdroj, kanál, pořad a režim (nikdy obraz ani místo v pořadu). Právě probíhající sledování se drží jen
+  v paměti a zapíše se, až skončí (zavřením přehrávače, přepnutím kanálu, nebo když zařízení 3 minuty nic nehlásí);
+  sledování kratší než 5 sekund se nezapisuje. Drží se nejnovějších 5 000 záznamů, nejvýš 30 dní; starší se mažou
+  samy. Vypnutím se záznam celý smaže. Diváci se o záznamu nedozvídají. Seznam se nedá stáhnout ani exportovat.</p>
 </section>
 <section id="defaults" hidden>
   <p class="sub" id="defaults-state"></p>
@@ -1007,7 +1091,7 @@ function api(method, path, body) {
   });
 }
 
-var TABS = ["channels", "storage", "profiles", "signin", "defaults", "tmdb", "update", "manual"];
+var TABS = ["channels", "storage", "profiles", "signin", "watch", "defaults", "tmdb", "update", "manual"];
 function showTab(name) {
   TABS.forEach(function (t) {
     document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
@@ -1016,6 +1100,7 @@ function showTab(name) {
   if (name === "storage") loadStorage();
   if (name === "profiles") loadProfiles();
   if (name === "signin") loadSignin(signinPage);
+  if (name === "watch") loadWatch(watchPage);
   if (name === "defaults" && !dfltDirty) loadDefaults();  // unsaved edits survive a look at another tab
   if (name === "tmdb") loadTmdb(tmdbPage);
   if (name === "update") loadUpdate();
@@ -1334,6 +1419,143 @@ function loadSignin(page) {
 document.getElementById("signin-prev").addEventListener("click", function () { loadSignin(Math.max(1, signinPage - 1)); });
 document.getElementById("signin-next").addEventListener("click", function () { loadSignin(signinPage + 1); });
 document.getElementById("signin-profile").addEventListener("change", function () { loadSignin(1); });
+
+// tab "Sledování" (watchlog.py): the list reloads every 15 s, the durations tick every second in the page
+var watchPage = 1, watchConfirm = false, watchLoadedAt = 0;
+var WATCH_SOURCES = {ct: "ČT", psp: "Sněmovna", dvb: "Anténa"};
+var WATCH_MODES = {live: "živě", startover: "zpětně (3 h)", archive: "archiv",
+  recording: "nahrávka", timeline: "časová osa"};
+function duration(seconds) {
+  var s = Math.max(0, Math.floor(seconds)), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return h + ":" + (m < 10 ? "0" : "") + m + ":" + (s % 60 < 10 ? "0" : "") + (s % 60);
+}
+function watchSource(e) { return WATCH_SOURCES[e.source] || "neznámý"; }
+function watchChannel(e) { return e.channel === "unknown" ? "neznámý" : e.channel; }
+function watchDevice(e) {
+  var td = el("td", e.network === "other" ? "warn" : null);
+  td.appendChild(document.createTextNode(signinHow(e) + ", "));
+  td.appendChild(e.network === "other" ? el("b", null, NETWORKS.other) : document.createTextNode(NETWORKS[e.network] || "?"));
+  td.appendChild(document.createTextNode(" " + (e.address || "")));
+  return td;
+}
+function watchRow(e, when, length) {
+  var tr = el("tr");
+  tr.appendChild(el("td", null, prague(when)));
+  tr.appendChild(length);
+  tr.appendChild(el("td", "name", e.profile || "–"));
+  tr.appendChild(watchDevice(e));
+  tr.appendChild(el("td", null, watchSource(e)));
+  tr.appendChild(el("td", null, watchChannel(e)));
+  tr.appendChild(el("td", null, e.title || "–"));
+  tr.appendChild(el("td", null, WATCH_MODES[e.mode] || "neznámý"));
+  return tr;
+}
+function watchOptions(id, all, values, label) {
+  var select = document.getElementById(id), chosen = select.value;
+  select.textContent = "";
+  select.appendChild(el("option", null, all)).value = "";
+  values.forEach(function (v) { select.appendChild(el("option", null, label(v))).value = v; });
+  if (chosen && values.indexOf(chosen) < 0) select.appendChild(el("option", null, label(chosen))).value = chosen;
+  select.value = chosen;
+}
+function watchDeviceLabel(key) {
+  var cut = key.indexOf(" "), platform = key.slice(0, cut);
+  return (PLATFORMS[platform] || "neznámý") + " " + key.slice(cut + 1);
+}
+function watchChannelLabel(key) {
+  var cut = key.indexOf(" ");
+  return watchSource({source: key.slice(0, cut)}) + " · " + watchChannel({channel: key.slice(cut + 1)});
+}
+function watchTick() {
+  var passed = (Date.now() - watchLoadedAt) / 1000;
+  var cells = document.querySelectorAll("#watch-now td[data-seconds]");
+  for (var i = 0; i < cells.length; i++) cells[i].textContent = duration(Number(cells[i].getAttribute("data-seconds")) + passed);
+}
+function loadWatch(page) {
+  var url = "/admin/api/watch?page=" + page;
+  ["profile", "device", "channel"].forEach(function (f) {
+    var v = document.getElementById("watch-" + f).value;
+    if (v) url += "&" + f + "=" + encodeURIComponent(v);
+  });
+  return api("GET", url).then(function (data) {
+    watchPage = data.page;
+    document.getElementById("watch-on").checked = data.enabled;
+    watchOptions("watch-profile", "Všechny profily", data.profiles, function (v) { return v; });
+    watchOptions("watch-device", "Všechna zařízení", data.devices, watchDeviceLabel);
+    watchOptions("watch-channel", "Všechny kanály", data.channels, watchChannelLabel);
+    watchLoadedAt = Date.now();
+    var now = document.getElementById("watch-now");
+    now.textContent = "";
+    if (!data.now.length) {
+      var tr = el("tr"), td = el("td", null, data.enabled ? "Teď se nic nesleduje." : "Záznam sledování je vypnutý.");
+      td.colSpan = 8; tr.appendChild(td); now.appendChild(tr);
+    }
+    data.now.forEach(function (e) {
+      var length = el("td", "n", duration(e.seconds));
+      length.setAttribute("data-seconds", String(e.seconds));
+      now.appendChild(watchRow(e, e.start, length));
+    });
+    document.getElementById("watch-count").textContent = entries(data.total);
+    var body = document.getElementById("watch-rows");
+    body.textContent = "";
+    if (!data.entries.length) {
+      var tr2 = el("tr"), td2 = el("td", null, "Žádné záznamy.");
+      td2.colSpan = 8; tr2.appendChild(td2); body.appendChild(tr2);
+    }
+    data.entries.forEach(function (e) { body.appendChild(watchRow(e, e.start, el("td", "n", duration(e.seconds)))); });
+    document.getElementById("watch-pages").textContent = "strana " + data.page + " z " + data.pages;
+    document.getElementById("watch-prev").disabled = data.page <= 1;
+    document.getElementById("watch-next").disabled = data.page >= data.pages;
+    var del = document.getElementById("watch-delete");
+    del.textContent = "";
+    if (watchConfirm) {
+      del.appendChild(el("span", null, "Smazat všechny záznamy sledování? "));
+      var yes = el("button", "danger", "Smazat záznamy"), no = el("button", null, "Zpět");
+      yes.addEventListener("click", function () {
+        watchConfirm = false;
+        api("POST", "/admin/api/watch", {deleteAll: true}).then(function () { say("Záznamy sledování jsou smazané."); },
+          function (e) { say(e.message, true); }).then(function () { loadWatch(1); });
+      });
+      no.addEventListener("click", function () { watchConfirm = false; loadWatch(watchPage); });
+      del.appendChild(yes); del.appendChild(no);
+    } else if (data.total) {
+      var ask = el("button", null, "Smazat záznamy");
+      ask.addEventListener("click", function () { watchConfirm = true; loadWatch(watchPage); });
+      del.appendChild(ask);
+    }
+  }, function (e) { say("Záznamy sledování se nepodařilo načíst: " + e.message, true); });
+}
+function watchSwitch(on) {
+  var box = document.getElementById("watch-on"), confirm = document.getElementById("watch-off-confirm");
+  box.disabled = true;
+  confirm.hidden = true;
+  api("POST", "/admin/api/watch", {enabled: on}).then(function (data) {
+    say(on ? "Sledování se zaznamenává." : "Záznam sledování je vypnutý a smazaný (" + entries(data.deleted) + ").");
+  }, function (e) { say(e.message, true); }).then(function () { box.disabled = false; loadWatch(1); });
+}
+document.getElementById("watch-on").addEventListener("change", function () {
+  if (this.checked) return watchSwitch(true);
+  this.checked = true;  // switching off deletes the log: asked first
+  var confirm = document.getElementById("watch-off-confirm");
+  confirm.textContent = "";
+  confirm.appendChild(el("span", null, "Vypnutím se smažou všechny záznamy sledování a nedokončená sledování se nezapíšou. "));
+  var yes = el("button", "danger", "Vypnout a smazat"), no = el("button", null, "Zpět");
+  yes.addEventListener("click", function () { watchSwitch(false); });
+  no.addEventListener("click", function () { confirm.hidden = true; });
+  confirm.appendChild(yes); confirm.appendChild(no);
+  confirm.hidden = false;
+});
+document.getElementById("watch-prev").addEventListener("click", function () { loadWatch(Math.max(1, watchPage - 1)); });
+document.getElementById("watch-next").addEventListener("click", function () { loadWatch(watchPage + 1); });
+["profile", "device", "channel"].forEach(function (f) {
+  document.getElementById("watch-" + f).addEventListener("change", function () { loadWatch(1); });
+});
+setInterval(function () { if (!document.getElementById("watch").hidden) watchTick(); }, 1000);
+setInterval(function () {
+  if (!document.getElementById("watch").hidden && !watchConfirm && document.getElementById("watch-off-confirm").hidden) {
+    loadWatch(watchPage);
+  }
+}, 15000);
 
 function tvs(n) { return n + " " + plural(n, "televize", "televize", "televizí"); }
 var profileEditing = null;

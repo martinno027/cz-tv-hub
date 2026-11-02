@@ -59,6 +59,8 @@ import cz.cztvhub.core.dvb.DvbTimeline
 import cz.cztvhub.core.dvb.TimelineEdge
 import cz.cztvhub.core.dvb.TimelineRules
 import cz.cztvhub.core.dvb.TimelineScrub
+import cz.cztvhub.core.dvb.WatchItem
+import cz.cztvhub.core.dvb.WatchReporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -162,6 +164,12 @@ class PlayerActivity : ComponentActivity() {
     /** Ad breaks per programme id of the window, with when they were fetched (elapsed realtime). */
     private val timelineBreaks = mutableMapOf<String, Pair<Long, List<AdBreak>>>()
 
+    /**
+     * Watch reports to the gateway (T53, spec/apps.md "Watch reports (T53)"): a session from [play] until the player
+     * is hidden or closed, or the channel changes; only while the gateway's status says `watchLog`.
+     */
+    private lateinit var watch: WatchReporter
+
     private val isTimeline: Boolean
         get() = (request as? PlayRequest.DvbRecorded)?.recordingId?.let(TimelineRules::isTimelineId) == true
 
@@ -172,6 +180,13 @@ class PlayerActivity : ComponentActivity() {
         card = PlayRequests.card(intent)
         cardKey = (request as? PlayRequest.DvbRecorded)?.let { ResumeRules.dvbKey(it.recordingId) } ?: spot?.key
         zapChannels = PlayRequests.channels(intent)
+        watch = WatchReporter(
+            config = { tvApp.gateway.value },
+            profileToken = { tvApp.dvbSettings.profile.value?.token },
+            client = tvApp.clientHeader,
+            enabled = { tvApp.dvb()?.status()?.watchLog ?: false },
+            runner = tvApp.watchRunner,
+        )
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         playerView = PlayerView(this).apply {
@@ -367,6 +382,8 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Closed or in the background: the session ends; back in front is a new one.
+        if (::watch.isInitialized) watch.end()
         saveProgress()
         progressJob?.cancel()
         progressJob = null
@@ -425,6 +442,7 @@ class PlayerActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) { tvApp.planner.plan(request, forceRefresh, timelineAt) }
             } catch (e: CtException) {
                 Log.w(TAG, "cannot play $request: ${e.message}")
+                watch.end() // nothing plays (also a failed re-resolve of what played)
                 showMessage(e.userMessage)
                 if (e.status == "UNSUPPORTED_DRM") {
                     errorActions.visibility = View.VISIBLE
@@ -441,6 +459,9 @@ class PlayerActivity : ComponentActivity() {
         val exo = player ?: return
         target = planned
         timeline = planned.timeline
+        val playing = request
+        // The same item again (a re-resolved URL) keeps its session; a new timeline window is a new programme.
+        watch.begin(WatchItem.of(playing, planned.kind)) { watchTitle(playing) }
         pendingWallClockMs = null
         var startPositionMs: Long? = planned.startPositionMs
         when {
@@ -513,11 +534,13 @@ class PlayerActivity : ComponentActivity() {
             // Poslanecká sněmovna answers 404 outside broadcasts: the broadcast just ended (or never began).
             if (request is PlayRequest.PspLive && httpStatus(error) == 404) {
                 exo.stop()
+                watch.end()
                 showMessage(getString(R.string.psp_not_on))
                 return
             }
             // The gateway explains tuner/stream problems in Czech (503 "Tuner je obsazený", 502).
             gatewayError(error)?.let {
+                watch.end()
                 showMessage(it)
                 return
             }
@@ -527,6 +550,7 @@ class PlayerActivity : ComponentActivity() {
                 lastReResolveAt = now
                 load(forceRefresh = true, resume = currentResume())
             } else {
+                watch.end()
                 showMessage(getString(R.string.error_playback))
             }
         }
@@ -679,6 +703,20 @@ class PlayerActivity : ComponentActivity() {
         val exo = player ?: return
         exo.seekTo((seconds * 1000).toLong())
         updateSkipAd(null)
+    }
+
+    /**
+     * The programme a watch report names (T53), on the report thread: for live what the guide shows on air now, the
+     * Chamber's stream name, else the programme title the player shows.
+     */
+    private fun watchTitle(playing: PlayRequest): String? {
+        val now = Instant.now()
+        return when (playing) {
+            is PlayRequest.Live -> runCatching { tvApp.schedules.onAir(now)[playing.channelId]?.current?.title }.getOrNull()
+            is PlayRequest.DvbLive -> runCatching { tvApp.dvb()?.onAir(now)?.get(playing.channelId)?.current?.title }.getOrNull()
+            is PlayRequest.PspLive -> PspStreams.byId(playing.channelId)?.name ?: playing.title
+            else -> playing.title
+        }
     }
 
     /** Channel name of the request (CT catalogue or the gateway's channel list). */
@@ -1236,6 +1274,8 @@ class PlayerActivity : ComponentActivity() {
     private fun switchTo(channel: ZapChannel) {
         val next = channel.liveRequest() ?: return
         if (next == request || player == null) return
+        // The old channel's session ends now, also when the new one does not play (e.g. the Chamber off air).
+        watch.end()
         setRequest(next)
         target = null
         pendingWallClockMs = null

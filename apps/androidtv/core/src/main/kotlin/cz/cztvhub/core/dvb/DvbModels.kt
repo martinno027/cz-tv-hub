@@ -34,6 +34,8 @@ data class DvbStatus(
     val tvheadendReachable: Boolean,
     /** The household allows programme thumbnails (`/admin` "Náhledy pořadů"; spec/dvb-gateway.md "Thumbnails"). */
     val thumbnails: Boolean = false,
+    /** The household logs what is watched (`/admin` "Sledování", T53): the apps send watch reports only then. */
+    val watchLog: Boolean = false,
 )
 
 /**

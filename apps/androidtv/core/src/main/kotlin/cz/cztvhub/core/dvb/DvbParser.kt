@@ -55,6 +55,7 @@ object DvbParser {
             tuners = tuners,
             tvheadendReachable = root.str("tvheadendReachable") == "true",
             thumbnails = root.str("thumbnails") == "true",
+            watchLog = root.str("watchLog") == "true",
         )
     }
 

@@ -121,6 +121,8 @@ public struct DVBStatus: Sendable, Equatable {
     public let tvheadendReachable: Bool
     /// The household allows programme thumbnails (spec/dvb-gateway.md "Thumbnails"); missing = off.
     public var thumbnails: Bool = false
+    /// The household logs what is watched (spec/dvb-gateway.md "Watch log (T53)"): report playback; missing = off.
+    public var watchLog: Bool = false
 }
 
 /// "Anténa thumbnails" (spec/apps.md): which recording's still the guide detail may show.
@@ -214,7 +216,8 @@ public enum DVBParser {
             retentionDays: (root["retentionDays"] as? NSNumber)?.intValue ?? 0,
             tuners: tuners,
             tvheadendReachable: root["tvheadendReachable"] as? Bool ?? false,
-            thumbnails: root["thumbnails"] as? Bool ?? false
+            thumbnails: root["thumbnails"] as? Bool ?? false,
+            watchLog: root["watchLog"] as? Bool ?? false
         )
     }
 
@@ -327,8 +330,17 @@ public struct DVBClient: Sendable {
     }
 
     /// Any method with a body and extra headers (profiles); same key and error handling as `get`.
-    func send(method: String, path: String, body: Data?, headers: [String: String]) async throws -> HTTPResponse {
-        try await send(config.url(path), timeout: timeout, method: method, body: body, headers: headers)
+    func send(method: String, path: String, body: Data?, headers: [String: String],
+              timeout: TimeInterval? = nil) async throws -> HTTPResponse {
+        try await send(config.url(path), timeout: timeout ?? self.timeout, method: method, body: body, headers: headers)
+    }
+
+    /// One watch report (`WatchRules.body`) to `POST /dvb/watch` with the app key as bearer and the profile's session
+    /// token when signed in; at most `WatchRules.timeout` seconds (spec/dvb-gateway.md "Watch log (T53)").
+    public func watch(body: Data, profileToken: String?) async throws {
+        var headers = ["Content-Type": "application/json"]
+        if let profileToken, !profileToken.isEmpty { headers[ProfileParser.tokenHeader] = profileToken }
+        _ = try await send(method: "POST", path: WatchRules.path, body: body, headers: headers, timeout: WatchRules.timeout)
     }
 
     private func send(_ url: URL, timeout: TimeInterval, method: String = "GET", body: Data? = nil,

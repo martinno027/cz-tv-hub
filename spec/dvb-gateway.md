@@ -404,7 +404,8 @@ docs/legal-notes.md)
   state is in memory only (bounded, lost on restart). A `/dvb/status` without the header (Kodi, curl, an old app)
   is logged with client „neznámý"; the worker key is never logged. And profile events of the gateway — sign-in (`POST /dvb/profiles/login`: success,
   wrong name or password, too many attempts), profile created (`POST /dvb/profiles`), sign-out (`POST
-  /dvb/profile/logout`), a session ended by `/admin` (new password, deleted profile). **Never** what is watched, never
+  /dvb/profile/logout`), a session ended by `/admin` (new password, deleted profile). **Never** what is watched (that is the
+  separate, switchable watch log of T53), never
   positions, never the password or token, never the request body, **never a per-request log**. A wrong name is logged
   as „neznámé jméno" (the typed text is not kept: it can be a mistyped password). „Too many attempts" is written at
   most once a minute per name, with the number of refused attempts (a flood must not push real entries out).
@@ -420,7 +421,7 @@ docs/legal-notes.md)
   HLS or details lines with the address); a test asserts that a 200/302 on a playback route writes nothing.
 - **The header** is sent by the apps and the web **only on the profile routes** (`/dvb/profiles*`, `/dvb/profile*`)
   **and `GET /dvb/status`**, never on other gateway requests (never on playback), never to ČT or the Chamber's CDN (a test per app); the gateway reads it only on
-  those routes and writes it nowhere else (journal, other stores).
+  those routes (and `/dvb/watch`, T53) and writes it nowhere else (journal, other stores).
 - **Storage**: `<state_dir>/signin-log.jsonl` (`0600`, user `cztvhub`), newest **1 000 entries** and at most **90
   days**: older lines dropped when written and **at every start of the service** (also without `[dvb]`). Never in
   exports, profiles, backups or the apps.
@@ -476,8 +477,69 @@ docs/legal-notes.md)
     in memory like the connection cap. Successful sign-ins, sign-outs and created profiles are never capped.
 - **The users are told**: under the buttons of „Přihlásit se" and „Vytvořit profil" in all three apps and the web:
   „Připojení a přihlášení se zaznamenává (kdy, odkud a z jakého zařízení). Záznam vidí jen správce a po 90
-  dnech se smaže. Co sledujete, se nezaznamenává." — also in Nastavení → Server below the gateway status (TVs
+  dnech se smaže." (T53 dropped „Co sledujete, se nezaznamenává.") — also in Nastavení → Server below the gateway status (TVs
   without a profile see it there) (spec/apps.md "Profil"), and the same in docs/dvb-setup.md.
+
+## Watch log (T53; owner 2026-11-02: „pridelej do admin log, jake zarizeni je pripojene, pripadne co sleduje za kanal, pripadne program, at dokazi co nejdetalneji logovat" + „pripadne od kdy sleduje (cas od kdy, a cas jak dlouho (bude tikat/pricitat)"; legal-guard 2026-11-02 approve with changes; the owner's dated approval in CLAUDE.md and docs/legal-notes.md: 30 days, no notice to users, no per-device opt-out)
+- **Switch**: `/admin` → tab „Sledování" → „Zaznamenávat sledování" (stored in the gateway's admin settings),
+  **default off**. Switching it off ends the sessions in progress without writing them and **deletes the store**
+  (logged `admin: watch log off, deleted (n entries)`); switching on is logged `admin: watch log on`.
+  `GET /dvb/status` gains `"watchLog": true|false`; the apps and the web report only while it is `true` (re-read
+  with every status check; a missing field = false; a failed check keeps the last answer, initially off). A
+  channel the app does not know is left out (→ `unknown`); `title` is optional (the gateway names channels itself).
+- **Reports** `POST /dvb/watch` (app key **only** as `Authorization: Bearer` — it writes, so the cookie alone is
+  `403` as on every writing route, spec/web.md "Security"; worker key `403`; optional `X-Cztvhub-Profile` session
+  token → the profile's name; `X-Cztvhub-Client` as T37 → platform/version; for the web browser/system from the
+  `User-Agent` as T37). Body JSON ≤ 2 KB: `{"event": "start"|"beat"|"stop", "session": "<16–64 of [A-Za-z0-9_-]>",
+  "source": "ct"|"psp"|"dvb", "mode": "live"|"startover"|"archive"|"recording"|"timeline",
+  "channel": "<id>", "title"?: "<programme, ≤ 200 chars>", "idec"?: "<ČT idec>", "recording"?: "<recording id>"}`
+  (`start` carries all fields, `beat`/`stop` only `event` + `session`). Answer `204` always when the key is right —
+  also when the log is off (ignored), for an unknown session, or over a limit (dropped) — `400` only for a body
+  that is not this shape (`event`/`session` wrong), so a report can never break playback. The apps send it
+  fire-and-forget (timeout 5 s, no retry, errors ignored, playback never waits for it), **never to ČT, the
+  Chamber or TMDb**, and never the body anywhere else.
+- **Neutral shape** (CLAUDE.md conventions): `source`/`mode` outside the lists → `unknown`; `channel` checked against
+  the catalogue of its source (ČT `CH_*` of channels.py, the gateway's own DVB channels by id, the Chamber's
+  `stream1`…`stream5` of `defaults.PSP_STREAMS` = `spec/fixtures/psp_cases.json`) and stored as the channel's
+  **name** for every source, else `unknown`; the programme: for `dvb` the
+  gateway's own guide (EPG) for that channel at the session's start (or the recording's title for `recording` /
+  `timeline`), for `ct` live/startover ČT's schedule the gateway already caches, else the client's
+  `title` cut to 200 characters with control characters removed; nothing guessed. `/admin` escapes every value.
+- **Sessions in progress in memory only**: at most **4 per address** and **200 in total** (a new start over the
+  limit is dropped, counted once per minute in the journal as `watch: limit`), `start` of a known session id
+  restarts nothing; a session ends at `stop` or **3 minutes without a beat** (the apps beat every **60 s** while
+  the player is open) and is then written as **one line**; a restart of the gateway loses sessions in progress.
+  At most 60 reports per address and minute (others dropped). Sessions shorter than 5 s are not written.
+- **Storage**: `<state_dir>/watch-log.jsonl` (`0600`, user `cztvhub`), one JSON object per line: `{"start": "…Z",
+  "end": "…Z", "seconds", "profile"?, "address", "network", "platform", "client"?, "browser"?, "system"?,
+  "source", "mode", "channel", "title"?}` (no session id, no position, no idec/recording id); newest **5 000**
+  entries, at most **30 days**; trimmed when written (rewritten atomically over 5 500 lines or an over-age oldest
+  line), every 30 minutes, when `/admin` reads it and at every start of the service (also without `[dvb]`; when the
+  switch is off a leftover file is deleted at start). Lines that do not parse are dropped. Never in the journal
+  (the HTTP log of `/dvb/watch` follows T37: errors only, path without ids), never in exports, profiles, backups,
+  the apps, TMDb or any `/dvb/*` answer.
+- **`/admin` tab „Sledování"**: the switch; **„Právě se sleduje"**: the sessions in progress — device (platform +
+  version or browser · system, network + address), profile, source, channel, programme, mode, **od** (start, Prague
+  time) and **jak dlouho**, ticking every second in the page's JS from the start time (the list itself reloads
+  every 15 s; nothing extra is asked of the apps); below it the history newest first, paginated 50, filters by
+  profile, device (`"<platform> <address>"`) and channel (`"<source> <channel name>"`: a renamed antenna „ČT1"
+  stays apart from ČT's); „Smazat záznamy" (confirmation; logged `admin: watch log
+  deleted (n entries)`). Routes (admin login, `X-Cztvhub-Admin: 1` + same origin on POST, as every admin action):
+  `GET /admin/api/watch?page=&profile=&device=&channel=` → `{"enabled", "now": [...], "total", "page", "pages",
+  "pageSize": 50, "profiles", "devices", "channels", "entries"}`; `POST /admin/api/watch {"enabled": bool}` |
+  `{"deleteAll": true}`; other methods `405`.
+- **Apps and web**: `start` when playback of a programme or channel begins (also after switching channel: `stop`
+  of the old session first), `beat` every 60 s while the player is open (paused included), `stop` when the player
+  closes, the channel changes or the app goes to the background (back in front with the player open = a new
+  session; on the web a hidden tab that keeps playing keeps its session, the own window of T46 takes over: the
+  tab's session stops before the window's starts); a new random session id per start. Modes (one meaning on every platform):
+  `live` the live stream at its edge, `startover` anything played from ČT's 3-hour buffer (a programme that began
+  < 3 h ago, Od začátku, Zpět v čase, resume within the buffer), `archive` iVysílání VOD, `recording` / `timeline`
+  the antenna's recording or timeline window; switching to another recording or window = a new session; a playback
+  error after which nothing plays ends the session. Sources: ČT
+  live/startover/archive (`ct`, channel `CH_*`, `idec` for archive, title from the guide/archive the app
+  shows), the Chamber (`psp`, the stream id), the antenna (`dvb`: live, recording, timeline; channel id). Nothing
+  is shown to the user; the T37 note loses its last sentence.
 
 ## Household default channel list (T11, `src/cztvhub/dvb/defaults.py`)
 One channel list for the whole household that TVs **without a profile and without their own changes** use, edited

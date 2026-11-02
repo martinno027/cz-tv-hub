@@ -2,6 +2,7 @@ import CTCore
 import Foundation
 import Observation
 import os
+import UIKit
 
 let log = Logger(subsystem: "cz.cztvhub.tv", category: "app")
 
@@ -22,6 +23,8 @@ struct LiveStart {
     /// Poslanecká sněmovna only: a 404 when opening means the broadcast just ended; called before the player
     /// closes with `PSPStreams.offAirMessage`.
     var offAir: (@MainActor () -> Void)? = nil
+    /// What the watch report says (spec/dvb-gateway.md "Watch log (T53)").
+    var watch: WatchStart? = nil
 }
 
 @MainActor
@@ -45,6 +48,9 @@ final class AppModel {
     let parliament = PSPLiveMonitor()
     /// Mute of every player until the app closes (spec/apps.md "Mute (T34)"); never stored.
     let mute = PlayerMute()
+    /// Watch reports to the gateway while its `/dvb/status` says `watchLog` (spec/dvb-gateway.md "Watch log (T53)").
+    @ObservationIgnored private(set) var watch: WatchReporter!
+    @ObservationIgnored private var lifecycleObservers: [NSObjectProtocol] = []
 
     var session: PlayerSession?
     /// The guide's programme page is on screen: it presents the player and messages instead of RootView.
@@ -104,10 +110,35 @@ final class AppModel {
             tvOwn: profile.isSignedIn ? profile.state.local?.channelPrefs ?? ChannelPrefs() : channelPrefs.prefs
         )
         wireProfile()
+        wireWatch()
         tailnet.onBridgeChange = { [weak self] in self?.applyGateway() }
         tailnet.onRecovered = { [weak self] in await self?.reloadFromGateway() }
         setGateway(GatewayStore.load(), persist: false)
         numberEntry = NumberEntry { [weak self] number in self?.playLive(number: number) }
+    }
+
+    // MARK: watch reports
+
+    private func wireWatch() {
+        watch = WatchReporter(
+            target: { [weak self] in
+                // only ever the household gateway (through the Tailscale bridge when in use)
+                guard let self, self.gateway != nil, let client = self.detailsClient else { return nil }
+                return WatchTarget(client: client, profileToken: self.profile.sessionToken)
+            },
+            refreshStatus: { [weak self] in await self?.images.refreshStatus(force: true) }
+        )
+        let watch = watch!
+        images.onStatus = { watch.setWatchLog($0.watchLog) }
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { watch.background() }
+            },
+            center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { watch.foreground() }
+            },
+        ]
     }
 
     // MARK: profile
@@ -203,6 +234,8 @@ final class AppModel {
             return LiveStart(resolve: { try await planner.resolve(.live(ct), resumeAt: nil) }, liveTitle: {
                 let airing = await schedules.onAir(at: Date())[ct.slug]
                 return .live(channel: ct.name, airing: airing.map { ($0.title, $0.end) })
+            }, watch: WatchStart(.ct(channelID: ct.id, playing: .live, idec: nil, title: nil)) {
+                await schedules.onAir(at: Date())[ct.slug]?.title
             })
         case .antenna(let dvb):
             guard let antenna else { return nil }
@@ -211,6 +244,8 @@ final class AppModel {
             return LiveStart(resolve: { try await Self.prepare(client, url: url, title: dvb.name, mode: .live) }, liveTitle: {
                 let airing = await antenna.onAir(at: Date())[dvb.id]
                 return .live(channel: dvb.name, airing: airing.map { ($0.title, $0.end) })
+            }, watch: WatchStart(.dvbLive(channelID: dvb.id, title: nil)) {
+                await antenna.onAir(at: Date())[dvb.id]?.title
             })
         case .parliament(let stream):
             // The published URL as it is: no extra or faked headers, live only (no resume, start-over, thumbnails).
@@ -225,7 +260,7 @@ final class AppModel {
                 return source
             }, liveTitle: {
                 PlayerTitle(title: stream.name, subtitle: PSPStreams.sourceLabel)
-            }, offAir: { parliament.markOff(stream.key) })
+            }, offAir: { parliament.markOff(stream.key) }, watch: WatchStart(.psp(stream)))
         }
     }
 
@@ -234,7 +269,7 @@ final class AppModel {
     func playLive(_ channel: MixedChannel) {
         guard let start = liveStart(channel) else { return }
         log.info("play live \(channel.key, privacy: .public)")
-        open(liveTitle: start.liveTitle, offAir: start.offAir, zapFrom: channel, start.resolve)
+        open(liveTitle: start.liveTitle, offAir: start.offAir, zapFrom: channel, watch: { _ in start.watch }, start.resolve)
     }
 
     /// Applies (and by default stores in the Keychain) a gateway configuration; nil removes it. With Tailscale on, the
@@ -301,6 +336,7 @@ final class AppModel {
         antenna = config.map { AntennaStore(client: DVBClient(config: $0, transport: watched(URLSessionTransport()))) }
         detailsClient = client
         detailsCache = [:]
+        watch.gatewayChanged()
         images.setGateway(config)
         let images = images
         archiveImages.setGateway(config, thumbnailsAllowed: { images.gatewayAllows && images.tvAllows })
@@ -320,18 +356,25 @@ final class AppModel {
         let planner = planner
         var target: ResumeTarget?
         var title: PlayerTitle?
+        let watched: (Programme, Channel?)
         switch request {
         case .programme(let programme, let channel):
             target = .ct(programme, card: card)
             title = .programme(programme.title, channel: channel.name, episode: programme.episodeTitle)
+            watched = (programme, channel)
         case .episode(let programme, let channel):
             target = .ct(programme, card: card)
             title = .programme(programme.title, channel: channel?.name, episode: programme.episodeTitle)
+            watched = (programme, channel)
         case .live(let channel):
             playLive(.ct(channel))
             return
         }
-        open(resumeTarget: target, title: title) {
+        // the mode as it resolved: the 3-hour buffer (startover) or the archive
+        let watch = { (source: PlaybackSource) -> WatchStart? in
+            WatchStart(.ct(channelID: watched.1?.id, playing: source.mode, idec: watched.0.idec, title: watched.0.title))
+        }
+        open(resumeTarget: target, title: title, watch: watch) {
             try await planner.resolve(request, resumeAt: resumeAt)
         }
     }
@@ -443,8 +486,9 @@ final class AppModel {
         let title = event.title
         var adBreaks: (@Sendable () async throws -> [AdBreak])?
         if finished { adBreaks = { try await client.adBreaks(recordingID: id) } }
+        let watch = WatchStart(.dvb(.recording, recordingID: id, channelID: event.channel, title: event.title))
         open(adBreaks: adBreaks, resumeTarget: .antenna(recordingID: id, event: event, channelName: channelName, card: card),
-             title: .programme(event.title, channel: channelName, episode: event.subtitle)) {
+             title: .programme(event.title, channel: channelName, episode: event.subtitle), watch: { _ in watch }) {
             try await client.preparePlaylist(url)
             return .antennaRecording(url: url, title: title, headers: client.config.authorizationHeaders, resumeAt: resumeAt)
         }
@@ -459,8 +503,11 @@ final class AppModel {
             startTime: TimelineRules.startTime(programmeStart: event.start, resumeAt: resumeAt),
             channelName: channelName ?? event.title, firstCard: card
         )
+        // the window as the gateway answered (its channel, the programme at the start); a later window is a new session
+        let fallback = WatchStart(.dvb(.timeline, recordingID: id, channelID: event.channel, title: event.title))
         open(progressAt: { [weak timeline] position in timeline?.progress(at: position) },
-             title: .programme(event.title, channel: channelName, episode: event.subtitle), timeline: timeline) {
+             title: .programme(event.title, channel: channelName, episode: event.subtitle), timeline: timeline,
+             watch: { [weak timeline] _ in timeline?.watchStart ?? fallback }) {
             try await timeline.resolve()
         }
     }
@@ -474,7 +521,8 @@ final class AppModel {
                       progressAt: (@MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)? = nil,
                       title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
                       timeline: TimelineController? = nil, offAir: (@MainActor () -> Void)? = nil,
-                      zapFrom channel: MixedChannel? = nil, _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
+                      zapFrom channel: MixedChannel? = nil, watch watchStart: ((PlaybackSource) -> WatchStart?)? = nil,
+                      _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
             log.info("play ignored: still resolving the previous selection")
             return
@@ -493,7 +541,8 @@ final class AppModel {
                 let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks,
                                                   progress: resumeTarget.map { ($0, resume) },
                                                   progressAt: progressAt.map { (resume, $0) },
-                                                  title: title, liveTitle: liveTitle, offAir: offAir, mute: mute)
+                                                  title: title, liveTitle: liveTitle, offAir: offAir, mute: mute,
+                                                  watch: watch, watchStart: watchStart?(source))
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }
                 var session = PlayerSession(controller: controller)
                 if let timeline {

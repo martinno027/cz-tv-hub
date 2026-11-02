@@ -51,6 +51,12 @@ of "done".
   key or the worker key as an `Authorization` header; the server grants no CORS preflight
   (`tests/test_dvb_cookie.py` sweeps every route shape). *Wrong:* a new state-changing route that accepts the
   cookie (with the web app the cookie is in every browser that opened `/web/`).
+- Watch reports (`POST /dvb/watch`, T53) need the app key as the bearer header: the cookie alone `403` (it writes the
+  watch log, so the CSRF rule above applies), the worker key `403`, a missing/wrong key `401`; `204` for everything
+  else with the right key (off, unknown session, over a limit), `400` only for a body that is not a report. The
+  `/admin` tab „Sledování" (`/admin/api/watch`) needs the admin login, and its POSTs (switch, „Smazat záznamy") the
+  admin header and same origin. *Wrong:* a report accepted with the cookie or the worker key, an answer that tells
+  whether the log is on (other than `/dvb/status` `watchLog`), the switch or a delete reachable with the app key.
 - GET routes with side effects (live sessions, thumbnails, TMDb lookups on request, `/dvb/ct/*`) can be started with
   the cookie alone; `SameSite=Strict` and `Path=/dvb` keep foreign sites out, but cookies ignore ports: every page
   on the Pi's host name is the same site and receives the cookie for its own `/dvb` paths. *Wrong:* another web UI
@@ -121,6 +127,19 @@ of "done".
   the worker key, failed key checks and every other route write nothing. *Wrong:* a typed (unknown) name, a password,
   a token, a request body, a full User-Agent or anything about what is watched in the file; the header read on a
   playback route; a download or export of the log; an entry per request.
+- The watch log (T53, `dvb/watchlog.py`, `<state dir>/watch-log.jsonl`, 0600; approved 2026-11-02) is **off by
+  default** (`settings.json` `watchLog`); off = reports ignored before anything is looked up, sessions in progress
+  dropped unwritten, the file deleted (logged `admin: watch log off, deleted (n entries)`), and a leftover file
+  deleted at the next start of the service (also without `[dvb]`). One line per ended session (≥ 5 s): start, end,
+  seconds, profile name (from the session token, never the token), peer address, network, the validated client
+  header, coarse browser/system, and source/mode/channel/title in a neutral shape (`unknown` outside the lists;
+  channel names only from the gateway's own catalogues; title ≤ 200 characters without control or format
+  characters). Never a session id, position, idec, recording id, full User-Agent or the body; never sent to ČT,
+  TMDb or anyone, never in a `/dvb/*` answer, the journal, an export or a backup. Newest 5 000, at most 30 days
+  (trimmed when written, every 30 min, when `/admin` reads it, at every start). `/admin` builds every cell with
+  `textContent`. *Wrong:* a report written while off, the file surviving „off" or a restart with the switch off,
+  a client-chosen channel name stored as sent, a line in the journal for a `204` (or with the body for a `400`),
+  a download of the log, a `/dvb/*` route returning it.
 - **No per-request log** (T37, O019): `server.py` writes to the journal only failed requests (`http: <status>
   <method> <path>`, path without the query string, no address) and exceptions (traceback, no address); successful
   requests write nothing (`tests/test_dvb_signinlog.py` `JournalTest`). No journal line says what was watched:
@@ -171,6 +190,12 @@ of "done".
 - Input from TVHeadend, CT and the apps is parsed defensively; sizes are capped (request bodies, thumbnail reads,
   bulk admin requests, profile documents 64 KB, 20 profiles, 10 sessions each; JSON with NaN, lone surrogates or deep
   nesting is refused). *Wrong:* an unbounded read or a crash on an unexpected field.
+- Watch reports are bounded in memory (T53): bodies ≤ 2 KB, at most 4 sessions per address and 200 in total (over
+  it: dropped, one `watch: limit (n starts dropped)` line a minute), 60 reports per address and minute, the rate
+  state at most 1 000 addresses, a session gone after 3 minutes without a beat; a `start` asks TVHeadend (channels
+  cached 60 s, EPG, DVR list) only when the log is on and the session fits, and never ČT (only the schedules the
+  gateway already holds). *Wrong:* a growing session table from made-up ids, a flood that grows the file faster
+  than the trim, a report that waits for ČT or blocks playback.
 - Irreversible admin actions are logged (who/what/result). *Wrong:* recordings deleted without a log line, an
   update requested from `/admin` without `admin: update requested` (its result is in `journalctl -u cztvhub-update`
   and `update-status.json`).
@@ -182,4 +207,5 @@ of "done".
 | 2026-10-24 | T05 | Channel timeline (`/dvb/timeline`, views, apps' timeline players) | Key required (401), worker key 403/404, media outside the window 404, no playlist over a whole recording; open timeline views capped at 4 per channel; view keys were never pruned (fixed); apps accept the JSON's playlist only as a gateway path (added to the checklist). |
 | 2026-11-01 | T33 | `/admin` (Access), the update from `/admin`, "Irreversible admin actions are logged" | Admin auth, header and same origin cover `POST /admin/api/update` (tests, mutations); requests and refusals logged. Found while building: `git pull --ff-only` alone does not stop on non-conflicting local edits or on another branch (it fast-forwards that branch to `main`): explicit check step; the status written by root into the gateway user's directory would have been a symlink-write primitive: written as `cztvhub` instead. Item added under Access. |
 | 2026-11-02 | T49 | `/admin` connection manual (Access, Secrets, irreversible actions logged) | The app key now leaves the Pi through `/admin`: admin login, header, same origin (tests: 401 for no login, wrong password, app key, worker key, cookie; 403 without the header or with a foreign origin; nothing gathered or logged then); only `[dvb] key` in the file (test with real admin/worker/TMDb/TVHeadend values); `no-store`, `nosniff`, attachment; log line without the key (mutations red). The Secrets statement "keys only in the config and the TVs" was no longer true (the web's browser storage, now the manual): rewritten. Not checked: whether the hardened service may run `tailscale status` on the Pi. |
+| 2026-11-02 | T53 | Watch log: `POST /dvb/watch`, `/admin` „Sledování" (Access, What leaves the Pi, Robustness, irreversible actions logged) | Bearer header only (cookie `403` like every state-changing `/dvb/*` route; the brief/spec said "bearer or cookie", contradicting spec/web.md "Security" – kept the CSRF rule, the apps send bearer), worker `403`, `401` without the key; off by default, off deletes (logged), leftover deleted at start; limits 2 KB / 4 per address / 200 / 60 per minute; no journal line for a `204`, the route only for a `400` (`test_dvb_watchlog.JournalTest`); admin login, header, same origin; 24 mutations of the rules all red. |
 | 2026-11-01 | T39 | `/admin` TMDb keys (Access, Secrets, irreversible actions logged) | Saving/removing needs admin login, `X-Cztvhub-Admin` and same origin (tests: 401/403, no TMDb request, no file); `[tmdb] key` in the config makes both `409`; the file is 0600 also over a leftover tmp file; no key value in any answer or log line after a save, a refusal, TMDb down (URL with `api_key` in the error) or a removal (tests, mutations red); the key check shares the lookups' limiter. Nothing open. |
