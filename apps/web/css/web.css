@@ -367,3 +367,13 @@ body.web #show {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* T52: the loader about 40 screen px (the TV's 64 px would grow and shrink with the window); the stage is scaled by
+   --web-scale (web-stage.js), so its size is divided by it. The next page's ring is half of it. */
+body.web .loader {
+  --loader-size: calc(40px / var(--web-scale, 1));
+}
+
+body.web .loader-below {
+  --loader-size: calc(20px / var(--web-scale, 1));
+}

@@ -58,10 +58,10 @@
       },
       '#ar-grid': function (dx, dy) {
         var archive = app.screens.archive;
-        var g = archive.grid;
+        var g = archive.shown(); // the dimmed old cards while new ones load (T52), else the grid
         var moved = moveLines(g.lines, step('cards', dy, CARD_ROW));
-        // near the end the next page comes, as when the focus gets there
-        if (moved && g.nextPage && !g.loading && g.lines.top + g.lines.visible >= g.lines.rows - 2) archive.loadPage(g.nextPage);
+        // near the end the next page comes, as when the focus gets there (not for cards being replaced)
+        if (moved && g === archive.grid && g.nextPage && !g.loading && g.lines.top + g.lines.visible >= g.lines.rows - 2) archive.loadPage(g.nextPage);
         if (moved) archive.renderTmdb();
         return moved;
       },

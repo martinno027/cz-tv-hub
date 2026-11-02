@@ -6,12 +6,15 @@
  * not playable ones dimmed), and "Nahráno z antény" lists our recorded episodes. A ČT list of more than 100 episodes
  * comes a month at a time: year and month chips under the season chips (T32); a year of at most 100 episodes comes
  * whole, with no month row (T51). The episode list is built around
- * the focus only. Return closes it; after the player the buttons and positions are recomputed.
+ * the focus only. Return closes it; after the player the buttons and positions are recomputed. Waiting for the
+ * gateway shows a loader after 150 ms (T52, CT.Loading): in place of the page while it opens, over the dimmed
+ * episodes while a season, year or month comes, small below the last episode for the next page.
  */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
   var A = CT.Archive;
+  var L = CT.Loading;
   var Cards = CT.ArchiveCards;
   var el = Cards.el;
 
@@ -51,9 +54,10 @@
     this.episodes = []; // indexes into lines of the focusable episodes
     this.episode = 0;
     this.list = null;
-    this.loadingPage = false;
-    this.token = 0;
+    this.listedSeason = 0; // the season whose episodes are listed (a chip chosen meanwhile may still be waited for)
+    this.waitPart = null; // what the newest request loads: 'show' (the page opening) | 'episodes'
     var self = this;
+    this.wait = new L.Wait(function () { self.renderLoading(); });
     // OK on an episode with a "Pokračovat" offer: short = from the position, long = "Přehrát od začátku"
     this.press = new Cards.LongPress(function () { self.playEpisode(false); }, function () { self.offerFromStart(); });
   }
@@ -74,7 +78,7 @@
     this.zone = 'buttons';
     this.button = 0;
     this.episode = 0;
-    this.loadingPage = false;
+    this.listedSeason = 0;
     $('show').classList.remove('hidden');
     this.render();
     this.load(null, 1, true, null);
@@ -83,7 +87,8 @@
   ShowPage.prototype.close = function () {
     this.card = null;
     this.data = null;
-    this.token++;
+    this.wait.cancel(); // answers still on their way are dropped
+    this.renderLoading();
     $('show').classList.add('hidden');
     $('sh-image').style.backgroundImage = '';
     if (this.list) this.list.clear();
@@ -94,34 +99,62 @@
   /**
    * GET /dvb/archive/show/<id> (`season` = null: the show as the gateway opens it). `group` = null: page 1 of a
    * season (or of a `period` {year, month?}, T32) replaces the iVysílání episodes; a group index: its next page is
-   * added to it. Our recorded episodes stay. `failed` (optional) puts back what was chosen before.
+   * added to it. Our recorded episodes stay. Only the newest request's answer counts (T52); a failed one puts the
+   * chips back to what is listed (not to a choice made meanwhile that never came).
    */
-  ShowPage.prototype.load = function (season, page, first, group, period, failed) {
+  ShowPage.prototype.load = function (season, page, first, group, period) {
     var self = this;
     var client = this.screen.client();
     var card = this.card;
     if (!client) return;
-    var token = ++this.token;
-    if (group !== null && group !== undefined) this.loadingPage = true;
+    var more = group !== null && group !== undefined;
+    var seasonIndex = this.season; // the season chip this request lists
+    var ticket = this.wait.begin(more ? L.MORE : L.REPLACE);
+    this.waitPart = first ? 'show' : 'episodes';
+    this.renderLoading();
     client.show(card.id, season, page, period || null).then(function (show) {
-      if (self.card !== card || self.token !== token) return;
-      self.loadingPage = false;
+      if (self.card !== card || !self.wait.finish(ticket)) return;
       self.choice = null;
       if (first) self.data = show;
-      else if (group !== null && group !== undefined) self.data.groups = A.withPage(self.data.groups, group, show.groups);
+      else if (more) self.data.groups = A.withPage(self.data.groups, group, show.groups);
       else self.data.groups = A.withSeason(self.data.groups, show.groups);
+      if (!more) self.listedSeason = seasonIndex;
       if (!first) self.data.error = show.error;
       self.error = null;
       self.render(first);
     }, function (e) {
-      if (self.card !== card || self.token !== token) return;
-      self.loadingPage = false;
+      if (self.card !== card || !self.wait.finish(ticket)) return;
       self.choice = null; // the chips show what is listed again
-      if (failed) failed();
+      self.season = self.listedSeason;
+      self.seasonFocus = self.listedSeason;
       if (first) self.error = e.userMessage || A.FAILED;
       else self.app.toast(e.userMessage || A.FAILED);
       self.render(false);
     });
+  };
+
+  /**
+   * The loader (T52) of what waits: the page opening (in its place), the episodes (over them, dimmed) or their
+   * next page (small, below the last episode).
+   */
+  ShowPage.prototype.renderLoading = function () {
+    var place = this.card ? this.wait.place() : 'none';
+    var opening = place === 'over' && this.waitPart === 'show';
+    var over = place === 'over' && this.waitPart === 'episodes';
+    var box = $('sh-episodes');
+    $('show').classList.toggle('opening', opening);
+    Cards.loader($('show'), 'sh-opening', opening);
+    box.classList.toggle('waiting', over);
+    Cards.loader(box, 'over', over);
+    // over an empty list too: the list's place is shown while it loads
+    box.classList.toggle('hidden', !this.lines.length && !over);
+    Cards.loader(box.firstChild, 'below', place === 'below', this.lines.length * EP_STEP);
+    // the list's lines fill its height exactly: one line under the last is kept for that loader
+    var tail = place === 'below' ? 1 : 0;
+    if (this.list && this.list.tail !== tail) {
+      this.list.tail = tail;
+      this.applyFocus();
+    }
   };
 
   ShowPage.prototype.hasSeasons = function () {
@@ -162,6 +195,7 @@
     this.renderSeasons();
     this.renderPeriods();
     this.renderEpisodes();
+    this.renderLoading();
     $('sh-state').textContent = this.stateLine();
     if (fresh) {
       this.zone = this.isFilm() ? 'buttons' : this.episodes.length ? 'episodes' : this.hasSeasons() ? 'seasons' : 'none';
@@ -175,7 +209,7 @@
 
   ShowPage.prototype.stateLine = function () {
     if (this.error) return this.error;
-    if (!this.data) return 'Načítám…';
+    if (!this.data) return ''; // opening: the loader in place of the page (T52)
     if (this.isFilm()) {
       var ep = A.filmEpisode(this.data);
       if (!ep) return 'Pořad teď nelze přehrát';
@@ -450,15 +484,10 @@
     if (this.zone === 'years' || this.zone === 'months') return this.choosePeriod();
     if (this.zone === 'seasons') {
       if (this.seasonFocus === this.season) return;
-      var self = this;
-      var previous = this.season;
       this.season = this.seasonFocus;
       this.episode = 0;
       this.choice = null; // another season comes with its own newest month
-      this.load(this.data.seasons[this.season].id, 1, false, null, null, function () {
-        self.season = previous; // not answered: the season listed stays chosen
-        self.seasonFocus = previous;
-      });
+      this.load(this.data.seasons[this.season].id, 1, false, null, null); // not answered: the season listed again
       this.renderSeasons();
       this.applyFocus();
       return;
@@ -509,8 +538,8 @@
   ShowPage.prototype.pageAhead = function () {
     var data = this.data;
     var line = this.lines[this.episodes[this.episode]];
-    // not while another year or month is coming (its answer replaces this list)
-    if (!data || !line || this.loadingPage || this.choice || this.zone !== 'episodes') return;
+    // not while anything else is coming: another season, year or month (its answer replaces this list) or a page
+    if (!data || !line || this.wait.waiting() || this.zone !== 'episodes') return;
     var group = data.groups[line.group];
     if (!group || !group.nextPage) return;
     var at = this.episodes[this.episode];

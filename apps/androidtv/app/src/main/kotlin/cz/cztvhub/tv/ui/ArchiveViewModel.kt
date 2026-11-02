@@ -9,6 +9,8 @@ import cz.cztvhub.core.ImageRequest
 import cz.cztvhub.core.archive.ArchiveCard
 import cz.cztvhub.core.archive.ArchiveCategory
 import cz.cztvhub.core.archive.ArchiveGenre
+import cz.cztvhub.core.archive.ArchiveGrid
+import cz.cztvhub.core.archive.ArchiveLoading
 import cz.cztvhub.core.archive.ArchiveMenu
 import cz.cztvhub.core.archive.ArchiveMessages
 import cz.cztvhub.core.archive.ArchivePeriods
@@ -16,10 +18,12 @@ import cz.cztvhub.core.archive.ArchiveParser
 import cz.cztvhub.core.archive.ArchiveRules
 import cz.cztvhub.core.archive.ArchiveShow
 import cz.cztvhub.core.archive.ArchiveSort
+import cz.cztvhub.core.archive.EpisodeChoice
 import cz.cztvhub.core.archive.GridContent
 import cz.cztvhub.core.archive.MenuItem
 import cz.cztvhub.core.archive.MenuState
 import cz.cztvhub.core.archive.MenuStep
+import cz.cztvhub.core.archive.Wait
 import cz.cztvhub.core.dvb.DvbClient
 import cz.cztvhub.tv.tvApp
 import kotlinx.coroutines.Dispatchers
@@ -33,32 +37,25 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** A paged grid (Naše nahrávky, a category or the search results); [error] = the last page failed. */
-data class ArchiveGrid(
-    val title: String = "",
-    val cards: List<ArchiveCard> = emptyList(),
-    val nextPage: Int? = 1,
-    val loading: Boolean = false,
-    val error: String? = null,
-    /** iVysílání did not answer (`200` with an `error`): said above what is listed (our recordings). */
-    val notice: String? = null,
-    val attribution: String? = null,
-)
-
 /**
  * An open show page; [season] the season chip shown, its episodes replace the show's first group. [year]/[month] the
  * period chips chosen (T32; [month] null while a year chosen alone loads, and for a year shown whole, T51), kept while
- * the page is open.
+ * the page is open. [episodesWait] how the episode list waits (T52: a chip = new episodes over the dimmed list, the
+ * next page below it); [listed] the choice whose episodes are listed while it waits (a failure returns there).
  */
 data class ShowState(
     val card: ArchiveCard,
     val show: Load<ArchiveShow> = Load.Loading,
     val season: String? = null,
-    val seasonLoading: Boolean = false,
+    val episodesWait: Wait = Wait.NONE,
     val seasonNextPage: Int? = null,
     val year: Int? = null,
     val month: Int? = null,
+    val listed: EpisodeChoice? = null,
 ) {
+    val seasonLoading: Boolean get() = episodesWait != Wait.NONE
+    val choice: EpisodeChoice get() = EpisodeChoice(season, year, month)
+
     /** The periods of the iVysílání group shown, with the selection made meanwhile; null = no chips. */
     val periods: ArchivePeriods?
         get() {
@@ -215,8 +212,7 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
 
     /** The focus neared the grid's end: the next page, if any. */
     fun moreGrid() {
-        val grid = _grid.value
-        if (grid.nextPage == null || grid.loading) return
+        if (_grid.value.more() == null) return
         loadGrid(reset = false)
     }
 
@@ -234,14 +230,20 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
         GridContent.Continue, GridContent.Search -> null
     }
 
+    /**
+     * New content ([reset]: page 1, the old cards stay dimmed under the loader until it answers, T52) or the next
+     * page; the newest request wins (its number in [ArchiveGrid.request]).
+     */
     private fun loadGrid(reset: Boolean) {
         val menu = _menu.value ?: return
-        gridJob?.cancel()
+        // New content cancels what the grid waited for (also when it is "Pokračovat" or the search now).
+        if (reset) gridJob?.cancel()
         val query = gridQuery(menu) ?: return
         val client = client() ?: return
-        val grid = if (reset) ArchiveGrid() else _grid.value
-        val page = grid.nextPage ?: return
-        _grid.value = grid.copy(loading = true, error = null)
+        val grid = (if (reset) _grid.value.replacing() else _grid.value.more()) ?: return
+        val page = grid.pageAsked
+        val request = grid.request
+        _grid.value = grid
         gridJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
@@ -258,24 +260,19 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
                     _menu.value = ArchiveMenu.withGenres(now, query.first, answer.genres)
                 }
             }
-            val current = _grid.value
-            _grid.value = result.fold(
-                onSuccess = {
-                    current.copy(
-                        title = it.title,
-                        cards = (current.cards + it.cards).distinctBy(ArchiveCard::id),
-                        nextPage = it.nextPage,
-                        loading = false,
-                        notice = it.error,
-                        attribution = it.attribution ?: current.attribution,
-                    )
-                },
-                onFailure = { current.copy(loading = false, error = (it as CtException).userMessage) },
-            )
+            _grid.update { current ->
+                result.fold(
+                    onSuccess = { current.answered(request, it) },
+                    onFailure = { current.failed(request, (it as CtException).userMessage) },
+                )
+            }
         }
     }
 
-    /** Typing in the search field: results after [ArchiveRules.SEARCH_DEBOUNCE_MS] without typing, from 2 characters. */
+    /**
+     * Typing in the search field: results after [ArchiveRules.SEARCH_DEBOUNCE_MS] without typing, from 2 characters.
+     * The wait (and its loader, T52) starts with the request; earlier results stay listed until the new ones arrive.
+     */
     fun setQuery(text: String) {
         _query.value = text
         searchJob?.cancel()
@@ -283,42 +280,40 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
             _search.value = null
             return
         }
-        _search.value = (_search.value ?: ArchiveGrid()).copy(loading = true, error = null)
         searchJob = viewModelScope.launch {
             delay(ArchiveRules.SEARCH_DEBOUNCE_MS)
-            _search.value = ArchiveGrid(loading = true)
-            searchPage(query, 1)
+            val grid = (_search.value ?: ArchiveGrid()).replacing()
+            _search.value = grid
+            searchPage(query, grid)
         }
     }
 
     fun moreSearch() {
-        val grid = _search.value ?: return
-        val page = grid.nextPage ?: return
         val query = ArchiveRules.searchQuery(_query.value) ?: return
-        if (grid.loading || searchJob?.isActive == true) return
-        _search.value = grid.copy(loading = true, error = null)
-        searchJob = viewModelScope.launch { searchPage(query, page) }
+        if (searchJob?.isActive == true) return
+        val grid = _search.value?.more() ?: return
+        _search.value = grid
+        searchJob = viewModelScope.launch { searchPage(query, grid) }
     }
 
-    private suspend fun searchPage(query: String, page: Int) {
-        val client = client() ?: return run { _search.value = ArchiveGrid(nextPage = null, error = ArchiveMessages.NO_GATEWAY) }
+    /** Asks [grid]'s page; the answer is taken only while it is still the newest request. */
+    private suspend fun searchPage(query: String, grid: ArchiveGrid) {
+        val client = client() ?: return run { _search.update { it?.failed(grid.request, ArchiveMessages.NO_GATEWAY)?.copy(nextPage = null) } }
         val result = withContext(Dispatchers.IO) {
             try {
-                Result.success(client.archiveSearch(query, page))
+                Result.success(client.archiveSearch(query, grid.pageAsked))
             } catch (e: CtException) {
                 Result.failure(e)
             }
         }
-        val grid = _search.value ?: return
-        _search.value = result.fold(
-            onSuccess = {
-                grid.copy(
-                    cards = (grid.cards + it.cards).distinctBy(ArchiveCard::id), nextPage = it.nextPage, loading = false,
-                    notice = it.error, attribution = it.attribution ?: grid.attribution,
+        _search.update { current ->
+            current?.let {
+                result.fold(
+                    onSuccess = { page -> it.answered(grid.request, page) },
+                    onFailure = { e -> it.failed(grid.request, (e as CtException).userMessage) },
                 )
-            },
-            onFailure = { grid.copy(loading = false, error = (it as CtException).userMessage) },
-        )
+            }
+        }
     }
 
     fun openShow(card: ArchiveCard) {
@@ -387,7 +382,12 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
         val page = if (more) state.seasonNextPage ?: return else 1
         val client = client() ?: return
         showJob?.cancel()
-        _show.value = state.copy(season = season, year = year, month = month, seasonLoading = true)
+        // T52: the chips show the new choice at once; a failure returns to the choice whose episodes are listed.
+        val listed = ArchiveLoading.listedChoice(state.seasonLoading, state.listed, state.choice)
+        _show.value = state.copy(
+            season = season, year = year, month = month,
+            episodesWait = if (more) Wait.MORE else Wait.REPLACE, listed = listed,
+        )
         showJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
@@ -403,13 +403,16 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
                 val shown = (current.show as? Load.Ready)?.value
                 // A failed load keeps what is listed and its chips (the chip can be chosen again).
                 if (result == null || shown == null) {
-                    return@update current.copy(seasonLoading = false, season = state.season, year = state.year, month = state.month)
+                    return@update current.copy(
+                        episodesWait = Wait.NONE, listed = null, season = listed.season, year = listed.year, month = listed.month,
+                    )
                 }
                 val merged = ArchiveRules.withSeasonPage(shown, result, season, append = more)
                 val group = merged.groups.firstOrNull(ArchiveRules::isCtGroup)
                 current.copy(
                     show = Load.Ready(merged),
-                    seasonLoading = false,
+                    episodesWait = Wait.NONE,
+                    listed = null,
                     seasonNextPage = group?.nextPage,
                     year = group?.periods?.year,
                     month = group?.periods?.month,

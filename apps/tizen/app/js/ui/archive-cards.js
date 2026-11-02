@@ -19,6 +19,26 @@
 
   Cards.el = el;
 
+  /**
+   * The loader (T52, spinning ring, CSS .loader) named `name` in `box`: added when `on`, removed when not. 'over'
+   * covers the box (its content dimmed by the box's .waiting), 'below' is a small one placed at `top` px (under a
+   * list's last line, inside its track), 'sh-opening' stands in for the show page. Never catches clicks.
+   */
+  Cards.loader = function (box, name, on, top) {
+    if (!box) return null;
+    var found = null;
+    Array.prototype.forEach.call(box.childNodes, function (c) {
+      if (c.classList && c.classList.contains('loader-' + name)) found = c;
+    });
+    if (!on) {
+      if (found) box.removeChild(found);
+      return null;
+    }
+    if (!found) found = box.appendChild(el('div', 'loader loader-' + name));
+    if (top !== undefined) found.style.top = top + 'px';
+    return found;
+  };
+
   /** Card model of a gateway card. */
   Cards.fromCard = function (card) {
     var lines = CT.Archive.cardLines(card);
@@ -92,6 +112,7 @@
     this.make = make;
     this.top = 0;
     this.built = {};
+    this.tail = 0; // lines kept free below the last one (T52: the next page's loader there), none built in them
   }
 
   Lines.prototype.setRows = function (rows) {
@@ -99,11 +120,16 @@
   };
 
   Lines.prototype.sync = function (row) {
+    var end = this.rows + this.tail;
     if (row !== null) {
       if (row < this.top) this.top = row;
       if (row > this.top + this.visible - 1) this.top = row - this.visible + 1;
     }
-    this.top = Math.max(0, Math.min(this.top, Math.max(0, this.rows - this.visible)));
+    // the last line in view: the tail under it comes into view too (the focus stays in view)
+    if (this.tail && this.top + this.visible >= this.rows) {
+      this.top = Math.max(this.top, Math.min(row === null ? end : row, end - this.visible));
+    }
+    this.top = Math.max(0, Math.min(this.top, Math.max(0, end - this.visible)));
     var from = Math.max(0, this.top - 2);
     var to = Math.min(this.rows - 1, this.top + this.visible + 2);
     var self = this;

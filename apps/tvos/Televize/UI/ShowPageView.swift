@@ -9,6 +9,8 @@ import SwiftUI
 struct ShowPageView: View {
     let client: DVBClient
     let id: String
+    /// The card's title, shown at once while the page loads (T52); nil = only the loader.
+    var knownTitle: String? = nil
 
     @Environment(AppModel.self) private var model
     @State private var show: ArchiveShow?
@@ -20,7 +22,15 @@ struct ShowPageView: View {
     @State private var periods: ArchivePeriods?
     @State private var seasonEpisodes: [ArchiveEpisode]?
     @State private var nextPage: Int?
-    @State private var loadingMore = false
+    /// The page on its way (T52: the loader in place of the page).
+    @State private var opening = LoadingState()
+    @State private var openingLoader = false
+    /// Page 1 of a season/year/month pick on its way: the loader over the episode list, the old list dimmed; a
+    /// failing pick puts back the list shown (not a pick replaced while waited for).
+    @State private var picking = ChoiceLoad<Listed>()
+    @State private var pickingLoader = false
+    /// A next page of episodes on its way: the small loader below the last episode.
+    @State private var more = LoadingState()
     /// A show without season chips starts with the focus on the selected year (once per page).
     @FocusState private var focusedYear: Int?
     @State private var focusedFirstYear = false
@@ -42,13 +52,19 @@ struct ShowPageView: View {
                     Button("Zkusit znovu") { attempt += 1 }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .dimmedWhileLoading(openingLoader)
+                .overlay { if openingLoader { LoaderRing() } }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                openingPlaceholder
             }
         }
+        .loaderDelay(opening, shown: $openingLoader)
+        .loaderDelay(picking.loading, shown: $pickingLoader)
         .task(id: Key(gateway: model.gateway, attempt: attempt)) {
+            let ticket = opening.begin()
             do {
                 let loaded = try await client.archiveShow(id)
+                guard opening.finish(ticket) else { return }
                 show = loaded
                 if query == nil {
                     let first = loaded.groups.first { !$0.isRecordings }
@@ -62,11 +78,26 @@ struct ShowPageView: View {
                     focusedYear = year
                 }
                 error = nil
-            } catch is CancellationError {
             } catch {
+                guard !(error is CancellationError || Task.isCancelled), opening.finish(ticket) else { return }
                 self.error = AppModel.message(for: error)
             }
         }
+    }
+
+    /// Opening the page: the card's title where the page's stands, the loader in place of the rest (after 150 ms).
+    private var openingPlaceholder: some View {
+        VStack(alignment: .leading, spacing: 40) {
+            if let knownTitle, !knownTitle.isEmpty {
+                Text(knownTitle).font(.title2.weight(.bold)).lineLimit(2)
+                    .accessibilityIdentifier("show.loadingTitle")
+            }
+            ZStack { if openingLoader { LoaderRing() } }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: content
@@ -123,10 +154,20 @@ struct ShowPageView: View {
                         if show.seasons.count > 1 { seasonChips(show) }
                         periodChips(show)
                         let episodes = seasonEpisodes ?? ctGroups.flatMap(\.episodes)
-                        if !episodes.isEmpty {
-                            episodeList(title: seasonEpisodes == nil ? ctGroups.first?.title ?? "" : "",
-                                        episodes: episodes, show: card, pages: true)
+                        // a pick on its way: the list shown stays, dimmed, the loader over its top (T52)
+                        Group {
+                            if !episodes.isEmpty {
+                                episodeList(title: seasonEpisodes == nil ? ctGroups.first?.title ?? "" : "",
+                                            episodes: episodes, show: card, pages: true)
+                            } else if picking.loading.isWaiting {
+                                Color.clear.frame(height: 200)
+                            }
                         }
+                        .dimmedWhileLoading(pickingLoader)
+                        .overlay(alignment: .top) {
+                            if pickingLoader { LoaderRing().padding(.top, 60) }
+                        }
+                        NextPageLoader(state: more)
                     }
                     ForEach(recGroups, id: \.title) { group in
                         episodeList(title: group.title.isEmpty ? ArchiveRules.recordingsGroupTitle : group.title,
@@ -300,34 +341,24 @@ struct ShowPageView: View {
         let nextPage: Int?
     }
 
-    /// Page 1 of a new pick replaces the list.
+    /// Page 1 of a new pick replaces the list once it comes; until then the list shown stays, dimmed under the
+    /// loader (T52), and does not page. A newer pick replaces the waited one (its answer is dropped).
     private func reload(_ next: ArchiveEpisodeQuery, keepPeriods: Bool = true) {
-        let previous = Listed(query: query, periods: periods, episodes: seasonEpisodes, nextPage: nextPage)
+        let ticket = picking.begin(over: Listed(query: query, periods: periods, episodes: seasonEpisodes, nextPage: nextPage))
         query = next
         if !keepPeriods { periods = nil }
-        seasonEpisodes = []
         nextPage = nil
-        Task { await load(next, selection: next, page: 1, failed: previous) }
+        more.cancel()
+        Task { await loadPick(next, ticket: ticket) }
     }
 
-    private func loadMore() {
-        guard !loadingMore, let page = nextPage, let show else { return }
-        let selection = query
-        Task { await load(baseQuery(show).paging(periods), selection: selection, page: page) }
-    }
-
-    /// `selection` is the pick the request belongs to: an answer for an older pick is dropped. A failed new pick
-    /// puts `failed` back (the previous season/year/month and its list); a failed later page is asked again when
-    /// the end of the list shows again.
-    private func load(_ request: ArchiveEpisodeQuery, selection: ArchiveEpisodeQuery?, page: Int,
-                      failed previous: Listed? = nil) async {
-        loadingMore = true
-        defer { loadingMore = false }
+    private func loadPick(_ request: ArchiveEpisodeQuery, ticket: Int) async {
         let loaded: ArchiveEpisodePage
         do {
-            loaded = try await client.archiveEpisodes(show: id, query: request, page: page)
+            loaded = try await client.archiveEpisodes(show: id, query: request, page: 1)
         } catch {
-            if let previous, selection == query {
+            // a failed pick puts the season/year/month whose list is shown back
+            if let previous = picking.fail(ticket) {
                 query = previous.query
                 periods = previous.periods
                 seasonEpisodes = previous.episodes
@@ -335,14 +366,28 @@ struct ShowPageView: View {
             }
             return
         }
-        guard selection == query else { return }
-        // the next page of what the show came with extends it
-        var episodes = seasonEpisodes ?? show?.groups.first(where: { !$0.isRecordings })?.episodes ?? []
-        let known = Set(episodes.map(\.id))
-        episodes += loaded.episodes.filter { !known.contains($0.id) }
-        seasonEpisodes = episodes
+        guard picking.succeed(ticket) else { return }
+        seasonEpisodes = loaded.episodes
         nextPage = loaded.nextPage
-        if page == 1 { periods = loaded.periods } else if let more = loaded.periods { periods = more }
+        periods = loaded.periods
+    }
+
+    /// The next page of what is listed; a failed one is asked again when the end of the list shows again.
+    private func loadMore() {
+        guard !more.isWaiting, !picking.loading.isWaiting, let page = nextPage, let show else { return }
+        let request = baseQuery(show).paging(periods)
+        let ticket = more.begin()
+        Task {
+            let loaded = try? await client.archiveEpisodes(show: id, query: request, page: page)
+            guard more.finish(ticket), let loaded else { return }
+            // the next page of what the show came with extends it
+            var episodes = seasonEpisodes ?? self.show?.groups.first(where: { !$0.isRecordings })?.episodes ?? []
+            let known = Set(episodes.map(\.id))
+            episodes += loaded.episodes.filter { !known.contains($0.id) }
+            seasonEpisodes = episodes
+            nextPage = loaded.nextPage
+            if let more = loaded.periods { periods = more }
+        }
     }
 }
 

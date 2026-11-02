@@ -39,6 +39,8 @@
     var f = CT.WebStage.last = fit(w, h);
     stage.style.transform = transform(f);
     stage.style.height = f.height + 'px';
+    // what is sized in screen px inside the scaled stage (the T52 loader, web.css) divides by it
+    stage.style.setProperty('--web-scale', String(f.scale));
     var rotate = rotateNeeded(w, h);
     if (overlay) {
       overlay.textContent = ROTATE_TEXT;

@@ -57,6 +57,7 @@ import cz.cztvhub.core.archive.ArchiveShow
 import cz.cztvhub.core.archive.CardKind
 import cz.cztvhub.core.archive.CardSource
 import cz.cztvhub.core.archive.EpisodeSource
+import cz.cztvhub.core.archive.LoaderPlace
 import cz.cztvhub.core.archive.PeriodChip
 import cz.cztvhub.tv.R
 import cz.cztvhub.tv.tvApp
@@ -117,7 +118,7 @@ fun ShowPageDialog(
                     }
                     Spacer(Modifier.height(8.dp))
                     when (val s = state.show) {
-                        Load.Loading -> Text(stringResource(R.string.loading), color = Palette.textDim)
+                        Load.Loading -> Unit
                         is Load.Failed -> Text(s.message, color = Palette.nowLine)
                         is Load.Ready -> s.value.error?.let { Text(it, color = Palette.nowLine) }
                     }
@@ -132,7 +133,11 @@ fun ShowPageDialog(
                         )
                     }
                     Spacer(Modifier.height(16.dp))
-                    if (show == null) {
+                    if (state.show == Load.Loading) {
+                        // T52: the page loads: the ring in its place (title and facts from the card already shown).
+                        CenteredLoader(Modifier.weight(1f).fillMaxWidth())
+                        BackOnly(onDismiss)
+                    } else if (show == null) {
                         BackOnly(onDismiss)
                     } else if (card.kind == CardKind.MOVIE) {
                         FilmButtons(show, offer, play, onDismiss)
@@ -245,37 +250,41 @@ private fun Episodes(
             Spacer(Modifier.height(12.dp))
         }
         val focusFirstEpisode = show.seasons.size <= 1 && periods == null
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-            show.groups.forEachIndexed { groupIndex, group ->
-                if (group.episodes.isEmpty()) return@forEachIndexed
-                if (group.title.isNotBlank()) item(key = "title$groupIndex") {
-                    Text(group.title, style = MaterialTheme.typography.titleMedium, color = Palette.textDim, modifier = Modifier.padding(top = 4.dp))
-                }
-                val ctGroup = group.episodes.any { it.source == EpisodeSource.CT }
-                itemsIndexed(group.episodes, key = { index, e -> "$groupIndex:$index:${e.idec ?: e.recordingId}" }) { index, episode ->
-                    val from = offer(episode)
-                    val focus = if (focusFirstEpisode && groupIndex == show.groups.indexOfFirst { it.episodes.isNotEmpty() } && index == 0) {
-                        Modifier.focusRequester(first)
-                    } else {
-                        Modifier
+        // T52: a chip's episodes load over the dimmed list (chips stay usable); the next page adds a small ring below.
+        val place = rememberLoaderPlace(state.episodesWait)
+        LoadingBox(place, Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+                show.groups.forEachIndexed { groupIndex, group ->
+                    if (group.episodes.isEmpty()) return@forEachIndexed
+                    if (group.title.isNotBlank()) item(key = "title$groupIndex") {
+                        Text(group.title, style = MaterialTheme.typography.titleMedium, color = Palette.textDim, modifier = Modifier.padding(top = 4.dp))
                     }
-                    EpisodeRow(
-                        episode, from,
-                        onFromStart = { choosing = episode },
-                        modifier = focus.onFocusChanged {
-                            if (it.isFocused && ctGroup && index >= group.episodes.size - ArchiveRules.PAGE_AHEAD) {
-                                viewModel.loadMore()
-                            }
-                        },
-                    ) { play(episode, from) }
+                    val ctGroup = group.episodes.any { it.source == EpisodeSource.CT }
+                    itemsIndexed(group.episodes, key = { index, e -> "$groupIndex:$index:${e.idec ?: e.recordingId}" }) { index, episode ->
+                        val from = offer(episode)
+                        val focus = if (focusFirstEpisode && groupIndex == show.groups.indexOfFirst { it.episodes.isNotEmpty() } && index == 0) {
+                            Modifier.focusRequester(first)
+                        } else {
+                            Modifier
+                        }
+                        EpisodeRow(
+                            episode, from,
+                            onFromStart = { choosing = episode },
+                            modifier = focus.onFocusChanged {
+                                if (it.isFocused && ctGroup && index >= group.episodes.size - ArchiveRules.PAGE_AHEAD) {
+                                    viewModel.loadMore()
+                                }
+                            },
+                        ) { play(episode, from) }
+                    }
                 }
-            }
-            if (state.seasonLoading) item(key = "loading") { Text(stringResource(R.string.loading), color = Palette.textDim) }
-            item(key = "back") {
-                Button(
-                    onClick = onDismiss,
-                    modifier = if (show.groups.all { it.episodes.isEmpty() } && focusFirstEpisode) Modifier.focusRequester(first) else Modifier,
-                ) { Text(stringResource(R.string.back)) }
+                if (place == LoaderPlace.BELOW) item(key = "loading") { MoreLoader() }
+                item(key = "back") {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = if (show.groups.all { it.episodes.isEmpty() } && focusFirstEpisode) Modifier.focusRequester(first) else Modifier,
+                    ) { Text(stringResource(R.string.back)) }
+                }
             }
         }
     }

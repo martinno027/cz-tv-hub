@@ -294,6 +294,22 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
     nahrávky"; a category or sub-genre "Nic nenalezeno"; while loading the T13 loading state; a failed load
     "Archiv se nepodařilo načíst". The gateway's `error` ("iVysílání teď neodpovídá") is shown above the grid when
     present (our recordings still listed).
+  - **Loading is always visible (T52, owner 2026-11-02: „kdyz cokoliv vyberu chvilku trva nez se to nacte, ale neni
+    visualizovano ze probyha nacitani, ta cast co se nacita (obash/filtr atd) tak by tam mel byt loader“)**: whenever
+    the archive waits for the gateway, **the part being loaded** shows a loader: a spinning ring in the app's own
+    accent colour (white on tvOS, as its focus; about 64 px of a 1080p TV screen — 32 dp on Android TV — and 40 px on the web) centred in the visible part of it (on a long episode list near its top), shown **after 150 ms** (a fast answer
+    shows none, no flash) and gone when the answer (or the error) is there. Meanwhile the part's old content stays
+    where it is, **dimmed** (opacity about 0.35), never replaced by an empty text (dimmed together with the loader, not before); the menu, chips and focus keep
+    working, the dimmed cards and episodes can still be chosen (a newer choice replaces the waited one, its loader
+    stays); a failed chip load returns the chips to the choice whose content is listed; no next page is asked
+    while a part waits for new content. Where:
+    - the grid: a menu item or sub-genre chosen, a sort chip, search results (from the 0.5 s pause on), a category
+      opened → loader over the grid; the next page of the grid → a small loader (half size) below the last row;
+    - the show page: opening a show → the loader in place of the page (title known from the card shown at once if
+      the app has it); a season, year or month chip → loader over the episode list (chips stay usable); the next
+      page of episodes → a small loader below the last episode;
+    - "Pokračovat ve sledování" when it needs the gateway (cards' details), the same as the grid.
+    The loader replaces the T13 loading text where that text stood alone. All three apps and the web, same rule.
   - The TMDB logo + attribution sentence small at the bottom of the tab whenever a card in the grid shows TMDb data.
   - Details (decided 2026-10-25 from the first implementation): Right before the 0.4 s makes the focused item the
     selection first (the grid and "Left back to the selected item" then agree); the focus resting on "‹ Filmy"
