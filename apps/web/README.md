@@ -29,6 +29,11 @@ s aplikací Tailscale v tom zařízení.
   v samostatném okně.“ s „Vrátit sem“. V okně je místo něj ⧈ „Zpět do prohlížeče“ (zavře okno), zavření okna
   křížkem udělá totéž. Okna se domlouvají přes `BroadcastChannel('televize')`, záložka navíc hlídá své okno. Na
   telefonech a tabletech tlačítko není; zablokované okno ohlásí „Prohlížeč samostatné okno zablokoval…“.
+- **Vždy navrchu** (T48, `js/web-pip.js`, `css/pip.css`): 📌 v liště přehrávače (a klávesa P) dá obraz do okna
+  Picture-in-Picture, které zůstává nad ostatními okny. V Chrome/Edge přes https (brána na `:8443`, nebo `localhost`)
+  je to malé okno s ovládáním (⏸/▶, 🔊/🔇, „Zpět do okna“), do kterého se přesune tentýž `<video>` (žádný druhý
+  stream); stránka mezitím ukazuje „Přehrává se v okně navrchu.“ s „Vrátit sem“. Přes obyčejné http (`:8098`) a v
+  Safari jen obraz prohlížeče navrchu; ve Firefoxu tlačítko není.
 - Nic se nestahuje ani neexportuje, žádné CDN ani analytika; vše jen z brány.
 
 ## Testy a vývoj

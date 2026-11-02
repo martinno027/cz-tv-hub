@@ -106,6 +106,32 @@ zobrazení")
   obsazený" (not checked with a real tuner). Every normal tab of the page shows the „běží v okně"
   line (nothing plays twice). Coordination via `BroadcastChannel('televize')` (same origin), no storage needed.
 
+## Always on top (T48, owner 2026-11-02: „tlačítko always on top, které bude držet okno vždy nahoře")
+- A page cannot pin a browser window; the web way is **Picture-in-Picture**, whose window stays above all others. A
+  button **„📌 Vždy navrchu"** in the player bar (before ⧉; not in the tab bar: there is no picture to pin there) and
+  the key **P** (unused by the remote table; not while typing, not with Ctrl/Cmd/Alt). Works the same in a tab and in
+  the T46 popup.
+- **Document Picture-in-Picture** where the browser has it (Chrome/Edge 116+, only in a secure context: the gateway's
+  `https://…:8443/web/` and `localhost`): a small always-on-top window (480 px wide, height by the video's aspect,
+  16 : 9 before it is known) into which the playing `<video>` element is **moved** (never a second stream: the same
+  element, hls.js stays attached; checked in Chrome 156: it keeps playing on the move and back, and a re-resolve
+  inside the window attaches and plays). In that window: the picture, the player's message (e.g. „Načítání…", an
+  error) over it, and a bar shown on hover: ⏸/▶ (as Space), 🔊/🔇 (as M), **„Zpět do okna"**; keys Space, M,
+  P/Esc. The page meanwhile shows **„Přehrává se v okně navrchu."** with **„Vrátit sem"** (keys: only Enter/Space,
+  as the T46 line). „Zpět do okna", „Vrátit sem", P and closing the window (✕, the browser's „back to tab") put the
+  element back into the player and it keeps playing. The player closing for any reason (end, T46 popup taking
+  over) closes the window first.
+- **Video Picture-in-Picture** where Document PiP is missing but `video.requestPictureInPicture` exists (Safari,
+  iPad/iPhone, Chrome/Edge over plain HTTP `:8098`): only the picture goes on top (the browser's own window and
+  controls); the page keeps its player, the button then reads **„Zpět do okna"** and ends it. In a Chromium browser
+  over plain HTTP the first use says „Navrchu je jen obraz. Okno s ovládáním navrchu má Chrome a Edge na adrese
+  https://…:8443/web/."
+- **Neither** (Firefox, which offers its own PiP toggle over videos): the button is hidden, no hint (a dead button
+  is worse than none; as ⛶ without the Fullscreen API). A refused request (no user gesture, a policy) says
+  „Okno navrchu se nepodařilo otevřít." and the video stays in the page.
+- Unverified on real devices: Safari/iPad video PiP, Edge, Windows; whether Firefox's own toggle appears over the
+  app's video (it has no `controls`).
+
 ## ČT (internet channels) on the web
 - The browser cannot ask ČT itself: ČT's API answers browsers only for pages from `ceskatelevize.cz` (CORS,
   checked 2026-11-01: no `Access-Control-Allow-Origin` for any other origin). So the web asks **the gateway**, which

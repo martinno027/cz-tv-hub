@@ -56,7 +56,8 @@
 
   /**
    * Wires the page: `doc` = document, `app` = CT.App, `opts` = {history: the browser's history (Back links),
-   * window: the own-window controller (web-window.js, T46; optional),
+   * window: the own-window controller (web-window.js, T46; optional), pip: the always-on-top controller (web-pip.js,
+   * T48; optional),
    * scale() → the stage's scale, onChange() after anything that may open or close a layer}. Returns the handlers.
    */
   function install(doc, app, opts) {
@@ -239,6 +240,9 @@
       var on = function (selector) { return target.closest ? target.closest(selector) : null; };
       var own = opts.window;
       if (own && own.elsewhere) return on('.web-elsewhere-return') ? own.returnHere() : undefined; // T46
+      var pip = opts.pip;
+      if (pip && pip.away()) return on('.web-pip-return') ? pip.back() : undefined; // T48: the page's line
+      if (on('.web-pip') && pip) return pip.toggle();
       if (on('.web-window') && own) return own.toggle();
       if (on('.web-fullscreen')) return fullscreen();
       if (on('.web-mute') && playerOpen()) return muteClick();
@@ -353,6 +357,7 @@
     doc.addEventListener('pointercancel', onCancel, true);
     doc.addEventListener('wheel', onWheel, { capture: true, passive: false });
     doc.addEventListener('dblclick', function (e) {
+      if (opts.pip && opts.pip.away()) return; // the picture is in the window on top (T48)
       if (!playerOpen() || !e.target.closest || e.target.closest('#osd, #audio-list, #skip-ad, #player-message .button')) return;
       fullscreen();
     }, true);

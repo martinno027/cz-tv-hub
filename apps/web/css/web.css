@@ -104,8 +104,10 @@ body.web #stage.section-open #screen-settings h1.page-title {
   border: 2px solid var(--muted);
 }
 
-/* The tab that gave the app to the popup: one line over the whole page (unscaled, outside the stage) */
-#web-elsewhere {
+/* The tab that gave the app to the popup (T46), the page whose picture is in the window on top (T48): one line over
+   the whole page (unscaled, outside the stage) */
+#web-elsewhere,
+#web-pip-line {
   display: none;
   position: fixed;
   inset: 0;
@@ -121,18 +123,37 @@ body.web #stage.section-open #screen-settings h1.page-title {
   text-align: center;
 }
 
-#web-elsewhere.visible {
+#web-elsewhere.visible,
+#web-pip-line.visible {
   display: flex;
 }
 
-#web-elsewhere .web-elsewhere-text {
+#web-elsewhere .web-elsewhere-text,
+#web-pip-line .web-elsewhere-text {
   margin: 0;
 }
 
-#web-elsewhere .button {
+#web-elsewhere .button,
+#web-pip-line .button {
   font-size: 20px;
   padding: 12px 28px;
   cursor: pointer;
+}
+
+/* Always on top (T48): 📌 „Vždy navrchu" before ⧉ in the player bar; „Zpět do okna" while the picture is on top */
+.web-pip {
+  font-size: 26px;
+  line-height: 1;
+  padding: 12px 18px;
+  margin-right: 16px;
+  border-radius: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.web-pip.web-pip-on {
+  border: 2px solid var(--muted);
 }
 
 /* Mute (spec/apps.md "Mute (T34)"): 🔊/🔇 before the fullscreen button; the Samsung's yellow-key button is not shown */
@@ -161,6 +182,7 @@ body.web .ar-menu-item:hover,
 body.web .audio-item:hover,
 body.web .web-fullscreen:hover,
 body.web .web-window:hover,
+body.web .web-pip:hover,
 body.web .web-mute:hover,
 body.web .web-back-link:hover {
   background: var(--surface-hi);
