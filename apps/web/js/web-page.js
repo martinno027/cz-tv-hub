@@ -3,8 +3,9 @@
  * link inside the headers that need one (a Nastavení section, the Archiv show page, the player bar; the programme page
  * has its own Zpět button, the Archiv sub-menu its "‹ <category>" item), the fullscreen button at the right end of the tab bar and in the player bar,
  * the mute button (🔊/🔇, spec/apps.md "Mute (T34)") before it in the player bar, the own-window button ⧉/⧈ before
- * ⛶ in the tab bar with the tab's „běží v samostatném okně" line (T46, web-window.js), and the input, history and
- * fullscreen glue. No strip or overlay over the TV layout (the T46 line covers the page only while a popup has it).
+ * ⛶ in the tab bar with the tab's „běží v samostatném okně" line (T46, web-window.js), 📌 „Vždy navrchu" before ⧉ in
+ * the player bar with the page's „Přehrává se v okně navrchu" line (T48, web-pip.js), and the input, history and
+ * fullscreen glue. No strip or overlay over the TV layout (the T46/T48 lines cover the page only while they apply).
  */
 (function (root) {
   'use strict';
@@ -65,12 +66,18 @@
     line.appendChild(el(doc, 'p', 'web-elsewhere-text', CT.WebWindow.ELSEWHERE));
     line.appendChild(el(doc, 'div', 'button web-elsewhere-return', CT.WebWindow.RETURN));
     doc.body.appendChild(line);
+    var pipLine = el(doc, 'div', 'web-pip-line');
+    pipLine.id = 'web-pip-line';
+    pipLine.appendChild(el(doc, 'p', 'web-elsewhere-text', CT.WebPip.PLACEHOLDER));
+    pipLine.appendChild(el(doc, 'div', 'button web-pip-return', CT.WebPip.RETURN));
+    doc.body.appendChild(pipLine);
     var osd = doc.getElementById('osd');
     var row = el(doc, 'div', 'web-osd-row');
     row.appendChild(el(doc, 'div', 'web-back-link', BACK));
     var right = el(doc, 'div', 'web-osd-buttons');
     var mute = el(doc, 'div', 'web-mute');
     right.appendChild(mute);
+    right.appendChild(el(doc, 'div', 'web-pip hidden'));
     right.appendChild(el(doc, 'div', 'web-window web-window-player hidden'));
     right.appendChild(el(doc, 'div', 'web-fullscreen web-fullscreen-player'));
     row.appendChild(right);
@@ -107,9 +114,11 @@
     };
     CT.WebDnd.install(doc, app); // Kanály: drag and drop (T31)
     var own = ownWindow(doc, win, app);
+    var pip = onTop(doc, win, app);
     var input = CT.WebInput.install(doc, app, {
       history: win.history,
       window: own,
+      pip: pip,
       scale: function () { return CT.WebStage.last ? CT.WebStage.last.scale : 1; },
       onChange: sync
     });
@@ -150,7 +159,66 @@
     if (win.MutationObserver) new win.MutationObserver(syncShowBack).observe(doc.getElementById('sh-buttons'), { childList: true });
     // capture: also the first key, which only shows the focus (web-input.js stops it before the app)
     doc.addEventListener('keydown', function () { setTimeout(function () { revealFocus(doc, app); }, 0); }, true);
-    return { tracker: tracker, input: input, window: own };
+    return { tracker: tracker, input: input, window: own, pip: pip };
+  }
+
+  /**
+   * Always on top (T48): the controller, its button and the page's line. P toggles it while the player is open; while
+   * the line is up the keyboard only knows Enter/Space/P („Vrátit sem"), as under the T46 line. The player closing
+   * for any reason brings the picture back first; the window mirrors the player's message and mute.
+   */
+  function onTop(doc, win, app) {
+    var video = doc.getElementById('html5player');
+    var css = doc.querySelector('link[href$="css/web.css"]');
+    var playerOpen = function () { return !!app.player && app.player.isOpen(); };
+    var message = doc.getElementById('player-message');
+    var pip = new CT.WebPip.Controller(win, {
+      video: function () { return video; },
+      playerOpen: playerOpen,
+      playPause: function () {
+        app.player.onKey('playpause');
+        app.player.onKeyUp('playpause');
+      },
+      toggleMute: function () { app.player.toggleMute(); },
+      muted: function () { return app.player.mute.muted; },
+      message: function () { return message.style.display === 'flex' ? message.textContent : ''; },
+      toast: function (text) { app.toast(text); },
+      render: function (c) {
+        CT.WebPip.render(c, Array.prototype.slice.call(doc.querySelectorAll('.web-pip')),
+          doc.getElementById('web-pip-line'));
+      },
+      cssUrl: css ? css.href.replace(/web\.css$/, 'pip.css') : null
+    });
+    doc.addEventListener('keydown', function (e) {
+      if (e.ctName || e.ctrlKey || e.metaKey || e.altKey) return;
+      var tag = doc.activeElement ? doc.activeElement.tagName : '';
+      if (pip.away()) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32 || CT.WebPip.isPipKey(e, tag)) pip.back();
+        return;
+      }
+      if (CT.WebPip.isPipKey(e, tag) && (playerOpen() || pip.state !== 'off')) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        pip.toggle();
+      }
+    }, true);
+    var previous = CT.Platform.onMute;
+    CT.Platform.onMute = function (muted) {
+      if (previous) previous(muted);
+      pip.renderWindow();
+    };
+    if (win.MutationObserver) {
+      var player = doc.getElementById('player');
+      new win.MutationObserver(function () {
+        if (player.classList.contains('hidden')) pip.playerClosed();
+      }).observe(player, { attributes: true, attributeFilter: ['class'] });
+      new win.MutationObserver(function () { pip.renderWindow(); })
+        .observe(message, { attributes: true, attributeFilter: ['style'], childList: true, characterData: true, subtree: true });
+    }
+    pip.set('off'); // the first render
+    return pip;
   }
 
   /**
@@ -287,5 +355,5 @@
     app.play(what.request);
   }
 
-  CT.WebPage = { playing: playing, playHere: playHere, BACK: BACK, adapt: adapt, ownWindow: ownWindow, renderMute: renderMute, wire: wire, reopen: reopen, relayout: relayout, needsBackLink: needsBackLink, hint: hint, playerHint: playerHint };
+  CT.WebPage = { onTop: onTop, playing: playing, playHere: playHere, BACK: BACK, adapt: adapt, ownWindow: ownWindow, renderMute: renderMute, wire: wire, reopen: reopen, relayout: relayout, needsBackLink: needsBackLink, hint: hint, playerHint: playerHint };
 })(typeof window !== 'undefined' ? window : global);

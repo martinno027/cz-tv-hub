@@ -20,6 +20,14 @@
     return doc.getElementById(id);
   }
 
+  /** The player's <video>; the last one seen while it plays in the window on top (T48), outside this document. */
+  var lastVideo = null;
+  function video() {
+    var v = $('html5player');
+    if (v) lastVideo = v;
+    return v || lastVideo;
+  }
+
   function demo() {
     return !!(CT.Demo && CT.Demo.enabled);
   }
@@ -43,7 +51,7 @@
   };
   P.playerBackend = function (cb) {
     return new CT.WebPlayer.WebBackend(cb, {
-      video: $('html5player'),
+      video: video(),
       Hls: root.Hls || null,
       key: function () { return CT.App.dvbConfig ? CT.App.dvbConfig.key : null; },
       origin: root.location.origin
@@ -53,7 +61,7 @@
   P.refusePlay = function (target) {
     if (!target.dvb || target.psp) return null;
     if (demo() && target.kind === 'timeline') return null;
-    return CT.WebPlayer.hevcSupported($('html5player'), root.Hls || null, root) ? null : CT.WebPlayer.HEVC_MESSAGE;
+    return CT.WebPlayer.hevcSupported(video(), root.Hls || null, root) ? null : CT.WebPlayer.HEVC_MESSAGE;
   };
   /** Under every ČT player error (also ČT refusing a URL): "Otevřít v iVysílání". */
   P.playErrorAction = function (request) {
@@ -117,9 +125,9 @@
         'nic nenahrává, nestahuje ani neobchází DRM.';
       about.parentNode.insertBefore(el('p', 'web-third-party', 'hint small', thirdPartyLine()), about.nextSibling);
     }
-    var video = $('html5player');
-    video.setAttribute('controlslist', 'nodownload noplaybackrate');
-    video.setAttribute('disableremoteplayback', '');
+    var player = video();
+    player.setAttribute('controlslist', 'nodownload noplaybackrate');
+    player.setAttribute('disableremoteplayback', '');
   }
 
   /** Called by boot.js after the last script: the page, the input, then the app (as Samsung's `load`). */
