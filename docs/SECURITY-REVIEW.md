@@ -132,8 +132,18 @@ of "done".
 
 ### Secrets
 
-- Keys and passwords only in `/etc/cztvhub/cztvhub.conf` (0600, user `cztvhub`) and the platform keychains / encrypted
-  prefs on the TVs. *Wrong:* a key in a log line, a URL, a playlist, a committed file or a screenshot in the repo.
+- Keys and passwords only in `/etc/cztvhub/cztvhub.conf` (0600, user `cztvhub`), the platform keychains / encrypted
+  prefs on the TVs, the browser's storage of the web app (per origin), and — the app key only — the connection
+  manual the admin downloads (below). *Wrong:* a key in a log line, a URL, a playlist, a committed file or a
+  screenshot in the repo.
+- The connection manual (T49, `POST /admin/api/manual`, `dvb/manual.py`) is the one route that answers with the app
+  key: only to a logged-in admin (password, `X-Cztvhub-Admin`, same origin; a POST, so no link, `<img>` or foreign
+  form can fetch it), `Cache-Control: no-store`, logged `admin: connection manual downloaded` without the key or the
+  text. `ManualInfo` takes only `[dvb] key` from the secrets. *Wrong:* a GET (a cached or linked key), the key in
+  the journal, the admin password, the worker key, a TMDb key, the TVHeadend password or a profile password in the
+  file (`tests/test_dvb_manual.py` checks with real values), the manual reachable with the app key or the cookie,
+  or text from `tailscale status` copied into it unchecked (only the MagicDNS name by the `cert.sh` pattern and
+  parsed IPs).
 - The HTTPS private key only in `/var/lib/cztvhub/tls/key.pem` (0600, owner `cztvhub`, directory 0750), written by
   the root job `cztvhub-cert.service` running root's copy `/opt/cztvhub/cert.sh` (not the clone, not a path the
   gateway user can write); the name comes from `tailscale status --json` (checked against a strict pattern), never
@@ -171,4 +181,5 @@ of "done".
 | ---- | ---- | ----- | -------- |
 | 2026-10-24 | T05 | Channel timeline (`/dvb/timeline`, views, apps' timeline players) | Key required (401), worker key 403/404, media outside the window 404, no playlist over a whole recording; open timeline views capped at 4 per channel; view keys were never pruned (fixed); apps accept the JSON's playlist only as a gateway path (added to the checklist). |
 | 2026-11-01 | T33 | `/admin` (Access), the update from `/admin`, "Irreversible admin actions are logged" | Admin auth, header and same origin cover `POST /admin/api/update` (tests, mutations); requests and refusals logged. Found while building: `git pull --ff-only` alone does not stop on non-conflicting local edits or on another branch (it fast-forwards that branch to `main`): explicit check step; the status written by root into the gateway user's directory would have been a symlink-write primitive: written as `cztvhub` instead. Item added under Access. |
+| 2026-11-02 | T49 | `/admin` connection manual (Access, Secrets, irreversible actions logged) | The app key now leaves the Pi through `/admin`: admin login, header, same origin (tests: 401 for no login, wrong password, app key, worker key, cookie; 403 without the header or with a foreign origin; nothing gathered or logged then); only `[dvb] key` in the file (test with real admin/worker/TMDb/TVHeadend values); `no-store`, `nosniff`, attachment; log line without the key (mutations red). The Secrets statement "keys only in the config and the TVs" was no longer true (the web's browser storage, now the manual): rewritten. Not checked: whether the hardened service may run `tailscale status` on the Pi. |
 | 2026-11-01 | T39 | `/admin` TMDb keys (Access, Secrets, irreversible actions logged) | Saving/removing needs admin login, `X-Cztvhub-Admin` and same origin (tests: 401/403, no TMDb request, no file); `[tmdb] key` in the config makes both `409`; the file is 0600 also over a leftover tmp file; no key value in any answer or log line after a save, a refusal, TMDb down (URL with `api_key` in the error) or a removal (tests, mutations red); the key check shares the lookups' limiter. Nothing open. |

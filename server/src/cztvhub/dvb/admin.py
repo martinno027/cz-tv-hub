@@ -17,7 +17,9 @@ read-only and paginated, with refresh / delete per entry, delete all and the ref
 logged (``admin: tmdb: …``). The store is never downloadable. The tab "Aktualizace" asks the Pi to update itself
 (``update.py``: only a request file; a root systemd unit runs the fixed ``deploy/update.sh``). The tab
 "Přihlášení" shows the sign-in log (``signinlog.py``) read-only, newest first, paginated, filtered by profile;
-"Smazat záznamy" deletes it (logged ``admin: signin log deleted``). It is never downloadable.
+"Smazat záznamy" deletes it (logged ``admin: signin log deleted``). It is never downloadable. The tab "Návod" offers
+the connection manual (``manual.py``, T49): a TXT with this gateway's addresses and the app key, only as the answer
+to an admin POST (logged ``admin: connection manual downloaded``, never with the key).
 
 Login: HTTP Basic, user ``admin``, ``[admin] password``. State-changing requests must carry the
 ``X-Cztvhub-Admin`` header (a cross-site page cannot send it without a CORS preflight, which this
@@ -38,6 +40,7 @@ from ..config import Config
 from . import defaults as dflt
 from . import details as tmdb
 from . import epg
+from . import manual
 from . import space
 from . import tmdbkeys, tmdbstore
 from .update import Updater
@@ -53,6 +56,7 @@ TMDB_PATH = "/admin/api/tmdb"
 TMDB_CONFIG_KEY = "Klíč je nastavený v konfiguraci ([tmdb] key v /etc/cztvhub/cztvhub.conf) a platí ten; tady ho změnit nejde."
 UPDATE_PATH = "/admin/api/update"
 SIGNIN_PATH = "/admin/api/signin"
+MANUAL_PATH = "/admin/api/manual"
 TMDB_KEY_MAX = 600  # a store key: ["kind", year, "cleaned title"]
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BULK = 500
@@ -250,11 +254,13 @@ class AdminSite:
     """``/admin`` (page) and ``/admin/api/*`` (JSON) behind HTTP Basic."""
 
     def __init__(self, cfg: Config, gateway: DvbGateway, admin: ChannelAdmin | None = None,
-                 updater: Updater | None = None):
+                 updater: Updater | None = None, manual_info: Callable[[], manual.ManualInfo] | None = None):
         self.password = cfg.admin.password
         self.gateway = gateway
         self.admin = admin or ChannelAdmin(cfg, gateway.client, gateway.log, gateway.now)
         self.updater = updater or Updater(cfg.dvb.state_dir)
+        # what the connection manual needs, gathered at the moment of the request (tests: a fixed ManualInfo)
+        self.manual_info = manual_info or (lambda: manual.gather(cfg, self.updater.version(), now=gateway.now))
 
     def handle(self, method: str, path: str, headers: Mapping[str, str], body: bytes = b"",
                query: Mapping[str, str] | None = None, client: str = "") -> Response:
@@ -309,8 +315,12 @@ class AdminSite:
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
                 return self._update()
+            if method == "POST" and path == MANUAL_PATH:
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._manual()
             if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles") \
-                    or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH, SIGNIN_PATH):
+                    or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH, SIGNIN_PATH, MANUAL_PATH):
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -529,6 +539,15 @@ class AdminSite:
             return error(409, refused)
         self.gateway.log("admin: update requested")
         return json_response(202, {"requested": True})
+
+    def _manual(self) -> Response:
+        """``POST /admin/api/manual`` (body ignored): the connection manual as a TXT attachment; logged without
+        the key (spec "Connection manual from /admin")."""
+        text = manual.manual_text(self.manual_info())
+        self.gateway.log("admin: connection manual downloaded")
+        return Response(200, text.encode("utf-8"), "text/plain; charset=utf-8",
+                        {"Content-Disposition": f'attachment; filename="{manual.FILENAME}"',
+                         "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     # -- tab "Přihlášení" (signinlog.py) ---------------------------------------------------
     def _signin_overview(self, query: Mapping[str, str]) -> Response:
@@ -821,6 +840,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
   <button role="tab" id="tab-defaults" aria-selected="false">Výchozí kanály</button>
   <button role="tab" id="tab-tmdb" aria-selected="false">TMDb</button>
   <button role="tab" id="tab-update" aria-selected="false">Aktualizace</button>
+  <button role="tab" id="tab-manual" aria-selected="false">Návod</button>
 </div>
 <p class="legal">Nahrávání je soukromá kopie jen pro tuto domácnost. Záznam zůstává na disku tohoto Raspberry, maže se
 automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostatku místa a nelze ho stáhnout ani sdílet.</p>
@@ -925,6 +945,13 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
   Spouští se jen tento pevný postup, nic jiného z prohlížeče zvolit nejde. Když má klon místní změny nebo jinou
   větev než main, aktualizace se zastaví a ukáže důvod.</p>
 </section>
+<section id="manual" hidden>
+  <div class="dactions"><button id="manual-download">Stáhnout návod pro připojení (TXT)</button></div>
+  <p class="help">Textový soubor s návodem, jak připojit k tomuto Raspberry aplikace Televize (Apple TV, Android TV,
+  Samsung), web doma, přes Tailscale i přes HTTPS a Kodi. Obsahuje adresy tohoto Raspberry a <b>klíč brány</b>
+  (heslo správy ani jiné klíče ne): dejte ho jen tomu, kdo má mít přístup. Stažení se zapíše do záznamu služby
+  (bez klíče).</p>
+</section>
 <section id="channels">
 <label class="setting"><input type="checkbox" id="thumbs"> Náhledy pořadů v aplikacích (snímek z nahrávky, jen v paměti)</label>
 <div class="list">
@@ -980,7 +1007,7 @@ function api(method, path, body) {
   });
 }
 
-var TABS = ["channels", "storage", "profiles", "signin", "defaults", "tmdb", "update"];
+var TABS = ["channels", "storage", "profiles", "signin", "defaults", "tmdb", "update", "manual"];
 function showTab(name) {
   TABS.forEach(function (t) {
     document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
@@ -995,6 +1022,33 @@ function showTab(name) {
 }
 TABS.forEach(function (t) {
   document.getElementById("tab-" + t).addEventListener("click", function () { showTab(t); });
+});
+
+// tab "Návod": the manual is the answer to a POST (admin header), saved through a blob link (the CSP forbids forms)
+document.getElementById("manual-download").addEventListener("click", function () {
+  var button = this;
+  button.disabled = true;
+  fetch("/admin/api/manual", {method: "POST", credentials: "same-origin", headers: {"X-Cztvhub-Admin": "1"}})
+    .then(function (r) {
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (data) {
+          throw new Error(data.error || ("HTTP " + r.status));
+        });
+      }
+      return r.blob();
+    })
+    .then(function (blob) {
+      var url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url;
+      a.download = "televize-pripojeni.txt";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      say("Návod stažen (televize-pripojeni.txt).");
+    })
+    .catch(function (e) { say("Návod se nepodařilo stáhnout: " + e.message, true); })
+    .then(function () { button.disabled = false; });
 });
 
 var updatePolling = null, updateConfirm = false;

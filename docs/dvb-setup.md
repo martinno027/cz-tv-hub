@@ -286,6 +286,19 @@ Kdy se aktualizace zastaví (záložka ukáže krok a konec výpisu, celý výpi
 
 Aktualizaci může spustit jen ten, kdo zná heslo `/admin`. Tlačítko nainstaluje to, co je právě na `main` na GitHubu.
 
+### Návod pro připojení (TXT)
+
+Záložka **Návod** na `/admin`, tlačítko **Stáhnout návod pro připojení (TXT)**: stáhne soubor
+`televize-pripojeni.txt` s návodem, jak k tomuto Raspberry připojit aplikace Televize (Apple TV, Android TV,
+Samsung), web doma, přes Tailscale i přes HTTPS (nainstalovaný jako aplikace) a Kodi. Adresy doplní Raspberry samo
+v okamžiku stažení: jméno v domácí síti (`<jméno>.local`) a IP adresu, jméno a IP v Tailscale (z
+`tailscale status`) a adresu HTTPS, když je certifikát (kapitola 6a). Když Tailscale nebo HTTPS nenajde, napíše to
+do souboru i s důvodem a postupem, jak je zapnout.
+
+Soubor obsahuje **klíč brány** (ten, který se zadává v Nastavení → Server), nic jiného: heslo správy, klíč pro
+hledání reklam, klíč TMDb ani heslo TVHeadendu v něm nejsou. Pošlete ho jen tomu, komu chcete dát přístup.
+Stažení se zapíše do záznamu služby (`journalctl -u cztvhub | grep "connection manual"`), bez klíče.
+
 ## 5. Vzdálený přístup: jen vaše domácnost přes Tailscale
 
 - Port 8098 **nikdy nepřesměrovávejte na routeru** a nepoužívejte Tailscale Funnel ani sdílení zařízení
