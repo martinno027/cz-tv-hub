@@ -35,6 +35,7 @@ function fakeDoc() {
   ['top', 'osd', 'show'].forEach((id) => { byId[id] = element(id); });
   const doc = {
     documentElement: {},
+    body: element('body'), // the own-window line (T46) goes there
     getElementById: (id) => byId[id] || null,
     querySelectorAll: () => [],
     createElement: () => element('')
@@ -42,7 +43,7 @@ function fakeDoc() {
   return { doc, byId };
 }
 
-test('player bar: ‹ Zpět left, then the mute button before fullscreen; the player\'s state reaches the button', () => {
+test('player bar: ‹ Zpět left, then the mute button, the own-window button (T46) and fullscreen; the player\'s state reaches the button', () => {
   const { doc, byId } = fakeDoc();
   CT.Platform = CT.Platform || {};
   CT.WebPage.adapt(doc);
@@ -50,7 +51,7 @@ test('player bar: ‹ Zpět left, then the mute button before fullscreen; the pl
   assert.equal(row.className, 'web-osd-row');
   const [back, buttons] = row.children;
   assert.equal(back.className, 'web-back-link');
-  assert.deepEqual(buttons.children.map((c) => c.className), ['web-mute', 'web-fullscreen web-fullscreen-player']);
+  assert.deepEqual(buttons.children.map((c) => c.className), ['web-mute', 'web-window web-window-player hidden', 'web-fullscreen web-fullscreen-player']);
   const mute = buttons.children[0];
   assert.equal(mute.attrs.title, 'Vypnout zvuk');
   assert.equal(typeof CT.Platform.onMute, 'function');

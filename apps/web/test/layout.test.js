@@ -41,6 +41,7 @@ function fakeDoc() {
   });
   const doc = {
     documentElement: {},
+    body: element('body'), // the own-window line (T46) goes there
     getElementById: (id) => byId[id] || null,
     querySelectorAll: (sel) => (sel === '.set-section' ? sections : sel === '.web-fullscreen' ? made.filter((m) => /web-fullscreen/.test(m.className)) : []),
     createElement: () => { const e = element(''); made.push(e); return e; }

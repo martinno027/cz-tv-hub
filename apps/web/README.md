@@ -23,6 +23,12 @@ s aplikací Tailscale v tom zařízení.
   jako okno“) i Safari („Přidat do Docku“) otevřou Televizi bez adresního řádku. Žádný service worker ani offline
   mezipaměť. Ikony v `icons/` kreslí `python3 apps/web/tools/make_icons.py` (jen standardní knihovna) ze stejné
   kresby jako ikona Samsungu (`apps/tizen/tools/make_icon.py`); maskovatelná je zmenšená na 80 % do bezpečné zóny.
+- **Samostatné okno** (T46, `js/web-window.js`): tlačítko ⧉ vedle ⛶ otevře Televizi ve vyskakovacím okně bez
+  záložek a lišt (velikost jako současné okno; ⧉ je i v liště přehrávače a přehrávání se pak přesune do okna:
+  stejný kanál, záznam nebo pořad na stejném místě); původní záložka zastaví přehrávač a ukáže „Televize běží
+  v samostatném okně.“ s „Vrátit sem“. V okně je místo něj ⧈ „Zpět do prohlížeče“ (zavře okno), zavření okna
+  křížkem udělá totéž. Okna se domlouvají přes `BroadcastChannel('televize')`, záložka navíc hlídá své okno. Na
+  telefonech a tabletech tlačítko není; zablokované okno ohlásí „Prohlížeč samostatné okno zablokoval…“.
 - Nic se nestahuje ani neexportuje, žádné CDN ani analytika; vše jen z brány.
 
 ## Testy a vývoj
