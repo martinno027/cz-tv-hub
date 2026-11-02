@@ -55,7 +55,7 @@
     if (demo() && target.kind === 'timeline') return null;
     return CT.WebPlayer.hevcSupported($('html5player'), root.Hls || null, root) ? null : CT.WebPlayer.HEVC_MESSAGE;
   };
-  /** Under every ČT player error (also "ČT jde v prohlížeči přehrát jen doma…"): "Otevřít v iVysílání". */
+  /** Under every ČT player error (also ČT refusing a URL): "Otevřít v iVysílání". */
   P.playErrorAction = function (request) {
     if (!request || !CT_REQUESTS[request.kind]) return null;
     return { label: 'Otevřít v iVysílání', run: openIvysilani };

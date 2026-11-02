@@ -2,13 +2,11 @@
  * `?demo` on the web: the shared demo (demo.js) answers the gateway and CT's API from spec/fixtures. The web asks
  * the gateway's /dvb/ct/… instead of CT (web-ct.js), so this turns those requests back into the CT requests the
  * demo knows, which also runs the web's mapping in the browser. Nothing leaves the PC.
- * `?demo&ct=away` answers live and archive streams as the gateway does away from home (403 and its text).
  */
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
 
-  var AWAY = typeof root.location !== 'undefined' && /[?&]ct=away\b/.test(root.location.search);
   var API = 'https://api.ceskatelevize.cz';
 
   /** The gateway's CT route → the CT request the shared demo answers (null for anything else). */
@@ -27,14 +25,10 @@
   }
 
   /** `base` = CT.Demo.transport. */
-  function wrap(base, away) {
-    var isAway = away === undefined ? AWAY : away;
+  function wrap(base) {
     return function (request) {
       var ct = ctRequest(request.url);
       if (!ct) return base(request);
-      if (isAway && ct.method === 'GET') {
-        return Promise.resolve({ status: 403, body: JSON.stringify({ error: CT.WebCt.HOME_ONLY }) });
-      }
       return base(ct);
     };
   }

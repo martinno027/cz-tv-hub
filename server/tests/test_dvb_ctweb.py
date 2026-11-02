@@ -1,7 +1,7 @@
 """ČT for the household web app (spec/dvb-gateway.md "Web" → "ČT for the web"): ``/dvb/ct/live|vod|schedule``.
 
-ČT is never called: the bridge's fetch is a fake that records what would have been sent. The "home LAN only" rule
-for streams is a legal limit (legal-guard 2026-11-01).
+ČT is never called: the bridge's fetch is a fake that records what would have been sent. Streams go to every client
+with the app key, at home and away (owner 2026-11-02, replacing the T27 home-LAN-only rule).
 """
 import io
 import json
@@ -143,20 +143,27 @@ class CtWebGatewayTest(unittest.TestCase):
         self.assertEqual(self.get("/dvb/ct/other").status, 404)
         self.assertEqual(len(self.ct.calls), 1)
 
-    def test_streams_only_for_the_home_lan(self):
-        for peer in ("100.101.102.103", "fd7a:115c:a1e0::5", "::ffff:100.101.102.103", "8.8.8.8", "2a00::1", ""):
+    def test_streams_for_every_client_with_the_key_at_home_and_away(self):
+        peers = ("192.168.1.20", "127.0.0.1", "100.101.102.103", "fd7a:115c:a1e0::5", "::ffff:100.101.102.103",
+                 "8.8.8.8", "2a00::1", "")
+        self.assertEqual({ctweb.home_lan(p) for p in peers}, {True, False})  # the peers differ in "home"
+        for peer in peers:
             for path in ("/dvb/ct/live/CH_1", "/dvb/ct/vod/226411010101016"):
+                self.clock[0] += ctweb.STREAM_SECONDS  # never a cached answer: ČT is asked for every peer
                 resp = self.get(path, client=peer)
-                self.assertEqual(resp.status, 403, (peer, path))
-                self.assertEqual(json.loads(resp.body), {"error": "ČT jde v prohlížeči přehrát jen doma. Mimo domov"
-                                                                  " použijte aplikaci Televize nebo iVysílání."})
-        self.assertEqual(self.ct.calls, [])  # ČT is never asked for them
-        self.assertEqual(self.get("/dvb/ct/live/CH_1", client="127.0.0.1").status, 200)
-        self.assertEqual(self.get("/dvb/ct/live/CH_1", client="::ffff:10.0.0.7").status, 200)
+                self.assertEqual((resp.status, resp.body), (200, self.ct.default[1]), (peer, path))
+        self.assertEqual(len(self.ct.calls), 2 * len(peers))
 
-    def test_a_cached_answer_does_not_reach_the_tailnet_either(self):
-        self.assertEqual(self.get("/dvb/ct/live/CH_1").status, 200)
-        self.assertEqual(self.get("/dvb/ct/live/CH_1", client="100.101.102.103").status, 403)
+    def test_away_from_home_cts_own_refusal_is_passed_on(self):
+        self.ct.answers = {api.API_BASE + "/video": fixture("live_blocked.json")}
+        resp = self.get("/dvb/ct/live/CH_1", client="100.101.102.103")
+        self.assertEqual((resp.status, resp.body), fixture("live_blocked.json"))
+
+    def test_streams_still_need_the_app_key(self):
+        for headers, status in (({}, 401), ({"Authorization": "Bearer wrong"}, 401), (WORKER, 403)):
+            for peer in (HOME, "100.101.102.103"):
+                self.assertEqual(self.get("/dvb/ct/live/CH_1", headers=headers, client=peer).status, status)
+        self.assertEqual(self.ct.calls, [])
 
     def test_schedule_is_open_on_the_tailnet(self):
         resp = self.get("/dvb/ct/schedule", {"channels": "ct1", "date": "2026-10-18"}, client="100.101.102.103")

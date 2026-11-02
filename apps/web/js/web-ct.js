@@ -9,7 +9,7 @@
  *   POST …/graphql/… {variables: {channels, date: MM.DD.YYYY}} → GET /dvb/ct/schedule?channels=a,b&date=YYYY-MM-DD
  *     (the gateway uses its own fixed query: the page's query text is never sent)
  *
- * The gateway's own refusals ({"error": "…"}: home LAN only, ČT unreachable, a bad key) are given to the parsers in
+ * The gateway's own refusals ({"error": "…"}: ČT unreachable, a bad key) are given to the parsers in
  * ČT's error shape, so the viewer reads the gateway's Czech text instead of a generic one.
  */
 (function (root) {
@@ -22,7 +22,6 @@
   var GRAPHQL = /^https:\/\/api\.ceskatelevize\.cz\/graphql\/(\?|$)/;
 
   var NO_KEY = 'Zadejte klíč brány v Nastavení → Server.';
-  var HOME_ONLY = 'ČT jde v prohlížeči přehrát jen doma. Mimo domov použijte aplikaci Televize nebo iVysílání.';
 
   /** 'MM.DD.YYYY' (api.js, CT's GraphQL) → 'YYYY-MM-DD' (the gateway), or null. */
   function isoDate(graphqlDate) {
@@ -100,7 +99,6 @@
   CT.WebCt = {
     API: API,
     NO_KEY: NO_KEY,
-    HOME_ONLY: HOME_ONLY,
     isoDate: isoDate,
     route: route,
     answer: answer,

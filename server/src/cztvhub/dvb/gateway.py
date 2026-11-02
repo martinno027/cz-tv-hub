@@ -261,7 +261,7 @@ class DvbGateway:
                 if BREAKS_RE.match(path) and self.ads.enabled:
                     raise HttpError(403, "Bloky reklam ukládá jen pracovník")
                 raise HttpError(405, "Nepodporovaná metoda")
-            return self._route(path, query, headers, client)
+            return self._route(path, query, headers)
         except HttpError as exc:
             return error(exc.status, exc.message)
         except TunerBusy:
@@ -292,9 +292,9 @@ class DvbGateway:
         """The app key: bearer, or the same key as cookie ``cztvhub_key`` (Samsung AVPlay cannot send headers)."""
         return self._role(header, cookie, "") == "app"
 
-    def _route(self, path: str, query: Mapping[str, str], headers: Mapping[str, str], client: str = "") -> Response:
+    def _route(self, path: str, query: Mapping[str, str], headers: Mapping[str, str]) -> Response:
         if path.startswith(CT_WEB_PREFIX):
-            return self.ct_route(path, query, client)
+            return self.ct_route(path, query)
         if path == "/dvb/status":
             return self.status()
         if path == "/dvb/channels":
@@ -761,10 +761,10 @@ class DvbGateway:
         return Response(200, found[0], found[1], {"Cache-Control": "private, no-store"})
 
     # -- ČT for the web (ctweb.py) ---------------------------------------------------------
-    def ct_route(self, path: str, query: Mapping[str, str], client: str) -> Response:
-        """``/dvb/ct/live|vod|schedule``: ČT's status and JSON body unchanged; streams only for the home LAN."""
+    def ct_route(self, path: str, query: Mapping[str, str]) -> Response:
+        """``/dvb/ct/live|vod|schedule``: ČT's status and JSON body unchanged, at home and away."""
         try:
-            found = self.ct_web.handle(path, dict(query), client)
+            found = self.ct_web.handle(path, dict(query))
         except ctweb.CtWebError as exc:
             raise HttpError(exc.status, exc.message)
         if found is None:

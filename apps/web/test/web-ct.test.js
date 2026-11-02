@@ -117,13 +117,13 @@ test('route: only the three CT calls of the apps; anything else is refused and n
   assert.equal(g.seen.length, 0);
 });
 
-test('away from home: the gateway 403 shows its text ("ČT jde v prohlížeči přehrát jen doma…")', async () => {
-  const body = JSON.stringify({ error: CT.WebCt.HOME_ONLY });
-  const { api: a } = api({ '/dvb/ct/live/CH_1': { status: 403, body }, '/dvb/ct/vod/1': { status: 403, body } });
-  await assert.rejects(a.liveStreams('CH_1'), (e) => e.userMessage === CT.WebCt.HOME_ONLY && e.status === 'GATEWAY_403');
-  await assert.rejects(a.vodUrl('1'), (e) => e.userMessage === CT.WebCt.HOME_ONLY);
-  assert.equal(CT.WebCt.HOME_ONLY,
-    'ČT jde v prohlížeči přehrát jen doma. Mimo domov použijte aplikaci Televize nebo iVysílání.');
+test('ČT refusing a stream: ČT\'s own text reaches the player; the web has no home-only text of its own', async () => {
+  const refused = response('vod_no_licence.json');
+  const { api: a } = api({ '/dvb/ct/vod/1': refused });
+  const text = JSON.parse(refused.body).message.labels.textShort;
+  assert.ok(text);
+  await assert.rejects(a.vodUrl('1'), (e) => e.userMessage === text && e.status === 'MISSING_LICENCE_NOW');
+  assert.equal(CT.WebCt.HOME_ONLY, undefined);
 });
 
 test('gateway errors: 502 its text, 401 the bad-key text; ČT\'s own error bodies are not rewritten', async () => {
@@ -148,7 +148,7 @@ test('no key: nothing is sent, the text says where to enter it', async () => {
 test('demo: the web demo turns the gateway routes back into the CT requests the shared demo answers', async () => {
   const seen = [];
   const base = (r) => { seen.push(r); return Promise.resolve({ status: 200, body: '{}' }); };
-  const wrapped = CT.WebDemo.wrap(base, false);
+  const wrapped = CT.WebDemo.wrap(base);
   await wrapped({ method: 'GET', url: 'http://h:8098/dvb/ct/live/CH_4', headers: {} });
   await wrapped({ method: 'GET', url: 'http://h:8098/dvb/ct/schedule?channels=ct1,ct24&date=2026-10-16', headers: {} });
   await wrapped({ method: 'GET', url: 'http://h:8098/dvb/channels', headers: {} });
@@ -156,10 +156,8 @@ test('demo: the web demo turns the gateway routes back into the CT requests the 
   assert.equal(seen[1].method, 'POST');
   assert.deepEqual(JSON.parse(seen[1].body).variables, { channels: ['ct1', 'ct24'], date: '10.16.2026' });
   assert.equal(seen[2].url, 'http://h:8098/dvb/channels');
-  const away = CT.WebDemo.wrap(base, true);
-  const r = await away({ method: 'GET', url: 'http://h:8098/dvb/ct/vod/12', headers: {} });
-  assert.equal(r.status, 403);
-  assert.equal(JSON.parse(r.body).error, CT.WebCt.HOME_ONLY);
+  await wrapped({ method: 'GET', url: 'http://h:8098/dvb/ct/vod/12', headers: {} });
+  assert.match(seen[3].url, /\/media\/external\/12\?$/); // the demo plays ČT streams, no "away" mode
 });
 
 test('ČT through the gateway never carries X-Cztvhub-Client (T37: only /dvb/status and the profile routes)', async () => {

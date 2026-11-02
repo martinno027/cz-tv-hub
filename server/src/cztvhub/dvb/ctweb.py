@@ -2,8 +2,9 @@
 
 A browser cannot call ČT's API from a page that is not ``ceskatelevize.cz`` (CORS), so the gateway asks the same
 API the apps ask, with exactly the request of ``api.py``, and hands back **ČT's status and JSON body unchanged**.
-Stream answers (signed URLs) only go to clients on the home LAN: never to the tailnet or anything public
-(legal-guard 2026-11-01; ČT's own IP check is not relied upon). This is metadata only: video never passes through.
+Stream answers (signed URLs) go to every client with the app key, at home and away (owner 2026-11-02, replacing
+the T27 home-LAN-only rule); ČT's own answer decides whether its URL plays. This is metadata only: video never
+passes through.
 
 The signed URLs are never logged and never written; they live at most 60 s in this module's memory.
 """
@@ -39,11 +40,10 @@ MAX_ENTRIES = 200  # per cache; idecs are open-ended
 MAX_BYTES = 4 * 1024 * 1024  # a whole day of six channels is far below this
 TIMEOUT = 10.0
 
-NOT_HOME = "ČT jde v prohlížeči přehrát jen doma. Mimo domov použijte aplikaci Televize nebo iVysílání."
 UNREACHABLE = "iVysílání teď neodpovídá"
 
-# Home LAN: RFC 1918, link-local, IPv6 ULA and loopback. The tailnet (CGNAT range and Tailscale's ULA prefix) is
-# excluded explicitly: it lies inside fc00::/7, and "home only" is the gateway's rule, not ČT's.
+# Home LAN (used by the sign-in log's "where from", signinlog.py): RFC 1918, link-local, IPv6 ULA and loopback.
+# The tailnet (CGNAT range and Tailscale's ULA prefix) is excluded explicitly: it lies inside fc00::/7.
 HOME_V4 = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
                                                   "169.254.0.0/16", "127.0.0.0/8"))
 HOME_V6 = tuple(ipaddress.ip_network(n) for n in ("fc00::/7", "fe80::/10", "::1/128"))
@@ -119,28 +119,22 @@ class CtWeb:
         self._streams: dict[str, tuple[float, int, bytes]] = {}
         self._schedules: dict[tuple[tuple[str, ...], date], tuple[float, int, bytes]] = {}
 
-    def handle(self, path: str, query: dict, client: str) -> tuple[int, bytes] | None:
-        """(status, body) for a ``/dvb/ct/*`` path, None when the path is not one of them."""
+    def handle(self, path: str, query: dict) -> tuple[int, bytes] | None:
+        """(status, body) for a ``/dvb/ct/*`` path, None when the path is not one of them. The peer address
+        decides nothing: streams go to every client with the key (owner 2026-11-02)."""
         if m := LIVE_RE.match(path):
             channel = m.group(1)
             if channel not in BY_ID:
                 raise CtWebError(404, "Neznámý kanál ČT")
-            self._home_only(client)
             return self._stream("live", ct_api.LIVE_URL.format(channel=channel))  # the log names no channel
         if m := VOD_RE.match(path):
             idec = m.group(1)
             if not IDEC_RE.match(idec):
                 raise CtWebError(400, "Neplatný idec")
-            self._home_only(client)
             return self._stream("vod", ct_api.VOD_URL.format(idec=idec))  # nor the programme
         if path == SCHEDULE_PATH:
             return self._schedule(query.get("channels"), query.get("date"))
         return None
-
-    @staticmethod
-    def _home_only(client: str) -> None:
-        if not home_lan(client):
-            raise CtWebError(403, NOT_HOME)
 
     def _stream(self, what: str, url: str) -> tuple[int, bytes]:
         return self._cached(self._streams, url, STREAM_SECONDS, what, lambda: self.fetch(url))
