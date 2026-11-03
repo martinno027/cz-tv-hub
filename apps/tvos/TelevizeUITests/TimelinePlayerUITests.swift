@@ -55,6 +55,11 @@ final class TimelinePlayerUITests: XCTestCase {
         let shownAt = try XCTUnwrap(clockSeconds)
         sleep(2)
         XCTAssertGreaterThanOrEqual(try XCTUnwrap(clockSeconds) - shownAt, 1, "OK with the bar hidden does not pause")
+        // With the bar hidden again the first → click only shows it (T55); the next one steps. (Not on the bar of
+        // the OK above: slow XCUI reads can outlast its 5 s.)
+        wait(for: [expectation(for: hidden, evaluatedWith: title)], timeout: 10)
+        remote.press(.right)
+        XCTAssertTrue(title.waitForExistence(timeout: 3), "→ with the bar hidden shows it")
         let before = try XCTUnwrap(clockSeconds)
         remote.press(.right)
         sleep(1)
@@ -85,13 +90,23 @@ final class TimelinePlayerUITests: XCTestCase {
         remote.press(.up)
         sleep(2)
         shot("5-up")
-        // Held ←: scrubs back by about 60 s per second, seeks on release.
+        // Held → (T55): fast-forward at speed 1 (60 s per s, `▶▶`) that goes on after the release; OK plays there.
+        // (→, not ←: ▲ may have gone to the window's start, where ◀◀ stops at once.)
         let beforeHold = try XCTUnwrap(clockSeconds)
-        remote.press(.left, forDuration: 1.5)
-        sleep(2)
-        shot("6-held-left")
+        remote.press(.right, forDuration: 1)
+        XCTAssertTrue(trick.waitForExistence(timeout: 2), "fast-forward shows its sign")
+        XCTAssertEqual(trick.label, "▶▶")
+        shot("6a-forward")
+        sleep(1)
+        let moving = try XCTUnwrap(clockSeconds)
+        remote.press(.select)
+        let stoppedAt = try XCTUnwrap(clockSeconds)
+        XCTAssertFalse(trick.exists, "OK stops it")
+        sleep(1)
+        shot("6-stopped")
         let afterHold = try XCTUnwrap(clockSeconds)
-        XCTAssertLessThan(afterHold, beforeHold - 30, "held ← scrubs back")
+        XCTAssertGreaterThan(moving - beforeHold, 45, "goes on after the release: 0.5 s held + 1 s ≈ 90 s")
+        XCTAssertLessThan(abs(afterHold - stoppedAt), 6, "plays from where it stopped, no jump back")
         // Play/pause keeps the bar on screen while paused.
         remote.press(.playPause)
         sleep(7)
@@ -109,6 +124,69 @@ final class TimelinePlayerUITests: XCTestCase {
         remote.press(.menu)
         wait(for: [expectation(for: hidden, evaluatedWith: title)], timeout: 5)
         shot("9-closed")
+    }
+
+    /// Rewind / fast-forward (T55, spec/apps.md "Keys"): held → starts `▶▶` at 60 s per second, → raises the speed
+    /// (at most 4), ← lowers it and from 1 turns round, Back returns to where it started. Needs channel 1's window to
+    /// have about 12 min recorded after the start position (`TEST_RUNNER_TIMELINE_HOLD=1`, a growing window grows
+    /// meanwhile).
+    func testTrickPlay() throws {
+        guard env["TIMELINE_HOLD"] != nil else { throw XCTSkip("set TEST_RUNNER_TIMELINE_HOLD with 12 min recorded ahead") }
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        sleep(2)
+        remote.press(.playPause)  // paused: the origin stays put while the clock is read
+        let origin = try XCTUnwrap(clockSeconds)
+        remote.press(.right, forDuration: 1)
+        XCTAssertTrue(trick.waitForExistence(timeout: 2))
+        XCTAssertEqual(trick.label, "▶▶")
+        let oneRate = try rate(over: 1)
+        XCTAssertGreaterThan(oneRate, 40, "speed 1 ≈ 60 s per second")
+        XCTAssertLessThan(oneRate, 80)
+        remote.press(.right)
+        XCTAssertTrue(waitForLabel(trick, "▶▶ 2"))
+        for _ in 0..<3 { remote.press(.right) }
+        XCTAssertTrue(waitForLabel(trick, "▶▶ 4"), "4 is the most")
+        // At once: 240 s per second runs out of window fast, and XCUI reads take seconds at times (a measured rate
+        // here reached the live edge and stopped). The rates are golden (`trick`) in CTCoreTests.
+        remote.press(.left)
+        XCTAssertTrue(waitForLabel(trick, "▶▶ 3"), "the other side lowers it")
+        shot("t2-speed-3")
+        remote.press(.left)
+        remote.press(.left)
+        XCTAssertTrue(waitForLabel(trick, "▶▶"))
+        remote.press(.left)
+        XCTAssertTrue(waitForLabel(trick, "◀◀"), "from 1 the other side turns round")
+        // Back: stops and returns to where it started, playing; the player stays open.
+        remote.press(.menu)
+        XCTAssertFalse(trick.waitForExistence(timeout: 1))
+        sleep(1)
+        shot("t3-returned")
+        XCTAssertTrue(title.exists, "Back while moving does not close the player")
+        let back = try XCTUnwrap(clockSeconds)
+        XCTAssertGreaterThanOrEqual(back, origin, "returned to where it started (and plays)")
+        XCTAssertLessThan(back - origin, 8)
+        // A click is still 10 s, no movement.
+        remote.press(.right)
+        sleep(1)
+        XCTAssertFalse(trick.exists, "a click does not start moving")
+        XCTAssertGreaterThanOrEqual((try XCTUnwrap(clockSeconds)) - back, 10)
+    }
+
+    private var trick: XCUIElement { app.staticTexts["timeline.trick"] }
+
+    /// Clock seconds per second over about `seconds`, timed from the reads themselves (each XCUI query takes a
+    /// noticeable fraction of a second, so a bare `sleep` overstates the rate).
+    private func rate(over seconds: Double) throws -> Double {
+        let first = try XCTUnwrap(clockSeconds)
+        let began = Date()
+        usleep(useconds_t(seconds * 1_000_000))
+        let second = try XCTUnwrap(clockSeconds)
+        return Double(second - first) / Date().timeIntervalSince(began)
+    }
+
+    private func waitForLabel(_ element: XCUIElement, _ label: String, timeout: TimeInterval = 3) -> Bool {
+        let predicate = NSPredicate(format: "label == %@", label)
+        return XCTWaiter().wait(for: [expectation(for: predicate, evaluatedWith: element)], timeout: timeout) == .completed
     }
 
     /// Long OK lists the audio renditions (Czech selected) and picking one keeps playing. Needs a programme

@@ -33,8 +33,10 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
   původní znění…), Zpět = konec.
 - **Nahrávky z antény** (nepřetržitý záznam) hrají v okně záznamu kanálu kolem pořadu (± 3 h), takže jde začít
   před ohlášeným začátkem a pokračovat do sousedních pořadů. Vlastní lišta ukazuje nahrané úseky, hranice pořadů a
-  čas přehrávaného místa (např. „Dnes 21:14:30“). ◀ ▶ = 10 s, podržení = rychlé převíjení (posune se po puštění),
-  ⏪ ⏩ totéž o minutu a víc, ▲ ▼ = začátek tohoto / dalšího pořadu, OK = pauza, podržet OK = výběr zvuku.
+  čas přehrávaného místa (např. „Dnes 21:14:30“). ◀ ▶ = 10 s; podržení (půl sekundy) spustí převíjení tím směrem, které běží i po puštění;
+  další stisk na stejnou stranu zrychlí (2×, 3×, 4×, na liště „◀◀ 2“), na druhou zpomalí, z 1× obrátí směr;
+  OK přehraje odtud, Zpět vrátí na místo, kde převíjení začalo; ⏪ ⏩ převíjení spustí / zrychlí hned.
+  ▲ ▼ = začátek tohoto / dalšího pořadu, OK = pauza, podržet OK = výběr zvuku.
   Na konci okna se samo otevře další. Nahrávky TVHeadendu hrají jako dřív.
   Když odkaz během sledování vyprší, aplikace si vyžádá nový a pokračuje.
 

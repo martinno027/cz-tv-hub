@@ -18,7 +18,7 @@ import cz.cztvhub.core.dvb.DvbTimeline
 import cz.cztvhub.core.dvb.TimelineRules
 import java.time.Instant
 
-/** What the timeline player shows at one moment; [position] is the playhead (or the seek being chosen). */
+/** What the timeline player shows at one moment; [position] is the playhead (moving, or the seek on its way). */
 data class TimelineFrame(
     val timeline: DvbTimeline,
     /** The window's length in playlist seconds (a growing window: what the player already knows). */
@@ -26,6 +26,8 @@ data class TimelineFrame(
     val position: Double,
     val channelName: String,
     val now: Instant,
+    /** Rewind / fast-forward sign next to the playhead's clock (`◀◀`, `▶▶ 2`, T55); null = none. */
+    val badge: String? = null,
 )
 
 /**
@@ -86,12 +88,13 @@ class TimelineOverlay(context: Context) : LinearLayout(context) {
         val index = TimelineRules.programmeAt(timeline.programmes, playhead)
         val programme = index?.let { timeline.programmes[it] }
         val info = PlayerTitle.programme(programme?.title.orEmpty(), frame.channelName, programme?.subtitle.orEmpty())
-        title.text = info.title
-        subtitle.text = info.subtitle
+        title.show(info.title)
+        subtitle.show(info.subtitle)
         subtitle.visibility = if (info.subtitle.isBlank()) GONE else VISIBLE
-        playheadLabel.text = TimelineRules.label(playhead, frame.now)
-        startLabel.text = TimelineRules.edgeLabel(windowStart, playhead, frame.now)
-        endLabel.text = TimelineRules.endLabel(windowEnd, timeline.complete, playhead, frame.now)
+        val clock = TimelineRules.label(playhead, frame.now)
+        playheadLabel.show(frame.badge?.let { "$clock   $it" } ?: clock)
+        startLabel.show(TimelineRules.edgeLabel(windowStart, playhead, frame.now))
+        endLabel.show(TimelineRules.endLabel(windowEnd, timeline.complete, playhead, frame.now))
 
         val startMs = windowStart.toEpochMilli()
         val lastPiece = pieces.last()
@@ -112,6 +115,11 @@ class TimelineOverlay(context: Context) : LinearLayout(context) {
             val max = (labelRow.width - playheadLabel.width).toFloat().coerceAtLeast(0f)
             playheadLabel.translationX = (x - playheadLabel.width / 2f).coerceIn(0f, max)
         }
+    }
+
+    /** Rendered every frame while moving: an unchanged text is not set again (no relayout). */
+    private fun TextView.show(value: String) {
+        if (text.toString() != value) text = value
     }
 
     private fun text(sp: Float, bold: Boolean = false, alpha: Int = 255) = TextView(context).apply {

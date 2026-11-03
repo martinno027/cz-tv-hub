@@ -1,6 +1,6 @@
 /*
  * The web's player backend (spec/web.md "Player"): an HTML5 <video> instead of Samsung's AVPlay, with the same API
- * the shared Player and TimelineController use (open, close, togglePause, paused, position, duration, seekTo,
+ * the shared Player and TimelineController use (open, close, togglePause, pause, paused, position, duration, seekTo, preview,
  * seekBy, audioTracks, currentAudio, selectAudio, audioOutput) and the same callbacks (onReady, onError, onEnded,
  * onBuffering).
  *
@@ -201,11 +201,35 @@
     return isFinite(d) && d > 0 ? d * 1000 : 0;
   };
 
-  WebBackend.prototype.seekTo = function (ms) {
+  /** Where a seek to `ms` goes: not before 0, not within the guard before a growing end. */
+  WebBackend.prototype.clampSeek = function (ms) {
     var duration = this.duration();
     var to = Math.max(0, ms);
     if (duration > 0) to = Math.min(to, Math.max(0, duration - LIVE_EDGE_GUARD_MS));
+    return to;
+  };
+
+  /** Seeks exactly (ms) and returns where to. */
+  WebBackend.prototype.seekTo = function (ms) {
+    var to = this.clampSeek(ms);
     this.video.currentTime = to / 1000;
+    return to;
+  };
+
+  /**
+   * While rewinding / fast-forwarding (spec/apps.md T55, at most once a second): the picture to the nearest keyframe
+   * of `ms` with `video.fastSeek` (Safari, Firefox); false where the browser has none (Chrome, Edge: the picture
+   * stays until the stop).
+   */
+  WebBackend.prototype.preview = function (ms) {
+    if (typeof this.video.fastSeek !== 'function') return false;
+    this.video.fastSeek(this.clampSeek(ms) / 1000);
+    return true;
+  };
+
+  /** Rewind / fast-forward keeps the video paused (T55). */
+  WebBackend.prototype.pause = function () {
+    this.video.pause();
   };
 
   WebBackend.prototype.seekBy = function (deltaMs) {

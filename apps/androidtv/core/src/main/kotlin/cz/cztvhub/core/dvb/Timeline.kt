@@ -53,18 +53,16 @@ object TimelineRules {
     val START_MARGIN: Duration = Duration.ofSeconds(30)
     val REFRESH: Duration = Duration.ofSeconds(60)
 
-    /** A ←/→ press released within this is a step, longer is a scrub. */
+    /** A ←/→ press released within this is a click (±10 s); held this long it starts the movement (T55). */
     const val HOLD_MIN_SECONDS = 0.5
-
-    /** ⏪/⏩ scrub like held arrows but count at least this long (a tap = 60 s). */
-    const val MEDIA_MIN_HELD_SECONDS = 1.0
-
-    /** Without a key-up event, the release counts this long after the last repeat. */
-    const val RELEASE_TIMEOUT_MS = 800L
     const val STEP_SECONDS = 10.0
-    const val HOLD_SLOW_PER_SECOND = 60.0
-    const val HOLD_FAST_AFTER_SECONDS = 3.0
-    const val HOLD_FAST_PER_SECOND = 600.0
+
+    /** Without a key-up event, the press ends this long after its last repeat. */
+    const val RELEASE_TIMEOUT_MS = 800L
+
+    /** Rewind / fast-forward (`trick`): speed 1…[TRICK_MAX_SPEED], [TRICK_SECONDS_PER_SPEED] s of programme per second each. */
+    const val TRICK_MAX_SPEED = 4
+    const val TRICK_SECONDS_PER_SPEED = 60.0
 
     /** ▲ more than this into a programme goes to its start, else to the previous one. */
     val JUMP_BACK_GRACE: Duration = Duration.ofSeconds(10)
@@ -152,11 +150,16 @@ object TimelineRules {
             else -> TimelineEdge.SEEK
         }
 
-    /** Seek offset (seconds) of ←/→ held for [heldSeconds]: a press is 10 s, then 60 × s up to 3 s, then +600 × s. */
-    fun holdOffset(heldSeconds: Double): Double = when {
-        heldSeconds < HOLD_MIN_SECONDS -> STEP_SECONDS
-        heldSeconds <= HOLD_FAST_AFTER_SECONDS -> HOLD_SLOW_PER_SECOND * heldSeconds
-        else -> HOLD_SLOW_PER_SECOND * HOLD_FAST_AFTER_SECONDS + HOLD_FAST_PER_SECOND * (heldSeconds - HOLD_FAST_AFTER_SECONDS)
+    /** A ←/→ press held [heldSeconds] is a hold (starts the movement); shorter is a click, [STEP_SECONDS]. */
+    fun isHold(heldSeconds: Double): Boolean = heldSeconds >= HOLD_MIN_SECONDS
+
+    /** Seconds of programme per second at [speed] (`trick` speeds: 1 = 60 … 4 = 240); 0 = stopped. */
+    fun trickRate(speed: Int): Double = TRICK_SECONDS_PER_SPEED * speed.coerceIn(0, TRICK_MAX_SPEED)
+
+    /** The bar's sign while moving: `◀◀` / `▶▶`, from speed 2 with the number (`◀◀ 2`). */
+    fun trickBadge(forward: Boolean, speed: Int): String {
+        val sign = if (forward) "▶▶" else "◀◀"
+        return if (speed >= 2) "$sign $speed" else sign
     }
 
     private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm:ss").withZone(Days.ZONE)
@@ -236,19 +239,230 @@ object TimelineRules {
     private fun seconds(from: Instant, to: Instant): Double = Duration.between(from, to).toMillis() / 1000.0
 }
 
+/** What a key did to the rewind / fast-forward (`trick`), for the player to act on. */
+sealed class TrickAction {
+    /** Nothing to do (yet): a press being timed, or the rest of a press already used. */
+    object None : TrickAction()
+
+    /** A click while stopped: seek exactly by [seconds] (−10 / +10). */
+    data class Step(val seconds: Double) : TrickAction()
+
+    /** The movement began: pause the video, move the playhead every frame. */
+    object Start : TrickAction()
+
+    /** Speed or direction changed while moving. */
+    object Change : TrickAction()
+}
+
+/** How the movement stopped: play from the playhead, or back to where it began. */
+enum class TrickStop { PLAY_HERE, RETURN }
+
 /**
- * A ←/→ press being chosen from [from] (playlist seconds): the playhead follows [target] while the key is held,
- * the video seeks once on release. Times are the key events' clock in milliseconds.
+ * Rewind / fast-forward of the timeline player (spec/apps.md "Keys" ← / →, T55; golden `trick`). While stopped a
+ * ←/→ press is timed: released under [TimelineRules.HOLD_MIN_SECONDS] it is a click (±10 s), held that long it
+ * starts moving at speed 1 (already while held; the release adds nothing). While moving every press is a click at
+ * its down: the same side = speed + 1 (at most 4), the other side = speed − 1, from 1 it turns round. ⏪/⏩ act on
+ * their down the same way (stopped: start). Positions are playlist seconds of the current window, times the key
+ * events' clock in milliseconds.
+ *
+ * Remotes without a key-up: their repeats lasting ≥ 0.5 s are a hold; the press ends [TimelineRules.RELEASE_TIMEOUT_MS]
+ * after the last repeat ([released]), counted at that last repeat (the wait adds nothing).
  */
-class TimelineScrub(
-    val from: Double,
-    val forward: Boolean,
-    private val downAtMs: Long,
-    /** ⏪/⏩: [TimelineRules.MEDIA_MIN_HELD_SECONDS]; arrows 0. */
-    private val minHeldSeconds: Double = 0.0,
-) {
-    fun target(atMs: Long): Double {
-        val offset = TimelineRules.holdOffset(maxOf(minHeldSeconds, (atMs - downAtMs) / 1000.0))
-        return if (forward) from + offset else from - offset
+class TimelineTrick {
+    private class Press(val forward: Boolean, val downAtMs: Long, val used: Boolean, val clickSteps: Boolean = true) {
+        var lastEventMs = downAtMs
+    }
+
+    private var press: Press? = null
+
+    /** -1 back, 1 forward, 0 stopped. */
+    var direction = 0
+        private set
+
+    /** 1…4 while moving, 0 stopped. */
+    var speed = 0
+        private set
+
+    /** Where the movement began (the Back target); meaningful in the window it began in. */
+    var origin = 0.0
+        private set
+
+    /** Held still at its position while a neighbouring window opens ([freeze] … [rebase]). */
+    var frozen = false
+        private set
+
+    private var anchor = 0.0
+    private var anchorMs = 0L
+
+    val moving: Boolean get() = speed > 0
+
+    /** Seconds of programme per second, signed. */
+    val rate: Double get() = direction * TimelineRules.trickRate(speed)
+
+    /** The bar's sign, null while stopped. */
+    val badge: String? get() = if (moving) TimelineRules.trickBadge(direction > 0, speed) else null
+
+    /** The playhead at [atMs] while moving (else the last anchor). */
+    fun position(atMs: Long): Double =
+        if (!moving || frozen) anchor else anchor + rate * (atMs - anchorMs) / 1000.0
+
+    /**
+     * The first down of a ←/→ press at [atMs]; [from] = the playhead shown now. [barShown] false: this press only
+     * shows the bar when it is a click, a hold still starts the movement (T55).
+     */
+    fun down(forward: Boolean, atMs: Long, from: Double, barShown: Boolean = true): TrickAction {
+        if (moving) {
+            press = Press(forward, atMs, used = true)
+            change(forward, atMs)
+            return TrickAction.Change
+        }
+        press = Press(forward, atMs, used = false, clickSteps = barShown)
+        anchor = from
+        return TrickAction.None
+    }
+
+    /** A repeat of the press at [atMs]: lasting ≥ 0.5 s it starts the movement. */
+    fun repeat(atMs: Long): TrickAction {
+        val p = press ?: return TrickAction.None
+        if (atMs > p.lastEventMs) p.lastEventMs = atMs
+        if (p.used || moving) return TrickAction.None
+        if (!TimelineRules.isHold((atMs - p.downAtMs) / 1000.0)) return TrickAction.None
+        start(p.forward, anchor, atMs)
+        return TrickAction.Start
+    }
+
+    /** The key-up of the press at [atMs]: a click steps, a hold not seen as one yet starts now. */
+    fun up(atMs: Long): TrickAction {
+        val p = press ?: return TrickAction.None
+        press = null
+        if (p.used || moving) return TrickAction.None
+        if (TimelineRules.isHold((atMs - p.downAtMs) / 1000.0)) {
+            start(p.forward, anchor, atMs)
+            return TrickAction.Start
+        }
+        if (!p.clickSteps) return TrickAction.None
+        return TrickAction.Step(if (p.forward) TimelineRules.STEP_SECONDS else -TimelineRules.STEP_SECONDS)
+    }
+
+    /** When a press without a key-up counts as released (null = no press open). */
+    fun releaseAtMs(): Long? = press?.let { it.lastEventMs + TimelineRules.RELEASE_TIMEOUT_MS }
+
+    /** No key-up came: the press ends at its last repeat. */
+    fun released(): TrickAction {
+        val p = press ?: return TrickAction.None
+        return up(p.lastEventMs)
+    }
+
+    /** ⏪ / ⏩ pressed at [atMs]: stopped = start (speed 1), moving = as a click. */
+    fun media(forward: Boolean, atMs: Long, from: Double): TrickAction {
+        press = null
+        if (moving) {
+            change(forward, atMs)
+            return TrickAction.Change
+        }
+        start(forward, from, atMs)
+        return TrickAction.Start
+    }
+
+    /** Stops the movement at [atMs]: [TrickStop.PLAY_HERE] at the playhead, [TrickStop.RETURN] at [origin]. */
+    fun stop(atMs: Long, how: TrickStop = TrickStop.PLAY_HERE): Double {
+        val at = if (how == TrickStop.RETURN) origin else position(atMs)
+        reset()
+        anchor = at
+        return at
+    }
+
+    /** Back to stopped, nothing pending (the player closed or changed programme). */
+    fun reset() {
+        press = null
+        direction = 0
+        speed = 0
+        frozen = false
+    }
+
+    /** A neighbouring window opens: the playhead waits at [position] until [rebase]. */
+    fun freeze(position: Double) {
+        anchor = position
+        frozen = true
+    }
+
+    /** The movement goes on from [position] (of the new window) at [atMs], same speed and direction. */
+    fun rebase(position: Double, atMs: Long) {
+        anchor = position
+        anchorMs = atMs
+        frozen = false
+    }
+
+    /**
+     * What the moving playhead meets at [atMs] (`edge` rule): [TimelineEdge.SEEK] = nothing, keep moving;
+     * [TimelineEdge.PREVIOUS] / [TimelineEdge.NEXT] = continue in that window; [TimelineEdge.CLAMP] = stop there
+     * and play (no neighbour, or a growing window's live edge [liveEnd]).
+     */
+    fun edge(atMs: Long, duration: Double, complete: Boolean, hasPrevious: Boolean, hasNext: Boolean, liveEnd: Double): TimelineEdge {
+        if (!moving || frozen) return TimelineEdge.SEEK
+        val p = position(atMs)
+        return when {
+            direction < 0 && p <= 0 -> if (hasPrevious) TimelineEdge.PREVIOUS else TimelineEdge.CLAMP
+            direction > 0 && complete && p >= duration -> if (hasNext) TimelineEdge.NEXT else TimelineEdge.CLAMP
+            direction > 0 && !complete && p >= liveEnd -> TimelineEdge.CLAMP
+            else -> TimelineEdge.SEEK
+        }
+    }
+
+    private fun start(forward: Boolean, from: Double, atMs: Long) {
+        origin = from
+        anchor = from
+        anchorMs = atMs
+        direction = if (forward) 1 else -1
+        speed = 1
+        frozen = false
+    }
+
+    private fun change(forward: Boolean, atMs: Long) {
+        anchor = position(atMs)
+        anchorMs = atMs
+        when {
+            forward == (direction > 0) -> speed = minOf(TimelineRules.TRICK_MAX_SPEED, speed + 1)
+            speed > 1 -> speed -= 1
+            else -> direction = -direction
+        }
+    }
+}
+
+/**
+ * After a chosen seek the bar keeps showing its target until the player is there (T55: no jump back to the old
+ * position, e.g. while the previous / next window opens). Positions are playlist seconds, times milliseconds.
+ */
+class TimelineShownSeek {
+    private var target: Double? = null
+    private var sinceMs = 0L
+
+    /** The seek just chosen: [target] as the player was asked to go there (clamped), or beyond the edge on a switch. */
+    fun seek(target: Double, atMs: Long) {
+        this.target = target
+        sinceMs = atMs
+    }
+
+    fun clear() {
+        target = null
+    }
+
+    /** What the bar shows for the player at [playerPosition]: the target until the player is within reach of it. */
+    fun position(playerPosition: Double, atMs: Long, switching: Boolean = false): Double {
+        val t = target ?: return playerPosition
+        val arrived = !switching && kotlin.math.abs(playerPosition - t) <= ARRIVED_SECONDS
+        if (arrived || atMs - sinceMs > MAX_MS) {
+            target = null
+            return playerPosition
+        }
+        return t
+    }
+
+    companion object {
+        /** Within this of the target the player is there (a keyframe seek lands up to a segment, ~2.6 s, away). */
+        const val ARRIVED_SECONDS = 3.0
+
+        /** A seek the player never finished (or a window that did not open) stops being shown after this. */
+        const val MAX_MS = 10_000L
     }
 }

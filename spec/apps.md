@@ -206,14 +206,37 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
     the calendar day in Prague compared with now, `H:MM:SS` without a leading zero). Under the bar's ends the
     window's first and last recorded times `H:MM`, with the day label in front only when that day is not the
     playhead's (`edges`). A growing window's right end is "Teď" while its last piece ends within 30 s of now.
-  - while a seek is being chosen (held key or swipe) the playhead and its label move, the video seeks on release.
-- **Keys** (while the bar is hidden the first key only shows it, except play/pause, Back, the audio keys, and OK
+  - while rewinding / fast-forwarding (T55) or swiping (tvOS) the playhead and its label move; the badge `◀◀ n` /
+    `▶▶ n` shows the speed.
+- **Keys** (while the bar is hidden the first key only shows it, except play/pause, Back, the audio keys, ⏪ / ⏩ and
+  a held ← / → (they show the bar and act at once, T55), and OK
   while "Přeskočit reklamu" is shown):
   - **OK / play-pause** = pause/play. **Back** closes the player as before.
-  - **← / →** = −10 s / +10 s (released within 0.5 s); **held** = scrub: offset `60 × held s` up to 3 s, then
-    `+600 × s` (`hold`: 5 s held = 23 min); seek on release. Without a key-up event the release counts 0.8 s after the
-    last repeat. **⏪ / ⏩** scrub the same way but count at least 1 s (a tap = 60 s). tvOS: clickpad left/right click = the same, a horizontal swipe on the touch surface
-    scrubs (about 10 min per full swipe); Android TV `DPAD_LEFT/RIGHT` (+ `MEDIA_REWIND/FAST_FORWARD` as held);
+  - **← / →: a click = −10 s / +10 s** (exact). **Rewind / fast-forward (T55, owner 2026-11-03: „na jeden klik by se
+    melo posunout o 10s … kdyz podrzi tlacitko pro posunuti (chvilku) a pusti, melo by se automaticky posouvat tim
+    smerem, kdyz jeste jednou klikne na danou stranu zacne se posouvat 2x rychleji a zobrazi se 2 … to same pro 4
+    (maximalni rychlost), kdyz klikne zpet, tak se rychlost zase o jednu snizi, pripadne se zacne pretacet zpet …
+    tak jak to standardne na televiznich aplikacich je")**: a press **held ≥ 0.5 s** starts moving the playhead in
+    that direction at **speed 1** (already while held; releasing keeps it moving, the hold adds nothing else); while it moves, a click on the **same side** = speed + 1 (at most
+    **4**), on the **other side** = speed − 1, and from speed 1 the other side turns it round (speed 1 the other
+    way). Speeds: 1 = 60 s of programme per second, 2 = 120, 3 = 180, 4 = 240 (`trick`; 10 min back: 10 s at 1,
+    2.5 s at 4). The bar shows `◀◀` / `▶▶` and, from 2 on, the number (`◀◀ 2`) next to the playhead's clock.
+    **OK / play-pause** = stop here and play from the playhead; **Back** = stop and return to where it started
+    (playing); **▲ / ▼** = stop and jump as below. Reaching the start of the window (with `previous`) or its end
+    (with `next`) continues in that window (edge rule); without one, or at a growing window's live edge, it stops
+    there and plays. Continuing in the neighbouring window keeps the direction and speed (from the mapped
+    position once it opened); OK or Back while it opens ends the movement and plays the new window where it opened;
+    Back after the movement crossed into another window opens the window where it started, at the start position.
+    While it moves, a press acts when it goes down (speed changes and OK do not wait for the release; a long OK
+    for audio is not available then) and the tvOS swipe is ignored (clickpad clicks touch the surface).
+    While it moves the video stays paused and its picture follows the playhead at most once a
+    second with a fast seek where the player can (AVPlayer tolerance ±2 s, `video.fastSeek`; Android/AVPlay: the
+    picture stays until the stop); on the stop one exact seek. ⏪ / ⏩ (media keys): a press = start (speed 1) /
+    speed + 1 in its direction / − 1 against it, as the clicks while moving. The playhead and clock move every frame
+    (smooth, not in key-repeat steps); after the stop the bar shows the target until the player is within 3 s of it,
+    at most 10 s. **Without a key-up** (remotes that only repeat): repeats lasting ≥ 0.5 s are a hold (the movement
+    starts then); its end is noticed 0.8 s after the last repeat, and a new press after that is a new click. tvOS: clickpad left/right click = the same, a horizontal swipe on the touch surface
+    scrubs (about 10 min per full swipe); Android TV `DPAD_LEFT/RIGHT` (+ `MEDIA_REWIND/FAST_FORWARD` as ⏪ / ⏩ above);
     Samsung ◀/▶ (+ ⏪/⏩).
   - **▲ / ▼** = start of this programme / of the next one (`jump`: ▲ more than 10 s in goes to its start, else to
     the previous programme's start; nothing there = nothing happens). The target goes through the map; when the
@@ -231,7 +254,7 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
 - **Pokračovat**: the programme at the playhead (with an id) is the one remembered; progress = wall clock −
   programme start (`resume`; before the start = 0). Positions stored before T05 counted from 30 s before the start;
   they now resume 30 s later (accepted).
-- Golden cases: `spec/fixtures/timeline_cases.json` (`map`, `edge`, `hold`, `labels`, `edges`, `programmeAt`,
+- Golden cases: `spec/fixtures/timeline_cases.json` (`map`, `edge`, `hold`, `trick`, `labels`, `edges`, `programmeAt`,
   `jump`, `resume`), tested in all three apps.
 
 ## Programme page (T15)

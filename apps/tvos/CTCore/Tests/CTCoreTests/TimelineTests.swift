@@ -61,13 +61,162 @@ final class TimelineTests: XCTestCase {
         }
     }
 
+    /// `hold` (T55): only the clicks are left; a press released under 0.5 s steps 10 s, through `TrickPlay`.
     func testHold() throws {
         let items = try cases("hold")
-        XCTAssertEqual(items.count, 5)
+        XCTAssertEqual(items.count, 2)
         for item in items {
-            XCTAssertEqual(TimelineRules.holdOffset(held: double(item["held"])), double(item["offset"]), accuracy: 0.001,
-                           item["name"] as! String)
+            for sign in [-1, 1] {
+                var trick = TrickPlay()
+                XCTAssertEqual(trick.keyDown(sign, position: 1000, at: 50), .none)
+                let held = double(item["held"])
+                XCTAssertEqual(trick.update(at: 50 + held), .none, item["name"] as! String)
+                XCTAssertEqual(trick.keyUp(sign, at: 50 + held), .step(Double(sign) * double(item["offset"])),
+                               item["name"] as! String)
+                XCTAssertFalse(trick.isMoving)
+            }
         }
+    }
+
+    /// Golden `trick` (T55): event sequences → state, direction, speed, rate, badge, what the stop does.
+    func testTrickGolden() throws {
+        let trick = try XCTUnwrap(try golden["trick"] as? [String: Any])
+        let speeds = try XCTUnwrap(trick["speeds"] as? [[String: Any]])
+        XCTAssertEqual(speeds.count, 4)
+        XCTAssertEqual(TrickPlay.rates, speeds.map { double($0["rate"]) })
+        XCTAssertEqual(speeds.map { ($0["speed"] as! NSNumber).intValue }, [1, 2, 3, 4])
+        let items = try XCTUnwrap(trick["cases"] as? [[String: Any]])
+        XCTAssertEqual(items.count, 13)
+        XCTAssertEqual(items.filter { $0["barHidden"] as? Bool == true }.count, 2)
+        for item in items {
+            let name = item["name"] as! String
+            // Only the first event finds the bar hidden: every press shows it.
+            var barHidden = item["barHidden"] as? Bool ?? false
+            var state = TrickPlay()
+            var time = 100.0
+            var last = TrickPlay.Action.none
+            for event in item["events"] as! [String] {
+                let parts = event.split(separator: " ")
+                let sign = parts.count > 1 && parts[1] == "L" ? -1 : 1
+                let position = state.position(at: time) ?? 1000
+                switch parts[0] {
+                case "click":
+                    last = state.keyDown(sign, position: position, at: time, barHidden: barHidden)
+                    if case .none = last { last = state.keyUp(sign, at: time + 0.2) } else { _ = state.keyUp(sign, at: time + 0.2) }
+                case "hold":
+                    let down = state.keyDown(sign, position: position, at: time, barHidden: barHidden)
+                    var frame = time
+                    var during = TrickPlay.Action.none
+                    while frame < time + 0.6 {
+                        frame += 1.0 / 60
+                        let action = state.update(at: frame)
+                        if action != .none { during = action }
+                    }
+                    let up = state.keyUp(sign, at: time + 0.6)
+                    last = down != .none ? down : during != .none ? during : up
+                case "ok": last = state.ok()
+                case "back": last = state.back()
+                default: XCTFail("unknown event \(event)")
+                }
+                barHidden = false
+                time += 1
+            }
+            XCTAssertEqual(state.isMoving ? "moving" : "stopped", item["state"] as? String, name)
+            if item["state"] as? String == "moving" {
+                XCTAssertEqual(state.direction, (item["direction"] as! NSNumber).intValue, name)
+                XCTAssertEqual(state.speed, (item["speed"] as! NSNumber).intValue, name)
+                XCTAssertEqual(state.rate, double(item["rate"]), name)
+                XCTAssertEqual(state.badge, item["badge"] as? String, name)
+            } else {
+                XCTAssertNil(state.badge, name)
+            }
+            if let step = item["step"] { XCTAssertEqual(last, .step(double(step)), name) }
+            if let seek = item["seek"] as? String {
+                XCTAssertEqual(last, .stopped(try XCTUnwrap(TrickPlay.Stop(rawValue: seek))), name)
+            }
+        }
+    }
+
+    /// Spec numbers: 10 min back takes 10 s at speed 1 and 2.5 s at 4; the movement starts at the 0.5 s threshold
+    /// (already while held) and from the position pressed, so the playhead never jumps by the half second.
+    func testTrickMovesWithTime() {
+        var trick = TrickPlay()
+        _ = trick.keyDown(-1, position: 3000, at: 10)
+        XCTAssertEqual(trick.update(at: 10.4), .none)
+        XCTAssertNil(trick.position(at: 10.4), "not moving under 0.5 s")
+        XCTAssertEqual(trick.update(at: 10.5), .started, "starts while still held")
+        XCTAssertEqual(trick.position(at: 10.5)!, 3000, accuracy: 0.001)
+        XCTAssertEqual(trick.keyUp(-1, at: 11), .none, "the release keeps it moving")
+        XCTAssertTrue(trick.isMoving)
+        XCTAssertEqual(trick.position(at: 20.5)!, 2400, accuracy: 0.001, "speed 1: 10 min in 10 s")
+        // Up to speed 4 at 20.5: from there 600 s takes 2.5 s.
+        for _ in 0..<3 {
+            _ = trick.keyDown(-1, position: 0, at: 20.5)
+            _ = trick.keyUp(-1, at: 20.5)
+        }
+        XCTAssertEqual(trick.speed, 4)
+        XCTAssertEqual(trick.position(at: 20.5)!, 2400, accuracy: 0.001, "a speed change continues from the playhead")
+        XCTAssertEqual(trick.position(at: 23)!, 1800, accuracy: 0.001, "speed 4: 10 min in 2.5 s")
+        XCTAssertEqual(trick.origin, 3000, "Back returns where it started")
+        XCTAssertEqual(trick.back(), .stopped(.return))
+        XCTAssertEqual(trick.origin, 3000, "still readable after the stop")
+        XCTAssertNil(trick.position(at: 24))
+    }
+
+    /// A press while moving acts on the key-down (no waiting for a release), the other key's release and key repeats
+    /// do nothing, ⏪ / ⏩ start at speed 1 without a hold, ▲ / ▼ interrupt.
+    func testTrickPressesWhileMoving() {
+        var trick = TrickPlay()
+        XCTAssertEqual(trick.media(1, position: 100, at: 0), .started)
+        XCTAssertEqual(trick.badge, "▶▶")
+        XCTAssertEqual(trick.media(1, position: 0, at: 1), .changed)
+        XCTAssertEqual(trick.badge, "▶▶ 2")
+        XCTAssertEqual(trick.media(-1, position: 0, at: 2), .changed)
+        XCTAssertEqual(trick.media(-1, position: 0, at: 3), .changed)
+        XCTAssertEqual(trick.badge, "◀◀", "⏪ from speed 1 forward turns round")
+        XCTAssertEqual(trick.keyUp(1, at: 3.1), .none, "a release without its press does nothing")
+        XCTAssertEqual(trick.interrupt(), .stopped(.none))
+        XCTAssertEqual(trick.interrupt(), .none, "stopped: nothing to interrupt")
+        XCTAssertEqual(trick.ok(), .none, "OK stopped is the player's pause/play")
+        XCTAssertEqual(trick.back(), .none, "Back stopped closes the player")
+        // A key repeat (a second key-down before the release) of a stopped press does not restart the hold time.
+        XCTAssertEqual(trick.keyDown(1, position: 50, at: 10), .none)
+        XCTAssertEqual(trick.keyDown(1, position: 55, at: 10.3), .none)
+        XCTAssertEqual(trick.update(at: 10.5), .started)
+        XCTAssertEqual(trick.origin, 50)
+        // A window switch: the playhead continues from the new window's position.
+        trick.rebase(position: 7, at: 20)
+        XCTAssertEqual(trick.position(at: 21)!, 67, accuracy: 0.001)
+    }
+
+    func testPictureFollowsOnceASecond() {
+        XCTAssertTrue(TimelineRules.picturesFollow(last: nil, now: 5, inFlight: false))
+        XCTAssertFalse(TimelineRules.picturesFollow(last: 5, now: 5.99, inFlight: false))
+        XCTAssertTrue(TimelineRules.picturesFollow(last: 5, now: 6, inFlight: false))
+        XCTAssertFalse(TimelineRules.picturesFollow(last: 5, now: 9, inFlight: true), "one seek at a time")
+    }
+
+    func testSeekTolerance() {
+        XCTAssertEqual(TimelineRules.seekTolerance(.scrub), 2)
+        XCTAssertEqual(TimelineRules.seekTolerance(.follow), 2)
+        for kind in [TimelineRules.SeekKind.step, .jump, .skip, .trick] {
+            XCTAssertEqual(TimelineRules.seekTolerance(kind), 0, "\(kind) stays exact")
+        }
+        XCTAssertNotEqual(TimelineRules.seekTolerance(.follow), TimelineRules.seekTolerance(.trick))
+    }
+
+    /// After the release the target stays on the bar until the player is within 3 s of it, at most 10 s (T55).
+    func testSeekTargetShownUntilThePlayerIsThere() {
+        // Not there yet: 600 s back asked, the player still near the old position.
+        XCTAssertTrue(TimelineRules.showsSeekTarget(1000, position: 1600, elapsed: 0.5))
+        // Within 3 s (either side, a ±2 s keyframe seek lands there): the player's position takes over.
+        XCTAssertFalse(TimelineRules.showsSeekTarget(1000, position: 1003, elapsed: 0.5))
+        XCTAssertFalse(TimelineRules.showsSeekTarget(1000, position: 997, elapsed: 0.5))
+        XCTAssertTrue(TimelineRules.showsSeekTarget(1000, position: 1003.5, elapsed: 0.5))
+        XCTAssertTrue(TimelineRules.showsSeekTarget(1000, position: 996.5, elapsed: 0.5))
+        // Never there: at most 10 s.
+        XCTAssertTrue(TimelineRules.showsSeekTarget(1000, position: 1600, elapsed: 9.9))
+        XCTAssertFalse(TimelineRules.showsSeekTarget(1000, position: 1600, elapsed: 10))
     }
 
     func testLabels() throws {

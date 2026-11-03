@@ -287,3 +287,38 @@ test('hls.js: never X-Cztvhub-Client (T37) — not to the gateway\'s media, not 
     assert.deepEqual(x.headers, {}, url); // a CDN request stays a "simple" one
   }
 });
+
+test('seek (T55): exact; while moving the picture follows with fastSeek where the browser has it, else nothing', () => {
+  const v = fakeVideo({});
+  const fast = [];
+  const { b } = backend(v, fakeHls());
+  b.open({ url: 'x.m3u8', kind: 'timeline' }, 0);
+  v.duration = 600;
+  assert.equal(b.preview(100000), false, 'no fastSeek (Chrome): no preview');
+  assert.equal(v.currentTime, 0, 'and no seek either');
+  v.fastSeek = (s) => { fast.push(s); };
+  assert.equal(b.preview(200000), true);
+  assert.deepEqual(fast, [200]);
+  assert.equal(v.currentTime, 0, 'fastSeek, not currentTime');
+  assert.equal(b.seekTo(300000), 300000); // the stop, a click, ▲/▼: exact
+  assert.equal(v.currentTime, 300);
+  assert.deepEqual(fast, [200]);
+  assert.equal(b.preview(10 * 60 * 1000), true);
+  assert.deepEqual(fast, [200, 590], 'the guard before the end also for the preview');
+  assert.equal(b.seekTo(10 * 60 * 1000), 590000);
+});
+
+test('pause (T55): rewind / fast-forward pauses a playing video; togglePause plays it again', () => {
+  const v = fakeVideo({ canPlay: [HLS_TYPE], audioTracks: [] });
+  const { b } = backend(v, fakeHls());
+  b.open({ url: ORIGIN + '/dvb/timeline/x.m3u8', kind: 'timeline', alwaysSeek: true }, 0);
+  v.onloadedmetadata();
+  assert.equal(v.paused, false, 'plays');
+  b.pause();
+  assert.equal(v.paused, true);
+  assert.equal(b.paused(), true);
+  b.pause(); // again: stays paused (not a toggle)
+  assert.equal(v.paused, true);
+  b.togglePause();
+  assert.equal(v.paused, false);
+});

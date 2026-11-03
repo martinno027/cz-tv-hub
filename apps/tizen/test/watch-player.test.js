@@ -320,3 +320,30 @@ test('signed in: the profile session token rides along', async () => {
     assert.equal(q.headers['X-Cztvhub-Client'], 'tizen/1.0.0 (412)');
   });
 });
+
+test('timeline key-ups (T55) are trusted per player opening: kept for a neighbouring window, not for a new opening', async () => {
+  const { app } = samsungApp();
+  const tl = (id, start) => ({ id, channel: 'nova1', playlist: '/dvb/timeline/' + id + '.m3u8',
+    programme: { start, end: start + 1 }, pieces: [{ position: 0, time: start, duration: 10 }],
+    programmes: [{ id, title: 'Zprávy', subtitle: '', start, end: start + 1 }] });
+  const target = (id, start) => ({ kind: 'timeline', url: GATEWAY + '/dvb/timeline/' + id + '.m3u8',
+    startPositionMs: 0, alwaysSeek: true, dvb: DVB, timeline: tl(id, start) });
+  app.planner.plan = () => Promise.resolve(target('bnova1-1-2', 1000));
+  const request = { kind: 'dvbRecorded', channelId: '', title: 'Zprávy', recordingId: 'bnova1-1-2' };
+  try {
+    app.player.open(request);
+    await tick();
+    assert.equal(app.player.tl.keyupSeen, false);
+    app.player.onKey('enter');
+    app.player.onKeyUp('enter');
+    assert.equal(app.player.tl.keyupSeen, true, 'this remote sends key-ups');
+    app.player.switchTarget(target('bnova1-2-3', 2000));
+    await tick();
+    assert.equal(app.player.tl.keyupSeen, true, 'the same opening');
+    app.player.open(request); // another stream while this one plays (the web's hand-over does that)
+    await tick();
+    assert.equal(app.player.tl.keyupSeen, false, 'a new opening: not trusted yet');
+  } finally {
+    app.player.close(); // stops the controller's timers
+  }
+});

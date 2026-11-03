@@ -27,7 +27,7 @@ test('player hint on the web: keyboard words; the audio part only with several a
   assert.equal(H('live', 2), 'Mezerník pauza · ▲ ▼ kanál · 0–9 číslo kanálu · A zvuk · M ztlumení · F celá obrazovka · Esc zpět');
   assert.equal(H('other', 0), 'Mezerník pauza · ◀ ▶ posun o 10 s · M ztlumení · F celá obrazovka · Esc zpět');
   assert.equal(H('other', 3), 'Mezerník pauza · ◀ ▶ posun o 10 s · ▲ zvuk · M ztlumení · F celá obrazovka · Esc zpět');
-  assert.equal(H('timeline', 1), 'Mezerník pauza · ◀ ▶ 10 s, podržet = rychleji · ▲ ▼ začátek pořadu · M ztlumení · F celá obrazovka · Esc zpět');
+  assert.equal(H('timeline', 1), 'Mezerník pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · M ztlumení · F celá obrazovka · Esc zpět');
   assert.match(H('timeline', 2), / · A nebo podržet Enter zvuk · M ztlumení · F celá obrazovka · Esc zpět$/);
   for (const kind of ['live', 'other', 'timeline']) assert.ok(!/\bOK\b|AUDIO|Zpět konec/.test(H(kind, 2)), kind);
   // through the player: tracks only once a stream is there

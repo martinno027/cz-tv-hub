@@ -1,5 +1,6 @@
 import AVKit
 import CTCore
+import MediaPlayer
 import SwiftUI
 
 /// The video of a timeline playback without AVKit's controls; keys and swipes go to `TimelineController`.
@@ -23,25 +24,36 @@ private final class FocusableView: UIView {
     override var canBecomeFocused: Bool { true }
 }
 
-/// Keys of the timeline player (spec/apps.md "Anténa timeline player"): OK and play/pause pause, ← / → step
-/// 10 s or scrub while held, a horizontal swipe scrubs, ▲ / ▼ jump between programmes, a long OK press opens the
-/// audio list (with „Vypnout zvuk“ / „Zapnout zvuk“), Back closes the player. While the bar is hidden the first key only shows it, except play/pause,
-/// Back, the long OK and OK while "Přeskočit reklamu" is shown.
-final class TimelineHostViewController: UIViewController {
+/// Keys of the timeline player (spec/apps.md "Anténa timeline player"): OK and play/pause pause, a ← / → click
+/// steps 10 s, held 0.5 s it starts rewind / fast-forward (`TrickPlay`: more clicks change the speed, OK plays
+/// there, Back returns), ⏪ / ⏩ media commands do the same, a horizontal swipe scrubs, ▲ / ▼ jump between
+/// programmes, a long OK press opens the audio list (with „Vypnout zvuk“ / „Zapnout zvuk“), Back closes the player.
+/// While the bar is hidden the first key only shows it, except play/pause, Back, the long OK, ⏪ / ⏩, a held ← / →
+/// (they show it and act at once) and OK while "Přeskočit reklamu" is shown.
+final class TimelineHostViewController: UIViewController, UIGestureRecognizerDelegate {
     let player = AVPlayerViewController()
     private let timeline: TimelineController
     private let controller: PlayerController
 
-    private struct Hold {
-        let sign: Double
-        let began: Date
-        let base: Double
-        /// The press only showed the bar.
-        let ignored: Bool
-    }
-
-    private var hold: Hold?
-    private var holdTimer: Timer?
+    /// The sign of the ← / → press down (key repeats of it are ignored).
+    private var arrow: Int?
+    /// Drives `TimelineController.trickFrame` while a press may become a hold or the playhead moves (spec/apps.md
+    /// "Keys", T55: the playhead moves every frame, not in key-repeat steps).
+    private var frameLink: CADisplayLink?
+    /// The Menu press down began while rewind / fast-forward moved: `backRecognizer` takes it instead of closing the
+    /// player (set on every Menu key-down).
+    private var menuConsumed = false
+    /// Back while moving (spec/apps.md "Keys", T55). A recognizer, not only the responder chain: the presentation
+    /// closes the player on Menu through a recognizer of its own (seen in the simulator: consuming the press in
+    /// `pressesBegan`/`Ended` still closed it). The others wait for this one to fail.
+    private lazy var backRecognizer: UITapGestureRecognizer = {
+        let recognizer = UITapGestureRecognizer(target: self, action: #selector(backWhileMoving))
+        recognizer.allowedPressTypes = [NSNumber(value: UIPress.PressType.menu.rawValue)]
+        recognizer.allowedTouchTypes = []
+        recognizer.delegate = self
+        return recognizer
+    }()
+    private var mediaTargets: [(MPRemoteCommand, Any)] = []
     private var selectBegan: Date?
     private var selectTimer: Timer?
     private var selectConsumed = false
@@ -77,6 +89,22 @@ final class TimelineHostViewController: UIViewController {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(swiped(_:)))
         pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
         view.addGestureRecognizer(pan)
+        view.addGestureRecognizer(backRecognizer)
+    }
+
+    @objc private func backWhileMoving() {
+        _ = timeline.trickBack()
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer === backRecognizer ? menuConsumed : true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+        // Only the other Menu recognizers wait (all of them would hold up the arrows too).
+        gestureRecognizer === backRecognizer && other !== backRecognizer
+            && other.allowedPressTypes.contains(NSNumber(value: UIPress.PressType.menu.rawValue))
     }
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] { [view] }
@@ -87,12 +115,17 @@ final class TimelineHostViewController: UIViewController {
         var rest = Set<UIPress>()
         for press in presses {
             switch press.type {
-            case .leftArrow: beginHold(-1)
-            case .rightArrow: beginHold(1)
+            case .leftArrow: arrowDown(-1)
+            case .rightArrow: arrowDown(1)
             case .upArrow: arrowJump(.up)
             case .downArrow: arrowJump(.down)
             case .select: beginSelect()
             case .playPause: timeline.togglePlay()
+            case .menu where timeline.isTrickMoving:
+                menuConsumed = true  // `backRecognizer` stops it on the release
+            case .menu:
+                menuConsumed = false
+                rest.insert(press)
             default: rest.insert(press)
             }
         }
@@ -103,9 +136,12 @@ final class TimelineHostViewController: UIViewController {
         var rest = Set<UIPress>()
         for press in presses {
             switch press.type {
-            case .leftArrow, .rightArrow: endHold(cancelled: false)
+            case .leftArrow: arrowUp(-1, cancelled: false)
+            case .rightArrow: arrowUp(1, cancelled: false)
             case .select: endSelect()
             case .upArrow, .downArrow, .playPause: break
+            case .menu where menuConsumed:
+                break  // reset by the next Menu press: the recognizer may still ask
             default: rest.insert(press)
             }
         }
@@ -116,47 +152,86 @@ final class TimelineHostViewController: UIViewController {
         var rest = Set<UIPress>()
         for press in presses {
             switch press.type {
-            case .leftArrow, .rightArrow: endHold(cancelled: true)
+            case .leftArrow: arrowUp(-1, cancelled: true)
+            case .rightArrow: arrowUp(1, cancelled: true)
             case .select:
                 selectTimer?.invalidate()
                 selectBegan = nil
             case .upArrow, .downArrow, .playPause: break
+            case .menu where menuConsumed:
+                break  // reset by the next Menu press: the recognizer may still ask
             default: rest.insert(press)
             }
         }
         if !rest.isEmpty { super.pressesCancelled(rest, with: event) }
     }
 
-    private func beginHold(_ sign: Double) {
-        guard hold == nil else { return }  // key repeat of the same press
-        let ignored = !timeline.barVisible
-        timeline.showBar()
-        hold = Hold(sign: sign, began: Date(), base: timeline.displayPosition, ignored: ignored)
-        guard !ignored else { return }
-        holdTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.holdTick() }
+    /// With the bar hidden a press shows it: a click only shows it, a hold starts moving at once (spec/apps.md
+    /// "Keys", T55; `TrickPlay`).
+    private func arrowDown(_ sign: Int) {
+        guard arrow == nil else { return }  // key repeat of the same press
+        arrow = sign
+        timeline.trickKeyDown(sign)
+        startFrames()
+    }
+
+    private func arrowUp(_ sign: Int, cancelled: Bool) {
+        guard arrow == sign else { return }
+        arrow = nil
+        timeline.trickKeyUp(sign, cancelled: cancelled)
+    }
+
+    private func startFrames() {
+        guard frameLink == nil, timeline.needsFrames else { return }
+        // The display link retains its target: a proxy keeps this controller free; `frame` / `viewWillDisappear`
+        // invalidate it.
+        let link = CADisplayLink(target: DisplayLinkProxy(self), selector: #selector(DisplayLinkProxy.frame(_:)))
+        link.add(to: .main, forMode: .common)
+        frameLink = link
+    }
+
+    /// One frame: `targetTimestamp` = when this frame will be on screen.
+    fileprivate func frame(_ link: CADisplayLink) {
+        timeline.trickFrame(link.targetTimestamp)
+        if !timeline.needsFrames { stopFrames() }
+    }
+
+    private func stopFrames() {
+        frameLink?.invalidate()
+        frameLink = nil
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        addMediaCommands()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        stopFrames()
+        arrow = nil
+        removeMediaCommands()
+    }
+
+    /// ⏪ / ⏩ of remotes that have them (they arrive as remote seek commands; the Siri Remote has none): a press =
+    /// start (speed 1) / ± 1, as the clicks while moving.
+    private func addMediaCommands() {
+        guard mediaTargets.isEmpty else { return }
+        let center = MPRemoteCommandCenter.shared()
+        for (command, sign) in [(center.seekBackwardCommand, -1), (center.seekForwardCommand, 1)] {
+            let target = command.addTarget { [weak self] event in
+                guard let self, (event as? MPSeekCommandEvent)?.type != .endSeeking else { return .success }
+                self.timeline.trickMedia(sign)
+                self.startFrames()
+                return .success
+            }
+            mediaTargets.append((command, target))
         }
     }
 
-    private func holdTick() {
-        guard let hold else { return }
-        let held = Date().timeIntervalSince(hold.began)
-        guard held >= TimelineRules.holdThreshold else { return }
-        timeline.scrub(from: hold.base, offset: hold.sign * TimelineRules.holdOffset(held: held))
-    }
-
-    private func endHold(cancelled: Bool) {
-        holdTimer?.invalidate()
-        holdTimer = nil
-        guard let hold else { return }
-        self.hold = nil
-        guard !hold.ignored else { return }
-        if cancelled {
-            timeline.cancelScrub()
-            return
-        }
-        let held = Date().timeIntervalSince(hold.began)
-        timeline.endScrub(from: hold.base, offset: hold.sign * TimelineRules.holdOffset(held: held))
+    private func removeMediaCommands() {
+        for (command, target) in mediaTargets { command.removeTarget(target) }
+        mediaTargets = []
     }
 
     private func arrowJump(_ direction: TimelineRules.Direction) {
@@ -168,6 +243,11 @@ final class TimelineHostViewController: UIViewController {
     }
 
     private func beginSelect() {
+        // While rewind / fast-forward moves OK stops it and plays there (no long press, no pause).
+        if timeline.trickOK() {
+            selectBegan = nil
+            return
+        }
         selectBegan = Date()
         selectConsumed = false
         selectShowsBar = !timeline.barVisible && timeline.skipTarget == nil
@@ -201,6 +281,11 @@ final class TimelineHostViewController: UIViewController {
 
     @objc private func swiped(_ pan: UIPanGestureRecognizer) {
         let fraction = Double(pan.translation(in: view).x / max(1, view.bounds.width))
+        // Not while rewind / fast-forward moves: the clickpad clicks that change its speed touch the surface too.
+        if timeline.isTrickMoving {
+            swipeBase = nil
+            return
+        }
         switch pan.state {
         case .began:
             swipeBase = timeline.displayPosition
@@ -248,6 +333,20 @@ final class TimelineHostViewController: UIViewController {
     }
 }
 
+/// Forwards display-link frames without the link retaining the view controller. The link runs on the main run
+/// loop (`frameLink` is added to `.main`).
+@MainActor
+private final class DisplayLinkProxy: NSObject {
+    private weak var host: TimelineHostViewController?
+
+    init(_ host: TimelineHostViewController) { self.host = host }
+
+    @objc func frame(_ link: CADisplayLink) {
+        guard let host else { link.invalidate(); return }
+        host.frame(link)
+    }
+}
+
 // MARK: - the bar
 
 /// Own player bar of the timeline (spec/apps.md): title = programme at the playhead, the window with its recorded
@@ -269,7 +368,7 @@ struct TimelineBar: View {
                                                  growing: !window.complete)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 18) {
-                    if timeline.isPaused {
+                    if timeline.isPaused && timeline.trickBadge == nil {
                         Image(systemName: "pause.fill").font(.title2)
                     }
                     Text(title.title).font(.title2.bold()).lineLimit(1).accessibilityIdentifier("timeline.title")
@@ -283,7 +382,7 @@ struct TimelineBar: View {
                         .accessibilityIdentifier("timeline.message")
                 }
                 TimelineTrack(window: window, timeline: timeline, position: position, duration: duration,
-                              label: TimelineRules.label(playhead, now: now))
+                              label: TimelineRules.label(playhead, now: now), badge: timeline.trickBadge)
                 HStack {
                     Text(edges.start)
                     Spacer()
@@ -308,8 +407,10 @@ private struct TimelineTrack: View {
     let position: Double
     let duration: Double
     let label: String
+    /// `◀◀` / `▶▶ 2` while rewind / fast-forward moves, next to the clock.
+    let badge: String?
 
-    private static let height: CGFloat = 14
+    private static let height = TrackAxis.height
     private static let highlight = Color(red: 0.35, green: 0.62, blue: 1)
 
     var body: some View {
@@ -322,14 +423,11 @@ private struct TimelineTrack: View {
             let playhead = timeline.time(at: position) ?? first
             let highlighted = timeline.programme(at: position)
             ZStack(alignment: .topLeading) {
-                Capsule().stroke(.white.opacity(0.35), lineWidth: 2)
-                    .frame(width: width, height: Self.height)
+                // Pieces and programme ticks do not depend on the playhead: not rebuilt on every scrub frame.
+                TimelineTrackBackground(window: window, last: last, width: width).equatable()
                 ForEach(Array(window.map.pieces.enumerated()), id: \.offset) { index, piece in
                     // The last piece of a growing window reaches the player's end.
                     let pieceEnd = index == window.map.pieces.count - 1 ? last : piece.endTime
-                    Rectangle().fill(.white.opacity(0.3))
-                        .frame(width: max(1, x(pieceEnd) - x(piece.time)), height: Self.height)
-                        .offset(x: x(piece.time))
                     if let highlighted {
                         let from = max(highlighted.start, piece.time), to = min(highlighted.end, pieceEnd)
                         if to > from {
@@ -352,19 +450,17 @@ private struct TimelineTrack: View {
                         }
                     }
                 }
-                ForEach(Array(window.programmes.enumerated()), id: \.offset) { _, programme in
-                    if programme.start > first, programme.start < last {
-                        Rectangle().fill(.white)
-                            .frame(width: 3, height: Self.height + 12)
-                            .offset(x: x(programme.start) - 1.5, y: -6)
-                    }
-                }
+                TimelineTrackTicks(window: window, last: last, width: width).equatable()
                 Circle().fill(.white)
                     .frame(width: 28, height: 28)
                     .shadow(radius: 4)
                     .offset(x: x(playhead) - 14, y: Self.height / 2 - 14)
-                Text(label)
-                    .accessibilityIdentifier("timeline.clock")
+                HStack(spacing: 10) {
+                    if let badge {
+                        Text(badge).accessibilityIdentifier("timeline.trick")
+                    }
+                    Text(label).accessibilityIdentifier("timeline.clock")
+                }
                     .font(.headline.monospacedDigit())
                     .fixedSize()
                     .padding(.horizontal, 12)
@@ -381,6 +477,64 @@ private struct TimelineTrack: View {
         .frame(height: Self.height + 8)
         .padding(.top, 58)
     }
+}
+
+/// The window's outline and recorded pieces (under the played part).
+private struct TimelineTrackBackground: View, Equatable {
+    let window: DVBTimeline
+    let last: Date
+    let width: CGFloat
+
+    var body: some View {
+        let axis = TrackAxis(window: window, last: last, width: width)
+        ZStack(alignment: .topLeading) {
+            Capsule().stroke(.white.opacity(0.35), lineWidth: 2)
+                .frame(width: width, height: TrackAxis.height)
+            ForEach(Array(window.map.pieces.enumerated()), id: \.offset) { index, piece in
+                // The last piece of a growing window reaches the player's end.
+                let pieceEnd = index == window.map.pieces.count - 1 ? last : piece.endTime
+                Rectangle().fill(.white.opacity(0.3))
+                    .frame(width: max(1, axis.x(pieceEnd) - axis.x(piece.time)), height: TrackAxis.height)
+                    .offset(x: axis.x(piece.time))
+            }
+        }
+    }
+}
+
+/// Programme boundaries as ticks (over the played part).
+private struct TimelineTrackTicks: View, Equatable {
+    let window: DVBTimeline
+    let last: Date
+    let width: CGFloat
+
+    var body: some View {
+        let axis = TrackAxis(window: window, last: last, width: width)
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(window.programmes.enumerated()), id: \.offset) { _, programme in
+                if programme.start > axis.first, programme.start < last {
+                    Rectangle().fill(.white)
+                        .frame(width: 3, height: TrackAxis.height + 12)
+                        .offset(x: axis.x(programme.start) - 1.5, y: -6)
+                }
+            }
+        }
+    }
+}
+
+/// The wall-clock axis of the track: the first recorded time at 0, `last` at `width`.
+private struct TrackAxis {
+    static let height: CGFloat = 14
+    let first: Date
+    let span: TimeInterval
+    let width: CGFloat
+
+    init(window: DVBTimeline, last: Date, width: CGFloat) {
+        first = window.map.startTime ?? last
+        span = max(1, last.timeIntervalSince(first))
+        self.width = width
+    }
+
+    func x(_ time: Date) -> CGFloat { CGFloat(min(max(time.timeIntervalSince(first) / span, 0), 1)) * width }
 }
 
 /// "Přeskočit reklamu" of the timeline player; OK presses it while it is shown.

@@ -585,7 +585,11 @@
     this.since = 0;
     this.playing = false;
     this.endedTimer = null;
+    this.seekFrom = 0; // a seek takes SEEK_MS like a real player: until then the old position (T55 "no jump back")
+    this.seekUntil = 0;
   }
+
+  var SEEK_MS = 600;
 
   DemoBackend.prototype.limit = function () {
     var tl = this.target.timeline;
@@ -601,6 +605,7 @@
     this.base = Math.max(0, startMs || 0);
     this.since = Date.now();
     this.playing = true;
+    this.seekUntil = 0;
     this.endedTimer = setInterval(function () {
       if (self.playing && self.target.timeline.complete && self.position() >= self.limit()) {
         self.base = self.limit();
@@ -619,6 +624,7 @@
 
   DemoBackend.prototype.position = function () {
     if (!this.target) return 0;
+    if (Date.now() < this.seekUntil) return this.seekFrom;
     var p = this.base + (this.playing ? Date.now() - this.since : 0);
     return Math.min(p, this.limit());
   };
@@ -632,14 +638,25 @@
   };
 
   DemoBackend.prototype.togglePause = function () {
+    if (Date.now() < this.seekUntil) {
+      this.playing = !this.playing; // lands at the seek's target, then plays from SEEK_MS on (or stays there)
+      return;
+    }
     this.base = this.position();
     this.since = Date.now();
     this.playing = !this.playing;
   };
 
+  DemoBackend.prototype.pause = function () {
+    if (this.playing) this.togglePause();
+  };
+
+  /** Seeks (ms) and returns where to. */
   DemoBackend.prototype.seekTo = function (ms) {
+    this.seekFrom = this.position();
     this.base = Math.max(0, Math.min(ms, this.limit() - (this.target.timeline.complete ? 0 : 10000)));
-    this.since = Date.now();
+    this.seekUntil = this.since = Date.now() + SEEK_MS;
+    return this.base;
   };
 
   DemoBackend.prototype.seekBy = function (deltaMs) {

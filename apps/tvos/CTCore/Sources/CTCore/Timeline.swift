@@ -130,7 +130,7 @@ public enum TimelineRules {
     public static let startMargin: TimeInterval = 30
     /// A left/right click.
     public static let stepSeconds: Double = 10
-    /// Held at least this long, a left/right press scrubs instead of stepping.
+    /// Held at least this long, a left/right press starts rewind / fast-forward instead of stepping (`TrickPlay`).
     public static let holdThreshold: Double = 0.5
     /// ▲ more than this far into a programme goes to its start, else to the previous one.
     public static let jumpBackThreshold: TimeInterval = 10
@@ -157,12 +157,52 @@ public enum TimelineRules {
         return .seek
     }
 
-    /// Seek offset (seconds, before the direction's sign) of a left/right press held `held` seconds (golden `hold`):
-    /// a click steps 10 s, held it scrubs 60 s per second up to 3 s, then 600 s per second.
-    public static func holdOffset(held: Double) -> Double {
-        guard held >= holdThreshold else { return stepSeconds }
-        if held <= 3 { return 60 * held }
-        return 180 + 600 * (held - 3)
+    /// What asks for a seek: a swipe on the touch surface and the picture following a moving playhead seek to the
+    /// nearest keyframe, everything else exactly.
+    public enum SeekKind: Sendable, Equatable {
+        /// ← / → click (±10 s).
+        case step
+        /// ▲ / ▼ to a programme start.
+        case jump
+        /// "Přeskočit reklamu".
+        case skip
+        /// Released after a swipe on the touch surface.
+        case scrub
+        /// Rewind / fast-forward stopped (`TrickPlay`): one exact seek.
+        case trick
+        /// While rewind / fast-forward moves: the paused picture follows the playhead (at most once a second).
+        case follow
+    }
+
+    /// Seconds the player may land before or after a seek target (spec/apps.md "Keys", T55): a swipe and the
+    /// picture following a moving playhead ±2 s (fast keyframe seek), the rest exact.
+    public static func seekTolerance(_ kind: SeekKind) -> Double {
+        kind == .scrub || kind == .follow ? scrubSeekTolerance : 0
+    }
+
+    /// While rewind / fast-forward moves, the paused picture follows the playhead at most this often.
+    public static let pictureFollowSeconds: Double = 1
+
+    /// Whether the moving playhead's picture is due again: none yet, or the last one asked for at `last` is at least a
+    /// second old and has finished (`inFlight` false; AVPlayer would cancel it otherwise and the picture never moves).
+    public static func picturesFollow(last: Double?, now: Double, inFlight: Bool) -> Bool {
+        guard !inFlight else { return false }
+        guard let last else { return true }
+        return now - last >= pictureFollowSeconds
+    }
+
+    public static let scrubSeekTolerance: Double = 2
+
+    /// After a seek the bar shows the target, not the player's position, until the player is within this many
+    /// seconds of it (spec/apps.md "Keys", T55)…
+    public static let targetReachedSeconds: Double = 3
+    /// …but at most this long after the seek was asked for.
+    public static let targetShownMaxSeconds: Double = 10
+
+    /// Whether the bar still shows the seek `target` instead of the player's `position`, `elapsed` seconds after the
+    /// seek was asked for.
+    public static func showsSeekTarget(_ target: Double, position: Double, elapsed: Double) -> Bool {
+        abs(position - target) > targetReachedSeconds && elapsed < targetShownMaxSeconds
     }
 
     /// Where the window opens: programme start − 30 s, or "Pokračovat" at start + progress.

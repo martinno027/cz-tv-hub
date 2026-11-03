@@ -32,12 +32,28 @@
   {"name": "playback reached the end", "target": 5400, "duration": 5400, "complete": true, "previous": false, "next": true, "result": "next"}
  ],
  "hold": [
-  {"name": "short press", "held": 0.2, "offset": 10},
-  {"name": "just under half a second", "held": 0.49, "offset": 10},
-  {"name": "held 1 s", "held": 1, "offset": 60},
-  {"name": "held 3 s", "held": 3, "offset": 180},
-  {"name": "held 5 s: faster after 3 s", "held": 5, "offset": 1380}
+  {"name": "a click", "held": 0.2, "offset": 10},
+  {"name": "just under half a second: still a click", "held": 0.49, "offset": 10}
  ],
+ "trick": {
+  "_doc": "T55: barHidden (default false) = the bar is hidden before the first event; events in order (click L|R = a press under 0.5 s, hold L|R = a press held >= 0.5 s and released, ok, back); result after the last event: state moving|stopped, direction -1|1 (moving), speed 1-4 (moving), rate = seconds of programme per second (moving), badge = the bar's sign, seek = what the stop does (play-here|return|none)",
+  "speeds": [{"speed": 1, "rate": 60}, {"speed": 2, "rate": 120}, {"speed": 3, "rate": 180}, {"speed": 4, "rate": 240}],
+  "cases": [
+   {"name": "a click is ten seconds, no movement", "events": ["click L"], "state": "stopped", "step": -10},
+   {"name": "held and released: moves back at speed 1", "events": ["hold L"], "state": "moving", "direction": -1, "speed": 1, "rate": 60, "badge": "◀◀"},
+   {"name": "same side again: speed 2 with its number", "events": ["hold L", "click L"], "state": "moving", "direction": -1, "speed": 2, "rate": 120, "badge": "◀◀ 2"},
+   {"name": "up to 4", "events": ["hold L", "click L", "click L", "click L"], "state": "moving", "direction": -1, "speed": 4, "rate": 240, "badge": "◀◀ 4"},
+   {"name": "4 is the most", "events": ["hold L", "click L", "click L", "click L", "click L"], "state": "moving", "direction": -1, "speed": 4, "rate": 240, "badge": "◀◀ 4"},
+   {"name": "other side lowers the speed", "events": ["hold L", "click L", "click L", "click R"], "state": "moving", "direction": -1, "speed": 2, "rate": 120, "badge": "◀◀ 2"},
+   {"name": "from speed 1 the other side turns round", "events": ["hold L", "click R"], "state": "moving", "direction": 1, "speed": 1, "rate": 60, "badge": "▶▶"},
+   {"name": "turned round, then faster forward", "events": ["hold L", "click R", "click R"], "state": "moving", "direction": 1, "speed": 2, "rate": 120, "badge": "▶▶ 2"},
+   {"name": "a hold while moving counts as a click", "events": ["hold R", "hold R"], "state": "moving", "direction": 1, "speed": 2, "rate": 120, "badge": "▶▶ 2"},
+   {"name": "OK plays from the playhead", "events": ["hold L", "click L", "ok"], "state": "stopped", "seek": "play-here"},
+   {"name": "Back returns to where it started", "events": ["hold R", "back"], "state": "stopped", "seek": "return"},
+   {"name": "bar hidden: a click only shows the bar", "barHidden": true, "events": ["click L"], "state": "stopped", "step": 0},
+   {"name": "bar hidden: a hold shows it and moves at once", "barHidden": true, "events": ["hold L"], "state": "moving", "direction": -1, "speed": 1, "rate": 60, "badge": "◀◀"}
+  ]
+ },
  "labels": [
   {"name": "today", "now": "2026-10-24T19:00:00Z", "time": "2026-10-24T19:14:30Z", "label": "Dnes 21:14:30"},
   {"name": "no leading zero", "now": "2026-10-24T19:00:00Z", "time": "2026-10-24T07:05:09Z", "label": "Dnes 9:05:09"},
