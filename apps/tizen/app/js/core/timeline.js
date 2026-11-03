@@ -12,6 +12,11 @@
   var START_MARGIN_MS = 30 * 1000; // "Od začátku" and ad-break positions count from 30 s before the start
   var JUMP_INTO_MS = 10 * 1000;
   var NOW_EDGE_MS = 30 * 1000;
+  var HOLD_FROM_S = 0.5; // released sooner = a click (±10 s)
+  var CLICK_STEP_S = 10;
+  var TRICK_RATES = [60, 120, 180, 240]; // seconds of programme per second at speed 1–4 (T55)
+  var SEEK_ARRIVED_S = 3; // a fast seek lands on a keyframe up to ~2 s off
+  var SEEK_SETTLE_MS = 10000; // both chosen (T55, as Android), not measured on a TV: how long AVPlay takes to land is unknown
   // The gateway's continuous-recording id (server archive.py RECORDING_ID_RE). TVHeadend DVR ids are hex uuids,
   // which can start with "b" too, so the first letter alone is not enough.
   var RECORDING_ID = /^b[A-Za-z0-9_]{1,40}-\d{9,11}-\d{9,11}$/;
@@ -152,11 +157,60 @@
       return 'seek';
     },
 
-    /** Seek offset (seconds) of ◀/▶ held for `held` seconds: a short press 10 s, 60 s per s up to 3 s, then 600 s per s. */
-    holdOffset: function (held) {
-      if (held < 0.5) return 10;
-      if (held <= 3) return 60 * held;
-      return 180 + 600 * (held - 3);
+    CLICK_STEP_S: CLICK_STEP_S,
+    HOLD_MS: HOLD_FROM_S * 1000,
+
+    /** A press of `held` seconds: 'click' (±10 s) under 0.5 s, else 'hold' (starts rewind / fast-forward). */
+    pressKind: function (held) {
+      return held < HOLD_FROM_S ? 'click' : 'hold';
+    },
+
+    /** Seconds of programme per second at trick-play speed 1–4 (`trick.speeds`). */
+    trickRate: function (speed) {
+      return TRICK_RATES[Math.max(1, Math.min(TRICK_RATES.length, speed)) - 1];
+    },
+
+    /** The bar's sign while moving: `◀◀` / `▶▶`, from speed 2 on with the number (`◀◀ 2`). */
+    trickBadge: function (direction, speed) {
+      return (direction < 0 ? '\u25c0\u25c0' : '\u25b6\u25b6') + (speed > 1 ? ' ' + speed : '');
+    },
+
+    /**
+     * Rewind / fast-forward (T55, golden `trick`): `state` null = stopped, else {direction: -1|1, speed: 1–4};
+     * `event` {type: 'click' | 'hold' | 'ok' | 'back', direction} (a click = a press under 0.5 s, a hold = one held
+     * from 0.5 s; ⏪/⏩ count as a hold); `barHidden` = the bar was hidden before this event. Returns {state, step
+     * (s, a click while stopped; 0 when it only showed the hidden bar), seek: 'play-here' | 'return' | 'none'}.
+     * While moving a click or a hold on the same side = speed + 1 (at most 4), on the other side − 1, and from 1
+     * the other side turns round.
+     */
+    trick: function (state, event, barHidden) {
+      var dir = event.direction < 0 ? -1 : 1;
+      var max = TRICK_RATES.length;
+      if (!state) {
+        if (event.type === 'click') return { state: null, step: barHidden ? 0 : dir * CLICK_STEP_S, seek: 'none' };
+        if (event.type === 'hold') return { state: { direction: dir, speed: 1 }, step: 0, seek: 'none' };
+        return { state: null, step: 0, seek: 'none' };
+      }
+      if (event.type === 'ok') return { state: null, step: 0, seek: 'play-here' };
+      if (event.type === 'back') return { state: null, step: 0, seek: 'return' };
+      var next;
+      if (dir === state.direction) next = { direction: dir, speed: Math.min(max, state.speed + 1) };
+      else if (state.speed > 1) next = { direction: state.direction, speed: state.speed - 1 };
+      else next = { direction: dir, speed: 1 };
+      return { state: next, step: 0, seek: 'none' };
+    },
+
+    /** Playhead (s) `elapsedMs` after `base` while moving at `speed` in `direction`. */
+    trickPosition: function (base, direction, speed, elapsedMs) {
+      return base + direction * Timeline.trickRate(speed) * elapsedMs / 1000;
+    },
+
+    /**
+     * After a seek the bar shows its target (`target`, s) until the player's `position` is within 3 s of it, or
+     * 10 s have passed (a seek that landed elsewhere, e.g. a fast seek's keyframe or a refused seek).
+     */
+    seekSettled: function (target, position, elapsedMs) {
+      return Math.abs(position - target) <= SEEK_ARRIVED_S || elapsedMs >= SEEK_SETTLE_MS;
     },
 
     /** `Dnes 21:14:30`, `Včera 23:59:59`, `čt 22. 10. 10:05:00`: the Prague calendar day compared with now. */

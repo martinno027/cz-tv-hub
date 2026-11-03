@@ -32,7 +32,7 @@
       return 'Mezerník pauza · ▲ ▼ kanál · 0–9 číslo kanálu · ' + (audio ? 'A zvuk · ' : '') + MUTE_HINT + END_HINT;
     }
     if (kind === 'timeline') {
-      return 'Mezerník pauza · ◀ ▶ 10 s, podržet = rychleji · ▲ ▼ začátek pořadu · ' +
+      return 'Mezerník pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · ' +
         (audio ? 'A nebo podržet Enter zvuk · ' : '') + MUTE_HINT + END_HINT;
     }
     return 'Mezerník pauza · ◀ ▶ posun o 10 s · ' + (audio ? '▲ zvuk · ' : '') + MUTE_HINT + END_HINT;

@@ -37,8 +37,62 @@ test('edge: seek, previous, next or stay', () => {
   }
 });
 
-test('hold: offset of a held left/right', () => {
-  for (const c of cases.hold) assert.ok(Math.abs(T.holdOffset(c.held) - c.offset) < 1e-9, c.name);
+test('hold: a press under 0.5 s is a click of 10 s', () => {
+  for (const c of cases.hold) {
+    assert.equal(T.pressKind(c.held), 'click', c.name);
+    assert.equal(T.CLICK_STEP_S, c.offset, c.name);
+  }
+  assert.equal(T.pressKind(0.5), 'hold'); // spec: held ≥ 0.5 s starts moving
+  assert.equal(T.HOLD_MS, 500);
+});
+
+test('trick (T55): speeds 1–4 are 60/120/180/240 s of programme per second', () => {
+  for (const s of cases.trick.speeds) assert.equal(T.trickRate(s.speed), s.rate, 'speed ' + s.speed);
+  // spec: 10 min back takes 10 s at speed 1, 2.5 s at 4
+  assert.equal(T.trickPosition(1000, -1, 1, 10000), 400);
+  assert.equal(T.trickPosition(1000, -1, 4, 2500), 400);
+  assert.equal(T.trickPosition(1000, 1, 2, 500), 1060);
+});
+
+/** "click L" → {type: 'click', direction: -1}; "ok" → {type: 'ok'}. */
+function trickEvent(text) {
+  const [type, side] = text.split(' ');
+  return { type, direction: side === 'L' ? -1 : side === 'R' ? 1 : 0 };
+}
+
+test('trick (T55): event sequences → state, direction, speed, rate, badge, step, seek', () => {
+  for (const c of cases.trick.cases) {
+    let state = null;
+    let r = null;
+    c.events.forEach((e, i) => {
+      r = T.trick(state, trickEvent(e), i === 0 && c.barHidden === true); // hidden only before the first event
+      state = r.state;
+    });
+    assert.equal(state ? 'moving' : 'stopped', c.state, c.name);
+    if (c.state === 'moving') {
+      assert.equal(state.direction, c.direction, c.name);
+      assert.equal(state.speed, c.speed, c.name);
+      assert.equal(T.trickRate(state.speed), c.rate, c.name);
+      assert.equal(T.trickBadge(state.direction, state.speed), c.badge, c.name);
+    }
+    assert.equal(r.step, c.step || 0, c.name);
+    assert.equal(r.seek, c.seek || 'none', c.name);
+  }
+});
+
+test('trick (T55): ok/back while stopped do nothing here (the player pauses / closes as before)', () => {
+  assert.deepEqual(T.trick(null, { type: 'ok' }), { state: null, step: 0, seek: 'none' });
+  assert.deepEqual(T.trick(null, { type: 'back' }), { state: null, step: 0, seek: 'none' });
+  assert.deepEqual(T.trick(null, { type: 'click', direction: 1 }).step, 10);
+  assert.ok(cases.trick.cases.some((c) => c.barHidden === true), 'the golden has bar-hidden cases');
+});
+
+test('seek settled (T55): the bar shows the target until the player is within 3 s of it, at most 10 s', () => {
+  assert.equal(T.seekSettled(600, 7200, 0), false); // still at the old position
+  assert.equal(T.seekSettled(600, 602.9, 100), true); // a keyframe up to ~2 s off
+  assert.equal(T.seekSettled(600, 596.9, 100), false);
+  assert.equal(T.seekSettled(600, 7200, 9999), false);
+  assert.equal(T.seekSettled(600, 7200, 10000), true); // never got there (refused, clamped): the player again
 });
 
 test('labels: playhead wall clock in Prague, day against now', () => {

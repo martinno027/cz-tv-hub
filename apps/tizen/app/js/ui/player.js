@@ -20,7 +20,7 @@
   var ZAP_BOX_MS = 3000;
   var HINT_LIVE = 'OK pauza · ▲ ▼ kanál · 0–9 číslo kanálu · AUDIO zvuk · Zpět konec';
   var HINT_OTHER = 'OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · ▲ AUDIO zvuk · Zpět konec';
-  var HINT_TIMELINE = 'OK pauza · ◀ ▶ 10 s, podržet = rychleji · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk · Zpět konec';
+  var HINT_TIMELINE = 'OK pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk · Zpět konec';
 
   function isLive(request) {
     return !!request && (request.kind === 'live' || request.kind === 'dvbLive' || request.kind === 'pspLive');
@@ -143,6 +143,12 @@
     }
   };
 
+  /** Pauses when playing (rewind / fast-forward keeps the video paused, T55); AVPlay has no picture preview. */
+  AvPlayBackend.prototype.pause = function () {
+    if (this.state() === 'PLAYING') this.av.pause();
+  };
+
+  /** Seeks (ms) and returns where to. */
   AvPlayBackend.prototype.seekTo = function (ms) {
     var duration = this.duration();
     var to = Math.max(0, ms);
@@ -152,6 +158,7 @@
     } catch (e) {
       // Not seekable (plain live).
     }
+    return to;
   };
 
   /** Audio tracks [{index, language}] and the selected one's index (AVPlay's track list). */
@@ -238,8 +245,22 @@
     return isFinite(d) ? d * 1000 : 0;
   };
 
+  Html5Backend.prototype.pause = function () {
+    this.video.pause();
+  };
+
+  /** Seeks (ms) and returns where to. */
   Html5Backend.prototype.seekTo = function (ms) {
-    this.video.currentTime = Math.max(0, ms / 1000);
+    var to = Math.max(0, ms);
+    this.video.currentTime = to / 1000;
+    return to;
+  };
+
+  /** While moving (T55): the picture to about `ms` with `video.fastSeek` where the browser has it; false if not. */
+  Html5Backend.prototype.preview = function (ms) {
+    if (typeof this.video.fastSeek !== 'function') return false;
+    this.video.fastSeek(Math.max(0, ms) / 1000);
+    return true;
   };
 
   Html5Backend.prototype.audioTracks = function () {
@@ -333,6 +354,10 @@
     this.request = request;
     this.lastReResolveAt = 0;
     this.timelineAt = null;
+    // a new opening gets its own timeline controller: key-ups are trusted per opening (spec/apps.md T55), also when
+    // the web starts another stream while one plays
+    if (this.tl) this.tl.stop();
+    this.tl = null;
     // Zapping uses the list of the moment the player opened (a settings change applies next time).
     this.zapList = isLive(request) ? this.app.channelList(this.app.dvbChannels) : [];
     this.showHint(isLive(request) ? 'live' : 'other');
@@ -761,7 +786,7 @@
     if (CT.Platform.onMute) CT.Platform.onMute(muted);
   };
 
-  /** Key releases: the timeline player seeks on release and tells a long OK from a short one. */
+  /** Key releases: the timeline player tells a click from a hold and a long OK from a short one. */
   Player.prototype.onKeyUp = function (key) {
     if (this.tl) this.tl.onKeyUp(key);
   };

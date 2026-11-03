@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.util.TypedValue
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -58,7 +59,10 @@ import cz.cztvhub.core.dvb.DvbParser
 import cz.cztvhub.core.dvb.DvbTimeline
 import cz.cztvhub.core.dvb.TimelineEdge
 import cz.cztvhub.core.dvb.TimelineRules
-import cz.cztvhub.core.dvb.TimelineScrub
+import cz.cztvhub.core.dvb.TimelineShownSeek
+import cz.cztvhub.core.dvb.TimelineTrick
+import cz.cztvhub.core.dvb.TrickAction
+import cz.cztvhub.core.dvb.TrickStop
 import cz.cztvhub.core.dvb.WatchItem
 import cz.cztvhub.core.dvb.WatchReporter
 import kotlinx.coroutines.Dispatchers
@@ -149,12 +153,37 @@ class PlayerActivity : ComponentActivity() {
     private lateinit var timelineBar: TimelineOverlay
     private var barJob: Job? = null
     private var barHideAt = 0L
-    private var scrub: TimelineScrub? = null
+
+    /** Rewind / fast-forward (T55): ←/→ clicks and holds, ⏪/⏩; the video stays paused while it moves. */
+    private val trick = TimelineTrick()
+
+    /** The window and wall clock the movement began at: Back returns there, also from a neighbouring window. */
+    private var trickOrigin: Pair<String, Instant>? = null
+
+    /** The chosen seek's target, shown until the player is there (T55: no jump back). */
+    private val shownSeek = TimelineShownSeek()
+
+    /** The channel's name for the bar, looked up once per channel (the bar renders every frame while moving). */
+    private var barChannel: Pair<String, String>? = null
+
+    /** While rewinding / fast-forwarding the playhead moves every frame, not in key-repeat steps (T55). */
+    private val trickFrame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!trick.moving) return
+            trickEdge()
+            renderBar()
+            if (trick.moving) Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
     private var timelineRefreshJob: Job? = null
     private var switching = false
 
-    /** A key whose first press only showed the bar: the rest of that press (repeats, release) does nothing. */
-    private var swallowedKey: Int? = null
+    /**
+     * A press (key code, its down time) already used, e.g. its first down only showed the bar: the rest of that press
+     * (repeats, release) does nothing. Matched by down time, so a remote that never sends the key-up does not lose
+     * its next press of the same key.
+     */
+    private var swallowed: Pair<Int, Long>? = null
     private var selectLongPressed = false
 
     /** OK pressed while the bar was hidden: its release only shows the bar. */
@@ -412,8 +441,11 @@ class PlayerActivity : ComponentActivity() {
         barJob = null
         releaseJob?.cancel()
         releaseJob = null
-        scrub = null
-        swallowedKey = null
+        trick.reset()
+        trickOrigin = null
+        Choreographer.getInstance().removeFrameCallback(trickFrame)
+        shownSeek.clear()
+        swallowed = null
         switching = false
         playerView.player = null
         player?.release()
@@ -459,6 +491,8 @@ class PlayerActivity : ComponentActivity() {
         val exo = player ?: return
         target = planned
         timeline = planned.timeline
+        // A new window (or a re-resolved one) starts where it was mapped: no old target to show.
+        shownSeek.clear()
         val playing = request
         // The same item again (a re-resolved URL) keeps its session; a new timeline window is a new programme.
         watch.begin(WatchItem.of(playing, planned.kind)) { watchTitle(playing) }
@@ -500,6 +534,11 @@ class PlayerActivity : ComponentActivity() {
         if (startPositionMs != null) exo.setMediaSource(source, startPositionMs) else exo.setMediaSource(source)
         // Hold playback until the start-over seek is done, so the live edge never flashes by.
         exo.playWhenReady = pendingWallClockMs == null
+        // Moving on into a neighbouring window: the movement goes on from where the window opened, paused.
+        if (planned.timeline != null && trick.moving && trick.frozen) {
+            trick.rebase((startPositionMs ?: 0L) / 1000.0, SystemClock.uptimeMillis())
+            exo.playWhenReady = false
+        }
         exo.prepare()
         hideMessage()
         if (planned.timeline != null) showBar()
@@ -810,7 +849,7 @@ class PlayerActivity : ComponentActivity() {
             while (isActive) {
                 delay(BAR_TICK_MS)
                 val paused = player?.playWhenReady == false
-                if (!paused && scrub == null && !switching && SystemClock.elapsedRealtime() >= barHideAt) {
+                if (!paused && !trick.moving && !switching && SystemClock.elapsedRealtime() >= barHideAt) {
                     timelineBar.visibility = View.GONE
                     break
                 }
@@ -824,25 +863,51 @@ class PlayerActivity : ComponentActivity() {
     private fun renderBar() {
         val t = timeline ?: return
         val exo = player ?: return
-        val position = scrub?.target(SystemClock.uptimeMillis()) ?: (exo.currentPosition / 1000.0)
-        timelineBar.render(TimelineFrame(t, windowDuration(t), position, channelName(), Instant.now()))
+        timelineBar.render(
+            TimelineFrame(t, windowDuration(t), shownPosition(exo), barChannelName(), Instant.now(), trick.badge),
+        )
+    }
+
+    /** The playhead the bar shows: the moving one, else a chosen seek until the player is there. */
+    private fun shownPosition(exo: ExoPlayer): Double {
+        val now = SystemClock.uptimeMillis()
+        if (trick.moving) return trick.position(now)
+        return shownSeek.position(exo.currentPosition / 1000.0, now, switching)
+    }
+
+    private fun barChannelName(): String {
+        val id = request.channelId
+        barChannel?.let { (forId, name) -> if (forId == id) return name }
+        val name = channelName()
+        // Only a name found in a list is kept; the fallback (the title) is looked up again next time.
+        if (name != request.title) barChannel = id to name
+        return name
     }
 
     /**
-     * Keys of the timeline player: OK / play-pause = pause/play, long OK or the audio key = audio, ←/→ = ±10 s or
-     * scrub while held (seek on release), ⏪/⏩ scrub (at least 1 s), ▲/▼ = start of this / the next programme.
-     * With the bar hidden the first press only shows it, except play/pause, Back, the audio keys and OK on
-     * "Přeskočit reklamu". Back is left to the activity (closes the player).
+     * Keys of the timeline player: OK / play-pause = pause/play, long OK or the audio key = audio, ←/→ = ±10 s on a
+     * click, held = rewind / fast-forward (T55: clicks then change the speed), ⏪/⏩ = start / change it, ▲/▼ =
+     * start of this / the next programme. While it moves OK / play-pause play from the playhead, Back returns to
+     * where it began and ▲/▼ stop and jump. With the bar hidden the first press only shows it, except play/pause,
+     * Back, the audio keys, ⏪/⏩ and a held ←/→ (they show it and act) and OK on "Přeskočit reklamu". Back is
+     * otherwise left to the activity (closes the player).
      */
     private fun handleTimelineKey(event: KeyEvent): Boolean {
         val code = event.keyCode
-        if (code == KeyEvent.KEYCODE_BACK || message.visibility == View.VISIBLE) return false
+        if (message.visibility == View.VISIBLE) return false
         val down = event.action == KeyEvent.ACTION_DOWN
         val first = down && event.repeatCount == 0
-        if (swallowedKey == code) {
-            if (!down) swallowedKey = null
+        swallowed?.let { (key, downTime) ->
+            if (key == code && downTime == event.downTime) {
+                if (!down) swallowed = null
+                return true
+            }
+        }
+        if (trick.moving && first && stopKey(code)) {
+            swallowed = code to event.downTime
             return true
         }
+        if (code == KeyEvent.KEYCODE_BACK) return false
         // "Přeskočit reklamu" takes OK while it is shown (spec/ad-breaks.md).
         if (isSelectKey(code) && skipAd.visibility == View.VISIBLE) {
             if (!down) skipAd()
@@ -894,82 +959,190 @@ class PlayerActivity : ComponentActivity() {
             else -> return false
         }
         if (timeline == null) return true
-        if (first && !barVisible) {
-            swallowedKey = code
+        val media = code == KeyEvent.KEYCODE_MEDIA_REWIND || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+        // With the bar hidden ▲/▼ only show it; ⏪/⏩ and a held ←/→ show it and act at once, a ←/→ click only shows it.
+        val barShown = barVisible
+        if (first && !barShown && forward == null) {
+            swallowed = code to event.downTime
             showBar()
             return true
         }
         if (forward == null) {
-            if (first) jump(up = code == KeyEvent.KEYCODE_DPAD_UP)
+            if (first) jump(up = code == KeyEvent.KEYCODE_DPAD_UP, from = player?.currentPosition?.div(1000.0))
             showBar()
             return true
         }
-        if (first) {
-            val media = code == KeyEvent.KEYCODE_MEDIA_REWIND || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
-            scrub = TimelineScrub(
-                from = player?.currentPosition?.div(1000.0) ?: 0.0,
-                forward = forward,
-                downAtMs = event.downTime,
-                minHeldSeconds = if (media) TimelineRules.MEDIA_MIN_HELD_SECONDS else 0.0,
-            )
+        val exo = player ?: return true
+        val now = event.eventTime
+        val action = when {
+            media -> {
+                if (!first) return true
+                swallowed = code to event.downTime // its repeats and key-up do nothing
+                trick.media(forward, now, shownPosition(exo))
+            }
+            first -> trick.down(forward, now, shownPosition(exo), barShown)
+            down -> trick.repeat(now)
+            else -> trick.up(now)
         }
-        val chosen = scrub ?: return true
-        if (down) {
-            watchRelease(chosen, code, event.eventTime)
-        } else {
-            releaseScrub(chosen, event.eventTime)
+        trickAction(action)
+        if (down && trick.releaseAtMs() != null) watchRelease(code, event.downTime) else releaseJob?.cancel()
+        showBar()
+        return true
+    }
+
+    /** OK, play/pause, Back and ▲/▼ while moving: stop (here, back where it began, or and jump). */
+    private fun stopKey(code: Int): Boolean {
+        val now = SystemClock.uptimeMillis()
+        when {
+            isSelectKey(code) || code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || code == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                code == KeyEvent.KEYCODE_MEDIA_PAUSE -> stopTrick(TrickStop.PLAY_HERE)
+            code == KeyEvent.KEYCODE_BACK -> stopTrick(TrickStop.RETURN)
+            code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN -> {
+                if (switching) {
+                    stopTrick(TrickStop.PLAY_HERE)
+                } else {
+                    val from = trick.stop(now)
+                    stopped()
+                    // Nothing to jump to: it plays from the playhead.
+                    if (!jump(up = code == KeyEvent.KEYCODE_DPAD_UP, from = from)) seekTimeline(from)
+                    player?.playWhenReady = true
+                }
+            }
+            else -> return false
         }
         showBar()
         return true
     }
 
-    /** Without a key-up event the release counts [TimelineRules.RELEASE_TIMEOUT_MS] after the last repeat. */
-    private fun watchRelease(chosen: TimelineScrub, code: Int, lastEventAt: Long) {
-        releaseJob?.cancel()
-        releaseJob = lifecycleScope.launch {
-            delay(TimelineRules.RELEASE_TIMEOUT_MS)
-            if (scrub !== chosen) return@launch
-            Log.i(TAG, "no key-up for $code: counted as released")
-            swallowedKey = code // its late key-up, if it comes, does nothing
-            releaseScrub(chosen, lastEventAt + TimelineRules.RELEASE_TIMEOUT_MS)
+    private fun trickAction(action: TrickAction) {
+        when (action) {
+            TrickAction.None, TrickAction.Change -> Unit
+            is TrickAction.Step -> player?.let { seekTimeline(shownPosition(it) + action.seconds) }
+            TrickAction.Start -> {
+                val t = timeline
+                val exo = player
+                if (t == null || exo == null) {
+                    trick.reset()
+                    return
+                }
+                trickOrigin = t.id to TimelineRules.toTime(t.pieces, trick.origin, growing = !t.complete)
+                shownSeek.clear()
+                // The picture stays until the stop (one exact seek then); ExoPlayer has no cheap preview seek here.
+                exo.playWhenReady = false
+                Choreographer.getInstance().removeFrameCallback(trickFrame)
+                Choreographer.getInstance().postFrameCallback(trickFrame)
+            }
         }
     }
 
-    private fun releaseScrub(chosen: TimelineScrub, atMs: Long) {
+    /** A press without a key-up ends [TimelineRules.RELEASE_TIMEOUT_MS] after its last repeat. */
+    private fun watchRelease(code: Int, downTime: Long) {
+        val at = trick.releaseAtMs() ?: return
+        releaseJob?.cancel()
+        releaseJob = lifecycleScope.launch {
+            delay((at - SystemClock.uptimeMillis()).coerceAtLeast(0))
+            if (trick.releaseAtMs() != at) return@launch
+            Log.i(TAG, "no key-up for $code: counted as released")
+            swallowed = code to downTime // its late key-up, if it comes, does nothing
+            trickAction(trick.released())
+            showBar()
+        }
+    }
+
+    /** Stops the movement: one exact seek to the playhead ([TrickStop.PLAY_HERE]) or back to its origin, playing. */
+    private fun stopTrick(how: TrickStop) {
+        if (!trick.moving) return
+        val origin = trickOrigin
+        val at = trick.stop(SystemClock.uptimeMillis(), how)
+        stopped()
+        val exo = player ?: return
+        exo.playWhenReady = true
+        // A neighbouring window is opening: it plays from where it opens (the movement just ends).
+        if (switching) return
+        val t = timeline ?: return
+        if (how == TrickStop.RETURN && origin != null && origin.first != t.id) {
+            shownSeek.clear()
+            openWindow(origin.first, origin.second)
+            return
+        }
+        seekTimeline(at)
+    }
+
+    private fun stopped() {
+        trickOrigin = null
         releaseJob?.cancel()
         releaseJob = null
-        if (scrub !== chosen) return
-        scrub = null
-        seekTimeline(chosen.target(atMs))
-        showBar()
+        Choreographer.getInstance().removeFrameCallback(trickFrame)
+    }
+
+    /** Each frame while moving: the window's start / end continue in its neighbour, else it stops there and plays. */
+    private fun trickEdge() {
+        val t = timeline ?: return
+        val duration = windowDuration(t)
+        val liveEnd = maxOf(0.0, duration - TIMELINE_LIVE_GUARD_S)
+        val now = SystemClock.uptimeMillis()
+        when (trick.edge(now, duration, t.complete, t.previous != null, t.next != null, liveEnd)) {
+            TimelineEdge.SEEK -> Unit
+            TimelineEdge.CLAMP -> {
+                val at = trick.stop(now).coerceIn(0.0, if (t.complete) duration else liveEnd)
+                stopped()
+                player?.let {
+                    seekPlayer(it, at, now)
+                    it.playWhenReady = true
+                }
+            }
+            TimelineEdge.PREVIOUS -> t.previous?.let {
+                trick.freeze(0.0)
+                openWindow(it, TimelineRules.toTime(t.pieces, 0.0))
+            }
+            TimelineEdge.NEXT -> t.next?.let {
+                trick.freeze(duration)
+                openWindow(it, TimelineRules.toTime(t.pieces, duration))
+            }
+        }
     }
 
     /**
      * ▲/▼: the start of this programme (or the previous one) / of the next one through the map, a target outside
-     * the window by the edge rule; nothing there = nothing happens.
+     * the window by the edge rule; nothing there = nothing happens (false).
      */
-    private fun jump(up: Boolean) {
-        val t = timeline ?: return
-        if (playheadTime() == null) return
-        val exo = player ?: return
-        val target = TimelineRules.jumpTarget(t, exo.currentPosition / 1000.0, up) ?: return
+    private fun jump(up: Boolean, from: Double?): Boolean {
+        val t = timeline ?: return false
+        if (from == null || switching || player?.playbackState == Player.STATE_IDLE) return false
+        val target = TimelineRules.jumpTarget(t, from, up) ?: return false
         seekTimeline(target)
+        return true
     }
 
-    /** A chosen seek: inside the window, clamped to it, or on into the previous / next window at its wall clock. */
+    /**
+     * A chosen seek (exact): inside the window, clamped to it, or on into the previous / next window at its wall
+     * clock. The bar shows the target until the player is there.
+     */
     private fun seekTimeline(target: Double) {
         val t = timeline ?: return
         val exo = player ?: return
         val duration = windowDuration(t)
+        val now = SystemClock.uptimeMillis()
         when (TimelineRules.edge(target, duration, t.complete, t.previous != null, t.next != null)) {
-            TimelineEdge.SEEK -> exo.seekTo(Math.round(target * 1000))
+            TimelineEdge.SEEK -> seekPlayer(exo, target, now)
             TimelineEdge.CLAMP -> {
                 val end = if (t.complete) duration else maxOf(0.0, duration - TIMELINE_LIVE_GUARD_S)
-                exo.seekTo(Math.round(target.coerceIn(0.0, end) * 1000))
+                seekPlayer(exo, target.coerceIn(0.0, end), now)
             }
-            TimelineEdge.PREVIOUS -> t.previous?.let { openWindow(it, TimelineRules.targetTime(t.pieces, target)) }
-            TimelineEdge.NEXT -> t.next?.let { openWindow(it, TimelineRules.targetTime(t.pieces, target)) }
+            TimelineEdge.PREVIOUS -> t.previous?.let {
+                shownSeek.seek(target, now)
+                openWindow(it, TimelineRules.targetTime(t.pieces, target))
+            }
+            TimelineEdge.NEXT -> t.next?.let {
+                shownSeek.seek(target, now)
+                openWindow(it, TimelineRules.targetTime(t.pieces, target))
+            }
         }
+    }
+
+    private fun seekPlayer(exo: ExoPlayer, seconds: Double, now: Long) {
+        shownSeek.seek(seconds, now)
+        exo.seekTo(Math.round(seconds * 1000))
     }
 
     /** Playback reached the end of a complete window: on into the next one, if any (else it stays). */
@@ -1001,6 +1174,17 @@ class PlayerActivity : ComponentActivity() {
                     }
                 } catch (e: CtException) {
                     Log.w(TAG, "cannot open timeline $id: ${e.message}")
+                    shownSeek.clear() // this window keeps playing: the bar shows where it is
+                    // Moving into it: it stops at this window's edge and plays.
+                    if (trick.moving) {
+                        val at = trick.stop(SystemClock.uptimeMillis())
+                        stopped()
+                        player?.let {
+                            val end = timeline?.let(::windowDuration) ?: at
+                            seekPlayer(it, at.coerceIn(0.0, end), SystemClock.uptimeMillis())
+                            it.playWhenReady = true
+                        }
+                    }
                     timelineBar.notice(e.userMessage)
                     showBar()
                     return@launch
@@ -1051,7 +1235,7 @@ class PlayerActivity : ComponentActivity() {
     private suspend fun timelineSkipTarget(): Double? {
         val t = timeline ?: return null
         val exo = player ?: return null
-        if (scrub != null) return null
+        if (trick.moving) return null
         val time = playheadTime() ?: return null
         val programme = TimelineRules.breaksProgramme(t.programmes, time, Instant.now()) ?: return null
         val id = programme.id ?: return null
@@ -1169,6 +1353,11 @@ class PlayerActivity : ComponentActivity() {
         message.text = text
         message.visibility = View.VISIBLE
         updateSkipAd(null)
+        // An error page ends a rewind / fast-forward (its keys go to the page now).
+        if (trick.moving) {
+            trick.reset()
+            stopped()
+        }
     }
 
     private fun hideMessage() {

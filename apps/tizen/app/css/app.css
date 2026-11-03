@@ -1649,6 +1649,16 @@ main {
   white-space: nowrap;
 }
 
+/* rewind / fast-forward (T55): ◀◀ / ▶▶ and the speed from 2 on, next to the playhead's clock */
+#tl-trick {
+  display: none;
+  margin-right: 14px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0d1117;
+}
+
 #tl-track {
   position: relative;
   height: 14px;

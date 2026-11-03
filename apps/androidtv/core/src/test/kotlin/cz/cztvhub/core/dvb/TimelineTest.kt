@@ -84,7 +84,183 @@ class TimelineTest {
     }
 
     @Test fun hold() {
-        group("hold").forEach { assertEquals(it.text("name"), it.num("offset"), TimelineRules.holdOffset(it.num("held")), 0.001) }
+        // T55: only the click remains of the hold curve; a press held 0.5 s is a hold (the movement starts).
+        group("hold").forEach {
+            assertFalse(it.text("name"), TimelineRules.isHold(it.num("held")))
+            assertEquals(it.text("name"), it.num("offset"), TimelineRules.STEP_SECONDS, 0.001)
+        }
+        assertTrue(TimelineRules.isHold(TimelineRules.HOLD_MIN_SECONDS))
+    }
+
+    private val trick = cases.getValue("trick").jsonObject
+
+    /**
+     * Plays golden `trick` events into [t], one second apart, the first with the bar hidden when [barHidden]; returns
+     * the last event's action and stop, if any.
+     */
+    private fun play(t: TimelineTrick, events: List<String>, barHidden: Boolean = false): Pair<TrickAction, TrickStop?> {
+        var at = 10_000L
+        var action: TrickAction = TrickAction.None
+        var stop: TrickStop? = null
+        for ((index, event) in events.withIndex()) {
+            val forward = event.endsWith("R")
+            val barShown = !(barHidden && index == 0)
+            stop = null
+            when (event.substringBefore(' ')) {
+                "click" -> {
+                    action = t.down(forward, at, from = 3000.0, barShown = barShown)
+                    if (action == TrickAction.None) action = t.up(at + 200)
+                }
+                "hold" -> {
+                    action = t.down(forward, at, from = 3000.0, barShown = barShown)
+                    var repeat = at + 400 // the repeat delay, then a repeat every 50 ms
+                    while (repeat <= at + 700) {
+                        val a = t.repeat(repeat)
+                        if (a != TrickAction.None) action = a
+                        repeat += 50
+                    }
+                    val a = t.up(at + 720)
+                    if (a != TrickAction.None) action = a
+                }
+                "ok" -> { t.stop(at, TrickStop.PLAY_HERE); stop = TrickStop.PLAY_HERE; action = TrickAction.None }
+                "back" -> { t.stop(at, TrickStop.RETURN); stop = TrickStop.RETURN; action = TrickAction.None }
+                else -> fail("unknown event $event")
+            }
+            at += 1_000
+        }
+        return action to stop
+    }
+
+    @Test fun trickSpeeds() {
+        val speeds = trick.getValue("speeds").jsonArray.map { it.jsonObject }
+        assertEquals(TimelineRules.TRICK_MAX_SPEED, speeds.size)
+        speeds.forEach { assertEquals(it.num("rate"), TimelineRules.trickRate(it.num("speed").toInt()), 0.001) }
+        // spec: 10 min back takes 10 s at speed 1 and 2.5 s at speed 4.
+        assertEquals(10.0, 600 / TimelineRules.trickRate(1), 0.001)
+        assertEquals(2.5, 600 / TimelineRules.trickRate(4), 0.001)
+    }
+
+    @Test fun trick() {
+        val all = trick.getValue("cases").jsonArray.map { it.jsonObject }
+        assertTrue(all.isNotEmpty())
+        all.forEach { case ->
+            val name = case.text("name")
+            val t = TimelineTrick()
+            val barHidden = case["barHidden"]?.jsonPrimitive?.boolean ?: false
+            val (action, stop) = play(t, case.getValue("events").jsonArray.map { it.jsonPrimitive.content }, barHidden)
+            when (case.text("state")) {
+                "moving" -> {
+                    assertTrue(name, t.moving)
+                    assertEquals(name, case.num("direction").toInt(), t.direction)
+                    assertEquals(name, case.num("speed").toInt(), t.speed)
+                    assertEquals(name, case.num("direction") * case.num("rate"), t.rate, 0.001)
+                    assertEquals(name, case.text("badge"), t.badge)
+                }
+                "stopped" -> {
+                    assertFalse(name, t.moving)
+                    assertNull(name, t.badge)
+                    // step 0 = no seek at all (a click that only showed the bar).
+                    case["step"]?.let { assertEquals(name, it.jsonPrimitive.double, (action as? TrickAction.Step)?.seconds ?: 0.0, 0.001) }
+                    val seek = case["seek"]?.jsonPrimitive?.content ?: "none"
+                    assertEquals(name, seek, stop?.name?.lowercase()?.replace('_', '-') ?: "none")
+                }
+                else -> fail("$name: unknown state")
+            }
+        }
+    }
+
+    @Test fun trickPlayheadMovesWithTimeAndKeepsItAcrossSpeedChanges() {
+        val t = TimelineTrick()
+        assertEquals(TrickAction.None, t.down(forward = false, atMs = 0, from = 3000.0))
+        assertEquals("under half a second: still timing", TrickAction.None, t.repeat(450))
+        assertEquals("starts while held", TrickAction.Start, t.repeat(500))
+        assertEquals(3000.0, t.origin, 0.001)
+        assertEquals("the hold adds nothing", 3000.0, t.position(500), 0.001)
+        assertEquals(3000.0 - 60, t.position(1_500), 0.001)
+        assertEquals("the release keeps it moving", TrickAction.None, t.up(1_500))
+        assertEquals(3000.0 - 120, t.position(2_500), 0.001)
+        assertEquals(TrickAction.Change, t.down(forward = false, atMs = 2_500, from = 0.0)) // speed 2
+        assertEquals(TrickAction.None, t.up(2_600))
+        assertEquals(3000.0 - 120 - 120, t.position(3_500), 0.001)
+        assertEquals(TrickAction.Change, t.media(forward = true, atMs = 3_500, from = 0.0)) // back to 1
+        assertEquals(1, t.speed)
+        assertEquals(3000.0 - 240 - 60, t.position(4_500), 0.001)
+        assertEquals("OK stops at the playhead", 3000.0 - 300, t.stop(4_500), 0.001)
+        assertFalse(t.moving)
+        // Back returns to the origin, not the playhead.
+        val b = TimelineTrick()
+        b.media(forward = true, atMs = 0, from = 100.0)
+        assertNotEquals(100.0, b.position(5_000), 0.001)
+        assertEquals(100.0, b.stop(5_000, TrickStop.RETURN), 0.001)
+    }
+
+    @Test fun trickWithoutKeyUp() {
+        val t = TimelineTrick()
+        t.down(forward = true, atMs = 0, from = 600.0)
+        assertEquals(TimelineRules.RELEASE_TIMEOUT_MS, t.releaseAtMs())
+        assertEquals("a click without a key-up: noticed 0.8 s later, still +10 s", TrickAction.Step(10.0), t.released())
+        assertNull(t.releaseAtMs())
+        // Repeats lasting 0.5 s start it; their end changes nothing.
+        t.down(forward = true, atMs = 5_000, from = 600.0)
+        var at = 5_000L
+        var started = false
+        while (at < 6_000) {
+            at += 100
+            if (t.repeat(at) == TrickAction.Start) started = true
+        }
+        assertTrue(started)
+        assertEquals(6_000 + TimelineRules.RELEASE_TIMEOUT_MS, t.releaseAtMs())
+        assertEquals(TrickAction.None, t.released())
+        assertTrue(t.moving)
+        assertEquals(1, t.speed)
+        // The next press after that is a new click: speed 2.
+        assertEquals(TrickAction.Change, t.down(forward = true, atMs = 7_500, from = 0.0))
+        assertEquals(2, t.speed)
+        // A repeat seen just under 0.5 s and a key-up after it: the hold counts at the key-up.
+        val late = TimelineTrick()
+        late.down(forward = false, atMs = 0, from = 600.0)
+        assertEquals(TrickAction.None, late.repeat(480))
+        assertEquals(TrickAction.Start, late.up(520))
+    }
+
+    @Test fun withTheBarHiddenAClickOnlyShowsItButAHoldActs() {
+        val click = TimelineTrick()
+        assertEquals(TrickAction.None, click.down(forward = true, atMs = 0, from = 600.0, barShown = false))
+        assertEquals("a click only showed the bar", TrickAction.None, click.up(200))
+        assertEquals("the same click with the bar shown steps", TrickAction.Step(10.0),
+            TimelineTrick().also { it.down(true, 0, 600.0) }.up(200))
+        val noKeyUp = TimelineTrick()
+        noKeyUp.down(forward = false, atMs = 0, from = 600.0, barShown = false)
+        assertEquals(TrickAction.None, noKeyUp.released())
+        val hold = TimelineTrick()
+        hold.down(forward = false, atMs = 0, from = 600.0, barShown = false)
+        assertEquals("a hold acts at once", TrickAction.Start, hold.repeat(500))
+        assertEquals(-1, hold.direction)
+        val late = TimelineTrick()
+        late.down(forward = true, atMs = 0, from = 600.0, barShown = false)
+        assertEquals(TrickAction.Start, late.up(600))
+        // ⏪/⏩ have no hidden-bar case: they always act (the player shows the bar too).
+        assertEquals(TrickAction.Start, TimelineTrick().media(forward = true, atMs = 0, from = 600.0))
+    }
+
+    @Test fun trickEdges() {
+        val t = TimelineTrick()
+        t.media(forward = false, atMs = 0, from = 30.0)
+        assertEquals(TimelineEdge.SEEK, t.edge(400, 5400.0, true, hasPrevious = false, hasNext = false, liveEnd = 5400.0))
+        assertEquals("start of the window, no previous: stop there", TimelineEdge.CLAMP, t.edge(500, 5400.0, true, false, false, 5400.0))
+        assertEquals(TimelineEdge.PREVIOUS, t.edge(500, 5400.0, true, true, false, 5400.0))
+        t.freeze(0.0)
+        assertEquals("frozen while the window opens", TimelineEdge.SEEK, t.edge(900, 5400.0, true, true, false, 5400.0))
+        assertEquals(0.0, t.position(900), 0.001)
+        t.rebase(7000.0, 1_000)
+        assertEquals("on in the new window, same speed", 7000.0 - 60, t.position(2_000), 0.001)
+        val f = TimelineTrick()
+        f.media(forward = true, atMs = 0, from = 5340.0)
+        assertEquals(TimelineEdge.NEXT, f.edge(1_000, 5400.0, true, false, true, 5400.0))
+        assertEquals(TimelineEdge.CLAMP, f.edge(1_000, 5400.0, true, false, false, 5400.0))
+        assertEquals("a growing window stops at its live edge", TimelineEdge.CLAMP, f.edge(500, 5400.0, false, false, true, 5370.0))
+        assertEquals(TimelineEdge.SEEK, f.edge(400, 5400.0, false, false, true, 5370.0))
+        assertEquals("moving forward the start is no edge", TimelineEdge.SEEK, TimelineTrick().also { it.media(true, 0, 0.0) }.edge(0, 5400.0, true, true, true, 5400.0))
     }
 
     @Test fun labels() {
@@ -172,14 +348,6 @@ class TimelineTest {
         assertNull(TimelineRules.breaksProgramme(t.programmes, Instant.parse("2026-10-24T09:40:00Z"), late))
     }
 
-    @Test fun mediaKeysCountAtLeastOneSecond() {
-        val tap = TimelineScrub(from = 600.0, forward = true, downAtMs = 1_000, minHeldSeconds = TimelineRules.MEDIA_MIN_HELD_SECONDS)
-        assertEquals(660.0, tap.target(1_100), 0.001)
-        assertEquals(600.0 + 1380, tap.target(6_000), 0.001)
-        // An arrow tap is the 10 s step.
-        assertEquals(610.0, TimelineScrub(600.0, true, 1_000).target(1_100), 0.001)
-    }
-
     @Test fun playlistCheckKeepsTheGatewaysText() {
         val t = parse(sample)
         val seen = ArrayList<Pair<String, Map<String, String>>>()
@@ -218,12 +386,20 @@ class TimelineTest {
         assertEquals("20:58", TimelineRules.endLabel(end.minusSeconds(60), complete = false, playhead, now))
     }
 
-    @Test fun scrubFollowsTheHoldAndStepsOnAShortPress() {
-        val back = TimelineScrub(from = 600.0, forward = false, downAtMs = 1_000)
-        assertEquals(590.0, back.target(1_200), 0.001)
-        assertEquals(600.0 - 1380, back.target(6_000), 0.001)
-        val forward = TimelineScrub(from = 600.0, forward = true, downAtMs = 1_000)
-        assertEquals(660.0, forward.target(2_000), 0.001)
+    @Test fun shownSeekHoldsTheTargetUntilThePlayerIsThere() {
+        val shown = TimelineShownSeek()
+        assertEquals("nothing chosen: the player's position", 1200.0, shown.position(1200.0, 0), 0.001)
+        shown.seek(600.0, atMs = 1_000)
+        assertEquals("the player is still at the old position: no jump back", 600.0, shown.position(1200.0, 1_100), 0.001)
+        assertEquals("a window switch is never 'there'", 600.0, shown.position(601.0, 1_200, switching = true), 0.001)
+        assertEquals("a keyframe seek lands near the target: the player's position", 598.0, shown.position(598.0, 1_300), 0.001)
+        assertEquals("and stays so once there", 1200.0, shown.position(1200.0, 1_400), 0.001)
+        shown.seek(600.0, atMs = 2_000)
+        assertEquals(600.0, shown.position(1200.0, 2_000 + TimelineShownSeek.MAX_MS), 0.001)
+        assertEquals("a seek never finished stops being shown", 1200.0, shown.position(1200.0, 2_001 + TimelineShownSeek.MAX_MS), 0.001)
+        shown.seek(600.0, atMs = 3_000)
+        shown.clear()
+        assertEquals(1200.0, shown.position(1200.0, 3_100), 0.001)
     }
 
     @Test fun timelineIdsAreContinuousRecordingsOnly() {
