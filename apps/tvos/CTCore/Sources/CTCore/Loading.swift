@@ -93,3 +93,103 @@ public struct ChoiceLoad<Shown> {
         fallback = nil
     }
 }
+
+/// What the archive grid lists (a category, our recordings, a search), page by page (T52, T57): the decisions of the
+/// app's pager, which only adds the requests. A new list's first page keeps the list shown (dimmed under the loader)
+/// until it answers; only the newest answer counts; no next page is asked while a first page is waited for.
+public struct ArchivePaging: Equatable, Sendable {
+    public private(set) var cards: [ArchiveCard] = []
+    public private(set) var genres: [ArchiveGenre] = []
+    public private(set) var attribution = ProgrammeDetails.defaultAttribution
+    /// A first page came (or failed): an empty list says so instead of waiting.
+    public private(set) var loaded = false
+    /// The gateway's own text in an answer ("iVysílání teď neodpovídá"; our recordings still listed).
+    public private(set) var notice: String?
+    /// The first page could not be loaded.
+    public private(set) var failure: String?
+    /// The next page of the list shown; nil = none (or not known).
+    public private(set) var nextPage: Int?
+    /// A first page on its way (the loader over the grid).
+    public private(set) var loading = LoadingState()
+    /// A next page on its way (the small loader below the last row).
+    public private(set) var more = LoadingState()
+
+    public init() {}
+
+    /// Nothing listed, nothing waited for.
+    public mutating func reset() {
+        loading.cancel()
+        clear()
+    }
+
+    /// The list shown stays, undimmed, but nothing is waited for (a search being typed).
+    public mutating func stopWaiting() {
+        loading.cancel()
+    }
+
+    /// A new list's first page starts: its ticket. The list shown stays until the answer and pages no more meanwhile.
+    /// Its next page is kept (`beginMore` asks none while waiting): a cancelled load leaves the list paging (T57).
+    public mutating func begin(at now: ContinuousClock.Instant = .now) -> Int {
+        more.cancel()
+        return loading.begin(at: now)
+    }
+
+    /// The first page for `ticket` came: true = it is shown (the newest), false = dropped.
+    @discardableResult
+    public mutating func succeed(_ ticket: Int, page: ArchivePage) -> Bool {
+        guard loading.finish(ticket) else { return false }
+        clear()
+        apply(page)
+        notice = page.error
+        loaded = true
+        return true
+    }
+
+    /// The first page for `ticket` failed with `message`: true = the failure is shown, false = dropped.
+    @discardableResult
+    public mutating func fail(_ ticket: Int, message: String) -> Bool {
+        guard loading.finish(ticket) else { return false }
+        clear()
+        failure = message
+        loaded = true
+        return true
+    }
+
+    /// The load for `ticket` was cancelled (the grid left, a newer choice, back on the list already shown). Still the
+    /// newest: the wait ends and the list shown stays as it was, its next pages too; a newer load keeps its wait.
+    /// T57: the loader stayed for good when the viewer went back to the list shown before its replacement answered
+    /// (no new load starts for the list already shown), and that list no longer paged.
+    public mutating func abandon(_ ticket: Int) {
+        loading.finish(ticket)
+    }
+
+    /// The next page to ask for, with its ticket; nil while none is due (one on its way, a first page waited for).
+    public mutating func beginMore() -> (ticket: Int, page: Int)? {
+        guard !more.isWaiting, !loading.isWaiting, let next = nextPage else { return nil }
+        return (more.begin(), next)
+    }
+
+    /// The next page for `ticket` came (`page`) or failed (nil: asked again when the end shows again).
+    public mutating func finishMore(_ ticket: Int, page: ArchivePage?) {
+        guard more.finish(ticket) else { return }
+        if let page { apply(page) }
+    }
+
+    private mutating func clear() {
+        more.cancel()
+        cards = []
+        genres = []
+        loaded = false
+        notice = nil
+        failure = nil
+        nextPage = nil
+    }
+
+    private mutating func apply(_ page: ArchivePage) {
+        let known = Set(cards.map(\.id))
+        cards += page.cards.filter { !known.contains($0.id) }
+        if genres.isEmpty { genres = page.genres }
+        attribution = page.attribution
+        nextPage = page.nextPage
+    }
+}

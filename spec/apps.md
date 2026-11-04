@@ -324,7 +324,10 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
     shows none, no flash) and gone when the answer (or the error) is there. Meanwhile the part's old content stays
     where it is, **dimmed** (opacity about 0.35), never replaced by an empty text (dimmed together with the loader, not before); the menu, chips and focus keep
     working, the dimmed cards and episodes can still be chosen (a newer choice replaces the waited one, its loader
-    stays); a failed chip load returns the chips to the choice whose content is listed; no next page is asked
+    stays); a failed chip load returns the chips to the choice whose content is listed;
+    going back to the listed choice while another one is waited for ends the wait (it may ask again for page 1, T57:
+    tvOS kept waiting forever); a request the app cancelled or left behind is never a failure („Archiv se
+    nepodařilo načíst" only for the newest request, T57); no next page is asked
     while a part waits for new content. Where:
     - the grid: a menu item or sub-genre chosen, a sort chip, search results (from the 0.5 s pause on), a category
       opened → loader over the grid; the next page of the grid → a small loader (half size) below the last row;

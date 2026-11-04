@@ -10,7 +10,6 @@ import cz.cztvhub.core.archive.ArchiveCard
 import cz.cztvhub.core.archive.ArchiveCategory
 import cz.cztvhub.core.archive.ArchiveGenre
 import cz.cztvhub.core.archive.ArchiveGrid
-import cz.cztvhub.core.archive.ArchiveLoading
 import cz.cztvhub.core.archive.ArchiveMenu
 import cz.cztvhub.core.archive.ArchiveMessages
 import cz.cztvhub.core.archive.ArchivePeriods
@@ -83,8 +82,8 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     val menu: StateFlow<MenuState?> = _menu.asStateFlow()
 
     /** The grid of "Naše nahrávky" or a category / sub-genre, as [menu] says. */
-    private val _grid = MutableStateFlow(ArchiveGrid())
-    val grid: StateFlow<ArchiveGrid> = _grid.asStateFlow()
+    private val grids = GridLoader(viewModelScope)
+    val grid: StateFlow<ArchiveGrid> = grids.grid
 
     /** "Pokračovat ve sledování", read from this TV's resume entries. */
     private val _continueRow = MutableStateFlow<List<ContinueItem>>(emptyList())
@@ -97,8 +96,8 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     private val _search = MutableStateFlow<ArchiveGrid?>(null)
     val search: StateFlow<ArchiveGrid?> = _search.asStateFlow()
 
-    private val _show = MutableStateFlow<ShowState?>(null)
-    val show: StateFlow<ShowState?> = _show.asStateFlow()
+    private val shows = ShowLoader(viewModelScope)
+    val show: StateFlow<ShowState?> = shows.show
 
     /** `/dvb/archive/categories` failed: the menu has only its own items, the tab says so above the grid. */
     private val _categoriesFailed = MutableStateFlow(false)
@@ -111,9 +110,7 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     private val genresBySlug = HashMap<String, List<ArchiveGenre>>()
 
     private var categoriesJob: Job? = null
-    private var gridJob: Job? = null
     private var searchJob: Job? = null
-    private var showJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -130,6 +127,15 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun client(): DvbClient? = app.dvb()?.client
+
+    /** The gateway's archive for the grid and show loaders; null without a gateway. */
+    private fun source(): ArchiveSource? = client()?.let { c ->
+        object : ArchiveSource {
+            override fun category(query: GridQuery, page: Int) = c.archiveCategory(query.slug, query.sort, query.genre, page)
+            override fun show(id: String, season: String?, page: Int, year: Int?, month: Int?) =
+                c.archiveShow(id, season, page, year, month)
+        }
+    }
 
     /** The tab was entered: the menu opens afresh (on "Pokračovat ve sledování" when it has an entry). */
     fun entered() {
@@ -212,7 +218,7 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
 
     /** The focus neared the grid's end: the next page, if any. */
     fun moreGrid() {
-        if (_grid.value.more() == null) return
+        if (grids.grid.value.more() == null) return
         loadGrid(reset = false)
     }
 
@@ -224,47 +230,27 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /** The slug, sort and sub-genre the grid asks the gateway for; null for "Pokračovat" and the search. */
-    private fun gridQuery(menu: MenuState): Triple<String, ArchiveSort, String?>? = when (val g = menu.grid) {
-        GridContent.Recordings -> Triple("recordings", menu.sort, null)
-        is GridContent.Category -> Triple(g.slug, menu.sort, g.genre)
+    private fun gridQuery(menu: MenuState): GridQuery? = when (val g = menu.grid) {
+        GridContent.Recordings -> GridQuery("recordings", menu.sort, null)
+        is GridContent.Category -> GridQuery(g.slug, menu.sort, g.genre)
         GridContent.Continue, GridContent.Search -> null
     }
 
     /**
      * New content ([reset]: page 1, the old cards stay dimmed under the loader until it answers, T52) or the next
-     * page; the newest request wins (its number in [ArchiveGrid.request]).
+     * page; the newest request wins ([GridLoader]).
      */
     private fun loadGrid(reset: Boolean) {
         val menu = _menu.value ?: return
         // New content cancels what the grid waited for (also when it is "Pokračovat" or the search now).
-        if (reset) gridJob?.cancel()
+        if (reset) grids.cancel()
         val query = gridQuery(menu) ?: return
-        val client = client() ?: return
-        val grid = (if (reset) _grid.value.replacing() else _grid.value.more()) ?: return
-        val page = grid.pageAsked
-        val request = grid.request
-        _grid.value = grid
-        gridJob = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    Result.success(client.archiveCategory(query.first, query.second, query.third, page))
-                } catch (e: CtException) {
-                    Result.failure(e)
-                }
-            }
-            val now = _menu.value ?: return@launch
-            if (gridQuery(now) != query) return@launch
-            result.getOrNull()?.let { answer ->
-                if (query.first != "recordings" && answer.genres.isNotEmpty() && query.first !in genresBySlug) {
-                    genresBySlug[query.first] = answer.genres
-                    _menu.value = ArchiveMenu.withGenres(now, query.first, answer.genres)
-                }
-            }
-            _grid.update { current ->
-                result.fold(
-                    onSuccess = { current.answered(request, it) },
-                    onFailure = { current.failed(request, (it as CtException).userMessage) },
-                )
+        val source = source() ?: return
+        grids.load(source, query, reset, wanted = { _menu.value?.let(::gridQuery) }) { answer ->
+            val slug = query.slug
+            if (slug != "recordings" && answer.genres.isNotEmpty() && slug !in genresBySlug) {
+                genresBySlug[slug] = answer.genres
+                _menu.value?.let { _menu.value = ArchiveMenu.withGenres(it, slug, answer.genres) }
             }
         }
     }
@@ -316,110 +302,21 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun openShow(card: ArchiveCard) {
-        showJob?.cancel()
-        _show.value = ShowState(card)
-        val client = client() ?: return run { _show.value = ShowState(card, Load.Failed(ArchiveMessages.NO_GATEWAY)) }
-        showJob = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    Load.Ready(client.archiveShow(card.id))
-                } catch (e: CtException) {
-                    Load.Failed(e.userMessage)
-                }
-            }
-            _show.update { current ->
-                val show = (result as? Load.Ready)?.value
-                val group = show?.groups?.firstOrNull(ArchiveRules::isCtGroup)
-                if (current?.card?.id != card.id) current
-                else current.copy(
-                    show = result,
-                    season = group?.season ?: show?.seasons?.firstOrNull()?.id,
-                    seasonNextPage = group?.nextPage,
-                    year = group?.periods?.year,
-                    month = group?.periods?.month,
-                )
-            }
-        }
-    }
+    fun openShow(card: ArchiveCard) = shows.open(card, source(), ArchiveMessages.NO_GATEWAY)
 
-    fun closeShow() {
-        showJob?.cancel()
-        _show.value = null
-    }
+    fun closeShow() = shows.close()
 
-    /** A season chip: that season's episodes, page 1, in the season's default period (its newest month, T32). */
-    fun loadSeason(season: String) {
-        val state = _show.value ?: return
-        if (state.season == season) return
-        loadEpisodes(state, season, year = null, month = null, more = false)
-    }
+    /** A season chip ([ShowLoader.season]). */
+    fun loadSeason(season: String) = shows.season(source(), season)
 
-    /** A year chip (T32): `?year=` alone, the gateway picks its newest month or lists it whole (T51), page 1. */
-    fun loadYear(year: Int) {
-        val state = _show.value ?: return
-        if (state.year == year) return
-        loadEpisodes(state, state.season, year, month = null, more = false)
-    }
+    /** A year chip ([ShowLoader.year]). */
+    fun loadYear(year: Int) = shows.year(source(), year)
 
-    /** A month chip of the year shown (T32), page 1. */
-    fun loadMonth(month: Int) {
-        val state = _show.value ?: return
-        val year = state.year ?: return
-        if (state.month == month) return
-        loadEpisodes(state, state.season, year, month, more = false)
-    }
+    /** A month chip of the year shown ([ShowLoader.month]). */
+    fun loadMonth(month: Int) = shows.month(source(), month)
 
-    /** The next page of the iVysílání episodes shown (season and period as they are). */
-    fun loadMore() {
-        val state = _show.value ?: return
-        if (state.seasonLoading || state.seasonNextPage == null) return
-        loadEpisodes(state, state.season, state.year, state.month, more = true)
-    }
-
-    private fun loadEpisodes(state: ShowState, season: String?, year: Int?, month: Int?, more: Boolean) {
-        if (state.show !is Load.Ready) return
-        val page = if (more) state.seasonNextPage ?: return else 1
-        val client = client() ?: return
-        showJob?.cancel()
-        // T52: the chips show the new choice at once; a failure returns to the choice whose episodes are listed.
-        val listed = ArchiveLoading.listedChoice(state.seasonLoading, state.listed, state.choice)
-        _show.value = state.copy(
-            season = season, year = year, month = month,
-            episodesWait = if (more) Wait.MORE else Wait.REPLACE, listed = listed,
-        )
-        showJob = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    client.archiveShow(state.card.id, season, page, year, month)
-                } catch (_: CtException) {
-                    null
-                }
-            }
-            _show.update { current ->
-                val same = current?.card?.id == state.card.id && current.season == season &&
-                    current.year == year && current.month == month
-                if (!same) return@update current
-                val shown = (current.show as? Load.Ready)?.value
-                // A failed load keeps what is listed and its chips (the chip can be chosen again).
-                if (result == null || shown == null) {
-                    return@update current.copy(
-                        episodesWait = Wait.NONE, listed = null, season = listed.season, year = listed.year, month = listed.month,
-                    )
-                }
-                val merged = ArchiveRules.withSeasonPage(shown, result, season, append = more)
-                val group = merged.groups.firstOrNull(ArchiveRules::isCtGroup)
-                current.copy(
-                    show = Load.Ready(merged),
-                    episodesWait = Wait.NONE,
-                    listed = null,
-                    seasonNextPage = group?.nextPage,
-                    year = group?.periods?.year,
-                    month = group?.periods?.month,
-                )
-            }
-        }
-    }
+    /** The next page of the iVysílání episodes shown ([ShowLoader.more]). */
+    fun loadMore() = shows.more(source())
 
     /**
      * A card image: ČT's `https://` URL as is, a gateway path with the key; a recording thumbnail only while the

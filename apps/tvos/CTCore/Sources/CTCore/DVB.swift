@@ -356,7 +356,7 @@ public struct DVBClient: Sendable {
         }
         do {
             return try await transport.send(request)
-        } catch is CancellationError {
+        } catch where RequestCancellation.matches(error) {
             throw CancellationError()
         } catch {
             throw CTError("Bránu Anténa se nepodařilo kontaktovat", detail: "\(url.path): \(error.localizedDescription)")

@@ -131,7 +131,8 @@ private struct ArchiveBrowser: View {
                 categoriesError = nil
                 // the same list again (a reload): the menu stays where the viewer is
                 if menu?.categories != categories { start(categories) }
-            } catch is CancellationError {
+            } catch where RequestCancellation.matches(error) || Task.isCancelled {
+                // the tab was left or a newer load began: nothing failed (T57); the next opening asks again
             } catch {
                 // a reload failing under a working menu leaves it alone
                 guard menu?.categories.isEmpty ?? true else { return }
@@ -499,48 +500,35 @@ private struct ArchiveMenuScreen: View {
     }
 }
 
-/// Pages of cards (a search or a category): the first page, then more as the focus nears the end. A new `load`
-/// keeps the cards shown (dimmed under the loader, T52) until its first page comes and drops answers still on their
-/// way for the previous one.
+/// Pages of cards (a search or a category): the first page, then more as the focus nears the end. The decisions are
+/// `ArchivePaging` (CTCore, tested): a new `load` keeps the cards shown (dimmed under the loader, T52) until its first
+/// page comes, only the newest answer counts, and a cancelled load that is still the newest ends the wait (T57).
 @MainActor
 @Observable
 final class ArchivePager {
     typealias Fetch = (Int) async throws -> ArchivePage
 
-    private(set) var cards: [ArchiveCard] = []
-    private(set) var genres: [ArchiveGenre] = []
-    private(set) var attribution = ProgrammeDetails.defaultAttribution
-    private(set) var loaded = false
-    /// The gateway's own text in an answer ("iVysílání teď neodpovídá"; our recordings still listed).
-    private(set) var notice: String?
-    /// The first page could not be loaded.
-    private(set) var failure: String?
-    /// A first page on its way (the loader over the grid).
-    private(set) var loading = LoadingState()
-    /// A next page on its way (the small loader below the last row).
-    private(set) var more = LoadingState()
-    @ObservationIgnored private var nextPage: Int?
+    private(set) var state = ArchivePaging()
+    /// The shown list's requests (its next pages); replaced only when a new list's first page is shown.
     @ObservationIgnored private var fetch: Fetch?
+
+    var cards: [ArchiveCard] { state.cards }
+    var genres: [ArchiveGenre] { state.genres }
+    var attribution: String { state.attribution }
+    var loaded: Bool { state.loaded }
+    var notice: String? { state.notice }
+    var failure: String? { state.failure }
+    var loading: LoadingState { state.loading }
+    var more: LoadingState { state.more }
 
     /// The cards shown stay, undimmed, but nothing is waited for (a search being typed, T52).
     func stopWaiting() {
-        loading.cancel()
+        state.stopWaiting()
     }
 
     /// Nothing listed, nothing waited for.
     func reset() {
-        loading.cancel()
-        clear()
-    }
-
-    private func clear() {
-        more.cancel()
-        cards = []
-        genres = []
-        loaded = false
-        notice = nil
-        failure = nil
-        nextPage = nil
+        state.reset()
         fetch = nil
     }
 
@@ -548,45 +536,30 @@ final class ArchivePager {
     /// replaced it or it was cancelled.
     @discardableResult
     func load(_ fetch: @escaping Fetch) async -> Bool {
-        // the cards shown stay until the answer, but no longer page (their next page is another list's)
-        more.cancel()
-        nextPage = nil
-        let ticket = loading.begin()
+        let ticket = state.begin()
         do {
             let page = try await fetch(1)
-            guard loading.finish(ticket) else { return false }
-            clear()
+            guard state.succeed(ticket, page: page) else { return false }
             self.fetch = fetch
-            apply(page)
-            notice = page.error
         } catch {
-            // cancelled: a newer load replaces it (its loader stays), or the grid is left and loads again on return
-            if error is CancellationError || Task.isCancelled { return false }
-            guard loading.finish(ticket) else { return false }
-            clear()
-            failure = AppModel.message(for: error)
+            // cancelled: the grid was left, a newer load replaces it, or the list shown is chosen again (T57)
+            if RequestCancellation.matches(error) || Task.isCancelled {
+                state.abandon(ticket)
+                return false
+            }
+            guard state.fail(ticket, message: AppModel.message(for: error)) else { return false }
+            self.fetch = nil
         }
-        loaded = true
         return true
     }
 
     /// The next page, if there is one and none is on its way.
     func loadMore() {
-        guard !more.isWaiting, !loading.isWaiting, let next = nextPage, let fetch else { return }
-        let ticket = more.begin()
+        guard let fetch, let next = state.beginMore() else { return }
         Task {
-            let page = try? await fetch(next)
-            guard more.finish(ticket) else { return }
-            if let page { apply(page) }
+            let page = try? await fetch(next.page)
+            state.finishMore(next.ticket, page: page)
         }
-    }
-
-    private func apply(_ page: ArchivePage) {
-        let known = Set(cards.map(\.id))
-        cards += page.cards.filter { !known.contains($0.id) }
-        if genres.isEmpty { genres = page.genres }
-        attribution = page.attribution
-        nextPage = page.nextPage
     }
 }
 

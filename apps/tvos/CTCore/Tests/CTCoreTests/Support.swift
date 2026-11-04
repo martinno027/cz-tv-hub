@@ -57,8 +57,9 @@ final class FakeTransport: HTTPTransport, @unchecked Sendable {
         let route: Result<HTTPResponse, Error>? = lock.withLock {
             _requests.append(request)
             let key = request.url!.absoluteString + (request.httpBody.map { String(decoding: $0, as: UTF8.self) } ?? "")
-            // Last registered route wins, so tests can override.
-            return routes.last { key.contains($0.match) }?.result
+            // Last registered route wins, so tests can override. "" matches every request (Foundation's
+            // `contains("")` is false, so `fail("", …)` used to fall through to "no route", T57).
+            return routes.last { $0.match.isEmpty || key.contains($0.match) }?.result
         }
         guard let route else { throw URLError(.badServerResponse) }
         return try route.get()

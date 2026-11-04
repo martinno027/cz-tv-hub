@@ -241,4 +241,44 @@ final class ArchiveCategoriesParserTests: XCTestCase {
         XCTAssertEqual(transport.requests.map { $0.url!.absoluteString }, ["http://gw.local:8098/dvb/archive/categories"])
         XCTAssertEqual(transport.requests[0].value(forHTTPHeaderField: "Authorization"), "Bearer k3y")
     }
+
+    /// T57: a request URLSession cancelled (the Archiv tab left while its categories load, a newer grid) is a
+    /// cancellation, never "Bránu Anténa se nepodařilo kontaktovat": the tab showed "Archiv se nepodařilo načíst"
+    /// with an empty menu for a request nobody waited for any more.
+    func testCancelledRequestIsACancellationNotAFailure() async throws {
+        let transport = FakeTransport()
+        let fixture = try Fixture.response("dvb/dvb_archive_categories")
+        transport.on("/dvb/archive/categories", fixture)
+        transport.fail("/dvb/archive/category/", URLError(.cancelled))
+        transport.fail("/dvb/archive/show/", URLError(.cancelled))
+        transport.fail("/dvb/archive/search", URLError(.cancelled))
+        let client = DVBClient(config: GatewayConfig(address: "pi", key: "k")!, transport: transport)
+        // the same client answers when the request was not cancelled (the two cases differ)
+        let categories = try await client.archiveCategories()
+        XCTAssertFalse(categories.isEmpty)
+        transport.fail("/dvb/archive/categories", URLError(.cancelled))
+        let calls: [(String, () async throws -> Void)] = [
+            ("categories", { _ = try await client.archiveCategories() }),
+            ("category", { _ = try await client.archiveCategory("3947-filmy", sort: .popular, genre: nil, page: 1) }),
+            ("search", { _ = try await client.archiveSearch("kom", page: 1) }),
+            ("show", { _ = try await client.archiveShow("ct:1") }),
+        ]
+        for (name, call) in calls {
+            do {
+                try await call()
+                XCTFail("\(name): expected a cancellation")
+            } catch is CancellationError {
+            } catch {
+                XCTFail("\(name): a cancelled request became \(error)")
+            }
+        }
+        // a real network failure stays the Czech error
+        transport.fail("/dvb/archive/categories", URLError(.timedOut))
+        do {
+            _ = try await client.archiveCategories()
+            XCTFail("expected an error")
+        } catch let error as CTError {
+            XCTAssertEqual(error.userMessage, "Bránu Anténa se nepodařilo kontaktovat")
+        }
+    }
 }

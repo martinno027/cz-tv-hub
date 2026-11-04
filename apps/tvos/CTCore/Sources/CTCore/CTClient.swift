@@ -17,6 +17,15 @@ public protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResponse
 }
 
+/// A request nobody waits for any more: Swift's `CancellationError`, or URLSession's own `URLError.cancelled`
+/// (`data(for:)` throws that when its task is cancelled). Never a failure to show (T57: a cancelled archive request
+/// read as one put "Archiv se nepodařilo načíst" on the screen).
+public enum RequestCancellation {
+    public static func matches(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+}
+
 public struct URLSessionTransport: HTTPTransport {
     private let session: URLSession
 
@@ -106,7 +115,7 @@ public struct CTClient: Sendable {
     private func send(_ request: URLRequest, failure: String) async throws -> HTTPResponse {
         do {
             return try await transport.send(request)
-        } catch is CancellationError {
+        } catch where RequestCancellation.matches(error) {
             throw CancellationError()
         } catch {
             let endpoint = request.url?.path ?? ""

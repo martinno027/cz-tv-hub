@@ -74,6 +74,8 @@ final class ClientTests: XCTestCase {
             XCTFail("expected error")
         } catch let error as CTError {
             XCTAssertEqual(error.userMessage, "Stream se nepodařilo načíst")
+            // the configured failure reached the client (not "no route" of the fake transport)
+            XCTAssertTrue(error.detail.contains("\(URLError.Code.notConnectedToInternet.rawValue)"), error.detail)
         } catch {
             XCTFail("unexpected \(error)")
         }
@@ -82,8 +84,30 @@ final class ClientTests: XCTestCase {
             XCTFail("expected error")
         } catch let error as CTError {
             XCTAssertEqual(error.userMessage, "Program se nepodařilo načíst")
+            XCTAssertTrue(error.detail.contains("\(URLError.Code.notConnectedToInternet.rawValue)"), error.detail)
         } catch {
             XCTFail("unexpected \(error)")
+        }
+    }
+
+    /// T57: URLSession's own cancel is a cancellation, never "Program se nepodařilo načíst".
+    func testCancelledRequestIsACancellation() async {
+        let transport = FakeTransport()
+        transport.fail("ceskatelevize.cz/", URLError(.cancelled))
+        let client = CTClient(transport: transport)
+        do {
+            _ = try await client.schedules(slugs: ["ct1"], day: BroadcastDay(year: 2026, month: 10, day: 17))
+            XCTFail("expected a cancellation")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("a cancelled request became \(error)")
+        }
+        do {
+            _ = try await client.liveStreams(channelID: "CH_1")
+            XCTFail("expected a cancellation")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("a cancelled request became \(error)")
         }
     }
 }
