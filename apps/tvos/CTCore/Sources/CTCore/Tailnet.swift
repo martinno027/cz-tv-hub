@@ -186,7 +186,7 @@ public struct BridgeWatchTransport: HTTPTransport {
         do {
             response = try await inner.send(request)
         } catch {
-            if !(error is CancellationError), (error as? URLError)?.code != .cancelled { onFailure() }
+            if !RequestCancellation.matches(error) { onFailure() }
             throw error
         }
         if TailnetRules.isBridgeFailure(status: response.status, body: response.body) { onFailure() }

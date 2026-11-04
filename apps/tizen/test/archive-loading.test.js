@@ -534,3 +534,167 @@ test('the grid: the old cards stay focusable and open while the new ones load (l
   assert.equal(screen.zone, 'grid');
   assert.deepEqual(focused(), ['serial 0']);
 });
+
+// --- back to the listed choice before the newer one came (T57: a T52 regression found on tvOS) ---
+// tvOS returned early on the choice already listed while the waited load was abandoned: the loader and the dimmed
+// content stayed forever and no next page came. Here every choice is a request of its own (the grid's key and the
+// chips compare with what was asked last, not with what is listed), so the newest wins and the wait ends with it.
+
+/** Selects the menu item titled `title` (the 0.4 s rest over at once). */
+const choose = (screen, title) => {
+  screen.menuFocus = screen.menu.items.map((i) => i.title).indexOf(title);
+  assert.ok(screen.menuFocus >= 0, title);
+  screen.commitFocus();
+};
+
+test('the grid: Filmy → Seriály (slow) → Filmy before Seriály came: Filmy wins, the wait ends, the next page comes', async (t) => {
+  const { screen, g } = await opened(t);
+  const toasts = [];
+  const toast = app.toast;
+  app.toast = (m) => toasts.push(m);
+  t.after(() => { app.toast = toast; });
+  choose(screen, 'Seriály');
+  const serialy = g.last('category');
+  assert.equal(serialy.args[0], 'serialy');
+  mock.timers.tick(150);
+  assert.ok(loaderIn($('ar-grid'), 'over'));
+  choose(screen, 'Filmy'); // back to what is listed, Seriály still on its way
+  const filmy = g.last('category');
+  assert.notEqual(filmy, serialy); // asked again: the newest choice is Filmy
+  assert.deepEqual([filmy.args[0], filmy.args[3]], ['filmy', 1]);
+  assert.deepEqual(builtCards().slice(0, 1), ['film 0']); // the listed cards, dimmed meanwhile
+  assert.ok(loaderIn($('ar-grid'), 'over'));
+  serialy.ok(cards('serial', 4)); // the abandoned answer comes late: dropped, the wait goes on
+  await tick();
+  assert.deepEqual(builtCards().slice(0, 1), ['film 0']);
+  assert.ok(loaderIn($('ar-grid'), 'over'));
+  filmy.ok(cards('film', 6, 2));
+  await tick();
+  assert.equal(screen.wait.waiting(), false);
+  assert.equal(loaderIn($('ar-grid'), 'over'), null);
+  assert.equal(has('ar-grid', 'waiting'), false);
+  assert.equal(has('ar-grid', 'stale'), false);
+  assert.equal(screen.stale, null);
+  assert.equal(screen.grid.loading, false);
+  assert.equal(screen.grid.nextPage, 2);
+  assert.equal(note.textContent, '');
+  // the next page is asked for and listed
+  screen.zone = 'grid';
+  screen.onKey('down');
+  assert.deepEqual([g.last('category').args[0], g.last('category').args[3]], ['filmy', 2]);
+  mock.timers.tick(150);
+  assert.ok(loaderIn($('ar-grid').firstChild, 'below'));
+  g.last('category').ok(cards('more', 3));
+  await tick();
+  assert.equal(loaderIn($('ar-grid').firstChild, 'below'), null);
+  assert.equal(screen.grid.items.length, 9);
+  assert.deepEqual(toasts, []);
+});
+
+test('the grid: back to Filmy, its answer first, the abandoned Seriály failing late: no error, nothing waits', async (t) => {
+  const { screen, g } = await opened(t);
+  choose(screen, 'Seriály');
+  const serialy = g.last('category');
+  mock.timers.tick(150);
+  choose(screen, 'Filmy');
+  const filmy = g.last('category');
+  filmy.ok(cards('film', 6, 2));
+  await tick();
+  assert.equal(loaderIn($('ar-grid'), 'over'), null);
+  serialy.fail(); // a request left behind never counts as "Archiv se nepodařilo načíst"
+  await tick();
+  assert.equal(note.textContent, '');
+  assert.equal(screen.grid.error, null);
+  assert.equal(loaderIn($('ar-grid'), 'over'), null);
+  assert.equal(screen.wait.waiting(), false);
+  assert.deepEqual(builtCards().slice(0, 1), ['film 0']);
+  assert.equal(screen.grid.nextPage, 2);
+});
+
+test('the show page: season A listed → B (slow) → back to A before B came: A wins, the wait ends, the next page comes', async (t) => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => mock.timers.reset());
+  const toasts = [];
+  const toast = app.toast;
+  app.toast = (m) => toasts.push(m);
+  t.after(() => { app.toast = toast; });
+  const { show, g } = showPage();
+  show.open({ id: 'ct:1', title: 'Pořad', kind: 'series', source: 'ct' });
+  g.last('show').ok(showBody('s1'));
+  await tick();
+  show.moveZoneTo('seasons');
+  show.onKey('right');
+  show.onKey('enter'); // 2. řada
+  const b = g.last('show');
+  assert.equal(b.args[1], 's2');
+  mock.timers.tick(150);
+  assert.ok(loaderIn($('sh-episodes'), 'over'));
+  show.onKey('left');
+  show.onKey('enter'); // back to 1. řada, the one listed
+  const a = g.last('show');
+  assert.notEqual(a, b);
+  assert.deepEqual([a.args[1], a.args[2]], ['s1', 1]);
+  assert.ok(loaderIn($('sh-episodes'), 'over'));
+  b.fail(); // the abandoned season fails late: no toast, the chips stay on the newest choice
+  await tick();
+  assert.deepEqual(toasts, []);
+  assert.equal(show.season, 0);
+  assert.ok(loaderIn($('sh-episodes'), 'over'));
+  a.ok(showBody('s1'));
+  await tick();
+  assert.equal(show.wait.waiting(), false);
+  assert.equal(loaderIn($('sh-episodes'), 'over'), null);
+  assert.equal(has('sh-episodes', 'waiting'), false);
+  assert.deepEqual($('sh-seasons').childNodes.map((c) => c.classList.contains('selected')), [true, false, false]);
+  assert.equal(show.data.groups[0].nextPage, 2);
+  show.moveZoneTo('episodes');
+  const before = g.calls.length;
+  for (let i = 0; i < 5; i++) show.onKey('down'); // near the end: page 2 of 1. řada
+  assert.equal(g.calls.length, before + 1);
+  assert.deepEqual([g.last('show').args[1], g.last('show').args[2]], ['s1', 2]);
+  g.last('show').ok(showBody('p2', { groups: [{ title: 'Díly', season: 's1', nextPage: null, episodes: episodes('p2', 3) }] }));
+  await tick();
+  assert.equal(lineTitles(show).length, 11);
+  assert.equal(show.wait.waiting(), false);
+  show.close();
+});
+
+test('the show page: year A listed → B (slow) → back to A before B came: A wins, its chip selected, the next page comes', async (t) => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => mock.timers.reset());
+  const { show, g } = showPage();
+  show.open({ id: 'ct:1', title: 'Pořad', kind: 'series', source: 'ct' });
+  g.last('show').ok(periodsBody('y2026', 2026));
+  await tick();
+  assert.equal(show.zone, 'years');
+  show.onKey('right');
+  show.onKey('enter'); // 2025
+  const b = g.last('show');
+  assert.deepEqual(b.args[3], { year: 2025 });
+  mock.timers.tick(150);
+  show.onKey('left');
+  show.onKey('enter'); // back to 2026, the one listed
+  const a = g.last('show');
+  assert.notEqual(a, b);
+  assert.deepEqual(a.args[3], { year: 2026 });
+  const selectedYear = () => $('sh-years').childNodes.filter((c) => c.classList.contains('selected')).map((c) => c.textContent);
+  assert.deepEqual(selectedYear(), ['2026']);
+  assert.ok(loaderIn($('sh-episodes'), 'over'));
+  b.ok(periodsBody('y2025', 2025)); // late: dropped
+  await tick();
+  assert.deepEqual(lineTitles(show).slice(0, 1), ['y2026 0']);
+  assert.ok(loaderIn($('sh-episodes'), 'over'));
+  a.ok(periodsBody('y2026b', 2026));
+  await tick();
+  assert.equal(show.wait.waiting(), false);
+  assert.equal(loaderIn($('sh-episodes'), 'over'), null);
+  assert.deepEqual(lineTitles(show).slice(0, 1), ['y2026b 0']);
+  assert.deepEqual(selectedYear(), ['2026']);
+  show.moveZoneTo('episodes');
+  const before = g.calls.length;
+  for (let i = 0; i < 5; i++) show.onKey('down');
+  assert.equal(g.calls.length, before + 1);
+  assert.equal(g.last('show').args[2], 2);
+  assert.deepEqual(g.last('show').args[3], { year: 2026, month: null });
+  show.close();
+});

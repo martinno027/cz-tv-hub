@@ -181,6 +181,9 @@ final class DVBTests: XCTestCase {
             XCTFail("expected error")
         } catch let error as CTError {
             XCTAssertEqual(error.userMessage, "Bránu Anténa se nepodařilo kontaktovat")
+            // the configured failure reached the client (not "no route" of the fake transport)
+            XCTAssertTrue(error.detail.contains("\(URLError.Code.cannotConnectToHost.rawValue)"), error.detail)
+            XCTAssertEqual(transport.requests.count, 1)
         } catch {
             XCTFail("unexpected \(error)")
         }
