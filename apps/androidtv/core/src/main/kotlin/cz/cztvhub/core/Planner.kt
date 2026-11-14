@@ -81,6 +81,9 @@ data class PlayTarget(
     val startPositionMs: Long? = null,
     /** The channel timeline window a `b…` recording plays in; [startPositionMs] is then mapped through it. */
     val timeline: DvbTimeline? = null,
+    /** The CT channel whose buffer plays ([PlayKind.TIMESHIFT]; may differ from the request's when the archive
+     *  reports the programme still live on another channel): the ČT bar reads its guide. */
+    val channelId: String? = null,
 )
 
 /** Turns a [PlayRequest] into a playable URL, resolving on the device right before playback. */
@@ -192,6 +195,7 @@ class Planner(
                 title = title,
                 seekToWallClock = ResumeRules.wallClock(start, resumeSeconds),
                 fallbackOffsetMs = ResumeRules.timeshiftOffsetSeconds(start, resumeSeconds, clock()) * 1000,
+                channelId = channel.id,
             )
         }
         return PlayTarget(
@@ -200,6 +204,7 @@ class Planner(
             title = title,
             seekToWallClock = start.minus(Decisions.START_MARGIN),
             fallbackOffsetMs = Decisions.startoverOffsetSeconds(start, clock()) * 1000,
+            channelId = channel.id,
         )
     }
 }
