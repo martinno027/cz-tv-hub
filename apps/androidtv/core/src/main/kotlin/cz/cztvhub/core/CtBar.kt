@@ -34,7 +34,10 @@ object CtBarRules {
     fun vodSpan(start: Instant?, durationSeconds: Double): Span =
         Span(start, start?.plusMillis(Math.round(durationSeconds * 1000)), growing = false)
 
-    /** A timeshift seek target (wall clock) inside `[now − 3 h + 60 s, now − 10 s]`; the lower end slides with now. */
+    /**
+     * A timeshift seek target (wall clock) inside `[now − 3 h + 60 s, now − 10 s]`; the lower end slides with now.
+     * [now] = the end of the stream where the player knows it (ČT's stream lags the real clock by minutes).
+     */
     fun clampTimeshift(target: Instant, now: Instant): Instant {
         val lower = now.minus(WINDOW).plus(OLDEST_SKIPPED)
         val upper = now.minus(END_GUARD)
@@ -70,6 +73,13 @@ object CtBarRules {
         windowDurationMs != null -> nowMs - windowDurationMs + positionMs
         else -> null
     }
+
+    /**
+     * The wall clock of the stream's end (the seekable range's end): program date-time + window duration; null without
+     * both (the estimate `now − duration + position` puts the end at the real clock anyway).
+     */
+    fun streamEndMs(windowStartMs: Long?, windowDurationMs: Long?): Long? =
+        if (windowStartMs != null && windowDurationMs != null) windowStartMs + windowDurationMs else null
 
     /** The player position of [wallClockMs], the inverse of [playerWallClockMs]. Null = unknown. */
     fun playerPositionMs(wallClockMs: Long, windowStartMs: Long?, windowDurationMs: Long?, nowMs: Long): Long? = when {
@@ -123,13 +133,13 @@ data class CtBarWindow(
 
     /** The lowest bar position a seek or the moving playhead reaches (the buffer: slides with now). */
     fun lower(clock: BarClock): Double = when (kind) {
-        CtBarKind.TIMESHIFT -> toPosition(CtBarRules.clampTimeshift(Instant.MIN, clock.now))
+        CtBarKind.TIMESHIFT -> toPosition(CtBarRules.clampTimeshift(Instant.MIN, clock.liveEnd))
         CtBarKind.VOD -> 0.0
     }
 
     /** The highest: 10 s before the live edge / the VOD's end (unknown length: no limit yet). */
     fun upper(clock: BarClock): Double = when (kind) {
-        CtBarKind.TIMESHIFT -> toPosition(CtBarRules.clampTimeshift(Instant.MAX, clock.now))
+        CtBarKind.TIMESHIFT -> toPosition(CtBarRules.clampTimeshift(Instant.MAX, clock.liveEnd))
         CtBarKind.VOD -> duration(clock)?.let { CtBarRules.clampVod(Double.MAX_VALUE, it) } ?: Double.MAX_VALUE
     }
 
@@ -137,7 +147,7 @@ data class CtBarWindow(
         if (target >= lower(clock) && target <= upper(clock)) TimelineEdge.SEEK else TimelineEdge.CLAMP
 
     override fun clamp(target: Double, clock: BarClock): Double = when (kind) {
-        CtBarKind.TIMESHIFT -> toPosition(CtBarRules.clampTimeshift(toTime(target), clock.now))
+        CtBarKind.TIMESHIFT -> toPosition(CtBarRules.clampTimeshift(toTime(target), clock.liveEnd))
         CtBarKind.VOD -> duration(clock)?.let { CtBarRules.clampVod(target, it) } ?: maxOf(0.0, target)
     }
 
@@ -215,7 +225,7 @@ data class CtBarWindow(
     }
 
     private fun timeshiftFrame(position: Double, clock: BarClock, channelName: String): BarFrame {
-        val span = CtBarRules.timeshiftSpan(clock.now)
+        val span = CtBarRules.timeshiftSpan(clock.liveEnd)
         val start = span.start!!
         val end = span.end!!
         val playhead = toTime(position).let { if (it.isBefore(start)) start else if (it.isAfter(end)) end else it }
@@ -231,7 +241,7 @@ data class CtBarWindow(
             subtitle = info.subtitle,
             clock = TimelineRules.label(playhead, clock.now),
             startLabel = TimelineRules.edgeLabel(start, playhead, clock.now),
-            endLabel = TimelineRules.endLabel(end, complete = false, playhead = playhead, now = clock.now),
+            endLabel = TimelineRules.endLabel(end, complete = false, playhead = playhead, now = clock.liveEnd),
             startMs = start.toEpochMilli(),
             endMs = end.toEpochMilli(),
             pieces = listOf(start.toEpochMilli() to end.toEpochMilli()),
