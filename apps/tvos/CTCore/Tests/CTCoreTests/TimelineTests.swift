@@ -82,11 +82,10 @@ final class TimelineTests: XCTestCase {
     func testTrickGolden() throws {
         let trick = try XCTUnwrap(try golden["trick"] as? [String: Any])
         let speeds = try XCTUnwrap(trick["speeds"] as? [[String: Any]])
-        XCTAssertEqual(speeds.count, 4)
-        XCTAssertEqual(TrickPlay.rates, speeds.map { double($0["rate"]) })
-        XCTAssertEqual(speeds.map { ($0["speed"] as! NSNumber).intValue }, [1, 2, 3, 4])
+        XCTAssertEqual(speeds.map { ($0["speed"] as! NSNumber).intValue }, TrickPlay.speeds)
+        XCTAssertEqual(TrickPlay.speeds.map { TrickPlay.secondsPerSpeed * Double($0) }, speeds.map { double($0["rate"]) })
         let items = try XCTUnwrap(trick["cases"] as? [[String: Any]])
-        XCTAssertEqual(items.count, 13)
+        XCTAssertEqual(items.count, 17)
         XCTAssertEqual(items.filter { $0["barHidden"] as? Bool == true }.count, 2)
         for item in items {
             let name = item["name"] as! String

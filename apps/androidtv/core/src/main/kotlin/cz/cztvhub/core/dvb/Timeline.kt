@@ -60,8 +60,10 @@ object TimelineRules {
     /** Without a key-up event, the press ends this long after its last repeat. */
     const val RELEASE_TIMEOUT_MS = 800L
 
-    /** Rewind / fast-forward (`trick`): speed 1…[TRICK_MAX_SPEED], [TRICK_SECONDS_PER_SPEED] s of programme per second each. */
-    const val TRICK_MAX_SPEED = 4
+    /** Rewind / fast-forward (`trick`): the speeds in order (8 and 16 since T62), [TRICK_SECONDS_PER_SPEED] s of
+     *  programme per second times the speed. */
+    val TRICK_SPEEDS = listOf(1, 2, 3, 4, 8, 16)
+    val TRICK_MAX_SPEED: Int get() = TRICK_SPEEDS.last()
     const val TRICK_SECONDS_PER_SPEED = 60.0
 
     /** ▲ more than this into a programme goes to its start, else to the previous one. */
@@ -153,7 +155,7 @@ object TimelineRules {
     /** A ←/→ press held [heldSeconds] is a hold (starts the movement); shorter is a click, [STEP_SECONDS]. */
     fun isHold(heldSeconds: Double): Boolean = heldSeconds >= HOLD_MIN_SECONDS
 
-    /** Seconds of programme per second at [speed] (`trick` speeds: 1 = 60 … 4 = 240); 0 = stopped. */
+    /** Seconds of programme per second at [speed] (`trick` speeds: 1 = 60 … 16 = 960); 0 = stopped. */
     fun trickRate(speed: Int): Double = TRICK_SECONDS_PER_SPEED * speed.coerceIn(0, TRICK_MAX_SPEED)
 
     /** The bar's sign while moving: `◀◀` / `▶▶`, from speed 2 with the number (`◀◀ 2`). */
@@ -261,8 +263,8 @@ enum class TrickStop { PLAY_HERE, RETURN }
  * Rewind / fast-forward of the timeline player (spec/apps.md "Keys" ← / →, T55; golden `trick`). While stopped a
  * ←/→ press is timed: released under [TimelineRules.HOLD_MIN_SECONDS] it is a click (±10 s), held that long it
  * starts moving at speed 1 (already while held; the release adds nothing). While moving every press is a click at
- * its down: the same side = speed + 1 (at most 4), the other side = speed − 1, from 1 it turns round. ⏪/⏩ act on
- * their down the same way (stopped: start). Positions are playlist seconds of the current window, times the key
+ * its down: the same side = the next speed (at most 16), the other side = the one before, from 1 it turns round.
+ * ⏪/⏩ act on their down the same way (stopped: start). Positions are playlist seconds of the current window, times the key
  * events' clock in milliseconds.
  *
  * Remotes without a key-up: their repeats lasting ≥ 0.5 s are a hold; the press ends [TimelineRules.RELEASE_TIMEOUT_MS]
@@ -422,8 +424,8 @@ class TimelineTrick {
         anchor = position(atMs)
         anchorMs = atMs
         when {
-            forward == (direction > 0) -> speed = minOf(TimelineRules.TRICK_MAX_SPEED, speed + 1)
-            speed > 1 -> speed -= 1
+            forward == (direction > 0) -> speed = TimelineRules.TRICK_SPEEDS.firstOrNull { it > speed } ?: speed
+            speed > 1 -> speed = TimelineRules.TRICK_SPEEDS.last { it < speed }
             else -> direction = -direction
         }
     }

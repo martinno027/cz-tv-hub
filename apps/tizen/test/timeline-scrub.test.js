@@ -1,6 +1,6 @@
 'use strict';
 // spec/apps.md "Anténa timeline player" → Keys ← / → (T55): a click = ±10 s (exact); a press held ≥ 0.5 s starts
-// rewind / fast-forward at speed 1, clicks while moving change the speed (1–4) or turn round, ⏪/⏩ act at once;
+// rewind / fast-forward at speed 1, clicks while moving change the speed (1, 2, 3, 4, 8, 16) or turn round, ⏪/⏩ act at once;
 // OK / Back / ▲▼ stop it; the playhead moves every frame, the video stays paused (its picture follows at most once
 // a second where the backend can), the stop seeks exactly once; without key-ups repeats lasting 0.5 s are a hold and
 // a press ends 0.8 s after its last repeat. The real TimelineController on a fake clock, fake animation frames and a
@@ -208,7 +208,7 @@ test('held 0.5 s: moves back at speed 1 already while held, smoothly every frame
   });
 });
 
-test('clicks while moving: same side faster up to 4 with the number, other side slower, from 1 turns round', async () => {
+test('clicks while moving: same side faster up to 16 with the number, other side slower, from 1 turns round', async () => {
   await withClock((clock) => {
     const { ctl } = controller(clock, { position: 2 * HOUR });
     press(clock, ctl, 'left', 600, 100);
@@ -219,9 +219,19 @@ test('clicks while moving: same side faster up to 4 with the number, other side 
     assert.equal(rate(), -120);
     click(clock, ctl, 'left');
     click(clock, ctl, 'left');
-    click(clock, ctl, 'left');
-    assert.equal(badge(), '◀◀ 4', '4 is the most');
+    assert.equal(badge(), '◀◀ 4');
     assert.equal(rate(), -240);
+    click(clock, ctl, 'left');
+    assert.equal(badge(), '◀◀ 8', 'T62: after 4 comes 8');
+    assert.equal(rate(), -480);
+    click(clock, ctl, 'left');
+    click(clock, ctl, 'left');
+    assert.equal(badge(), '◀◀ 16', '16 is the most');
+    assert.equal(rate(), -960);
+    click(clock, ctl, 'right');
+    assert.equal(badge(), '◀◀ 8');
+    click(clock, ctl, 'right');
+    assert.equal(badge(), '◀◀ 4');
     click(clock, ctl, 'right');
     assert.equal(badge(), '◀◀ 3');
     click(clock, ctl, 'right');

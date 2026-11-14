@@ -217,10 +217,12 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
     smerem, kdyz jeste jednou klikne na danou stranu zacne se posouvat 2x rychleji a zobrazi se 2 … to same pro 4
     (maximalni rychlost), kdyz klikne zpet, tak se rychlost zase o jednu snizi, pripadne se zacne pretacet zpet …
     tak jak to standardne na televiznich aplikacich je")**: a press **held ≥ 0.5 s** starts moving the playhead in
-    that direction at **speed 1** (already while held; releasing keeps it moving, the hold adds nothing else); while it moves, a click on the **same side** = speed + 1 (at most
-    **4**), on the **other side** = speed − 1, and from speed 1 the other side turns it round (speed 1 the other
-    way). Speeds: 1 = 60 s of programme per second, 2 = 120, 3 = 180, 4 = 240 (`trick`; 10 min back: 10 s at 1,
-    2.5 s at 4). The bar shows `◀◀` / `▶▶` and, from 2 on, the number (`◀◀ 2`) next to the playhead's clock.
+    that direction at **speed 1** (already while held; releasing keeps it moving, the hold adds nothing else); while it moves, a click on the **same side** = the next speed (at most
+    **16**), on the **other side** = the speed before, and from speed 1 the other side turns it round (speed 1 the
+    other way). Speeds **1, 2, 3, 4, 8, 16** (8 and 16 added in T62, owner 2026-11-14: „pridej jeste rychlost 8x a
+    16x"), each 60 s of programme per second times the speed: 60, 120, 180, 240, 480, 960 (`trick`; 10 min back:
+    10 s at 1, 2.5 s at 4, 0.6 s at 16). The bar shows `◀◀` / `▶▶` and, from 2 on, the speed (`◀◀ 2`, `◀◀ 16`)
+    next to the playhead's clock.
     **OK / play-pause** = stop here and play from the playhead; **Back** = stop and return to where it started
     (playing); **▲ / ▼** = stop and jump as below. Reaching the start of the window (with `previous`) or its end
     (with `next`) continues in that window (edge rule); without one, or at a growing window's live edge, it stops
@@ -232,7 +234,7 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
     While it moves the video stays paused and its picture follows the playhead at most once a
     second with a fast seek where the player can (AVPlayer tolerance ±2 s, `video.fastSeek`; Android/AVPlay: the
     picture stays until the stop); on the stop one exact seek. ⏪ / ⏩ (media keys): a press = start (speed 1) /
-    speed + 1 in its direction / − 1 against it, as the clicks while moving. The playhead and clock move every frame
+    the next speed in its direction / the one before against it, as the clicks while moving. The playhead and clock move every frame
     (smooth, not in key-repeat steps); after the stop the bar shows the target until the player is within 3 s of it,
     at most 10 s. **Without a key-up** (remotes that only repeat): repeats lasting ≥ 0.5 s are a hold (the movement
     starts then); its end is noticed 0.8 s after the last repeat, and a new press after that is a new click. tvOS: clickpad left/right click = the same, a horizontal swipe on the touch surface

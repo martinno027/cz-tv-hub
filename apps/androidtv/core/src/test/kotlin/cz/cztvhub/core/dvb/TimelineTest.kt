@@ -133,11 +133,12 @@ class TimelineTest {
 
     @Test fun trickSpeeds() {
         val speeds = trick.getValue("speeds").jsonArray.map { it.jsonObject }
-        assertEquals(TimelineRules.TRICK_MAX_SPEED, speeds.size)
+        assertEquals(TimelineRules.TRICK_SPEEDS, speeds.map { it.num("speed").toInt() })
         speeds.forEach { assertEquals(it.num("rate"), TimelineRules.trickRate(it.num("speed").toInt()), 0.001) }
         // spec: 10 min back takes 10 s at speed 1 and 2.5 s at speed 4.
         assertEquals(10.0, 600 / TimelineRules.trickRate(1), 0.001)
         assertEquals(2.5, 600 / TimelineRules.trickRate(4), 0.001)
+        assertEquals(0.625, 600 / TimelineRules.trickRate(16), 0.001) // T62
     }
 
     @Test fun trick() {

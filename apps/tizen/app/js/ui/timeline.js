@@ -2,7 +2,7 @@
  * The "Anténa" timeline player's own bar and keys (spec/apps.md "Anténa timeline player"), driven by the Player:
  * the bar shows the window in wall clock (recorded pieces, gaps, programme ticks, the programme at the playhead,
  * the played part), the title follows the programme at the playhead, ◀/▶ seek 10 s and, held, rewind / fast-forward
- * at speeds 1–4 (T55), ▲/▼ jump
+ * at speeds 1, 2, 3, 4, 8, 16 (T55, T62), ▲/▼ jump
  * between programmes, a seek past the window's ends opens the neighbouring window at the same wall clock.
  * The rules themselves are in core/timeline.js.
  */
