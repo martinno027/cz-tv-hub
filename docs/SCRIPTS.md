@@ -240,6 +240,16 @@ requests (`http: 502 GET /dvb/live/*.m3u8`: the route with ids as `*`, no query 
 
 Logic tests in the CTCore package; the app is built from `project.yml` with XcodeGen.
 
+Opt-in UI tests (`TelevizeUITests`, skipped without their variables; not in CI):
+- `TimelinePlayerUITests` — the Anténa timeline player against a gateway: `TEST_RUNNER_TIMELINE_GATEWAY=host:port
+  TEST_RUNNER_TIMELINE_KEY=…`; `TEST_RUNNER_TIMELINE_HOLD=1` (rewind / fast-forward, about 45 min recorded after the
+  start position) and `TEST_RUNNER_TIMELINE_SPEEDS=1` (measures the playhead's rate at speeds 1–4, about 20 min
+  ahead); `TEST_RUNNER_TIMELINE_SHOTS=<dir>` saves screenshots. Against `dvb-fake` the recording starts only once a
+  channel is set to record on `/admin`, and on a nearly full Mac disk it pauses ("recording paused, disk full")
+  until the reserve on `/admin` is lowered.
+- `CTBarUITests` — the ČT bar of start-over (T62) through the real ČT API: `TEST_RUNNER_CT_BAR=1`
+  (`TEST_RUNNER_CT_BAR_SHOTS=<dir>`); needs internet in Czechia and fails while ČT is down.
+
 Can go wrong: `xcodegen generate` recreates `Televize.xcodeproj` and drops the signing team chosen in Xcode — pick it
 again before running on a device. `Televize.xcodeproj` is generated and not in git: after a pull that adds Swift files, Xcode
 reports "Cannot find type … in scope" until `xcodegen generate` runs again. In the simulator install `Televize.app`, not the UI-test runner.
