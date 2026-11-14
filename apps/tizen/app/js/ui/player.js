@@ -21,6 +21,8 @@
   var HINT_LIVE = 'OK pauza · ▲ ▼ kanál · 0–9 číslo kanálu · AUDIO zvuk · Zpět konec';
   var HINT_OTHER = 'OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · ▲ AUDIO zvuk · Zpět konec';
   var HINT_TIMELINE = 'OK pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk · Zpět konec';
+  // T62: with subtitles in the stream the long-OK list offers them too (spec/apps.md "ČT player bar")
+  var HINT_TIMELINE_SUBTITLES = 'OK pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk a titulky · Zpět konec';
 
   function isLive(request) {
     return !!request && (request.kind === 'live' || request.kind === 'dvbLive' || request.kind === 'pspLive');
@@ -46,6 +48,8 @@
   function AvPlayBackend(cb) {
     this.av = root.webapis.avplay;
     this.cb = cb;
+    this.subtitle = -1; // the TEXT track shown (T62); AVPlay hands its text to the app (onsubtitlechange) to draw
+    this.subtitleTimer = null;
     // AVPlay has no mute of its own: the TV's audio control while the player is open (spec/apps.md "Mute (T34)")
     var control = root.tizen && root.tizen.tvaudiocontrol;
     this.audio = control ? new CT.Mute.TvAudio(control) : null;
@@ -58,6 +62,7 @@
   AvPlayBackend.prototype.open = function (target, startMs) {
     var av = this.av;
     var cb = this.cb;
+    var self = this;
     this.close();
     av.open(target.url);
     av.setDisplayRect(0, 0, 1920, 1080);
@@ -78,8 +83,14 @@
       onstreamcompleted: function () { cb.onEnded(); },
       onerror: function (type) { cb.onError(String(type)); },
       onevent: function () {},
-      oncurrentplaytime: function () {}
+      oncurrentplaytime: function () {},
+      onsubtitlechange: function (duration, text) { self.showSubtitle(text, duration); }
     });
+    try {
+      av.setSilentSubtitle(true); // subtitles start off ("Titulky: Vypnuto")
+    } catch (e) {
+      // not every firmware has it: the text is drawn only for a chosen track anyway
+    }
     av.prepareAsync(function () {
       // A timeline and "Od začátku" always seek (also to 0): a growing EVENT playlist would otherwise start live.
       if (startMs > 0 || target.alwaysSeek) {
@@ -100,6 +111,8 @@
   };
 
   AvPlayBackend.prototype.close = function () {
+    this.subtitle = -1;
+    this.showSubtitle('', 0);
     try {
       if (this.av.getState() !== 'NONE') {
         this.av.stop();
@@ -190,6 +203,45 @@
 
   AvPlayBackend.prototype.seekBy = function (deltaMs) {
     this.seekTo(this.position() + deltaMs);
+  };
+
+  /** Subtitle (TEXT) tracks [{index, language, name}] of the stream (T62). */
+  AvPlayBackend.prototype.subtitleTracks = function () {
+    try {
+      return CT.SubtitleTracks.fromAvPlay(this.av.getTotalTrackInfo());
+    } catch (e) {
+      return [];
+    }
+  };
+
+  AvPlayBackend.prototype.currentSubtitle = function () {
+    return this.subtitle;
+  };
+
+  /** Shows the TEXT track `index` (-1 = off); false when AVPlay refused. */
+  AvPlayBackend.prototype.selectSubtitle = function (index) {
+    try {
+      if (index < 0) {
+        this.av.setSilentSubtitle(true);
+      } else {
+        this.av.setSelectTrack('TEXT', index);
+        this.av.setSilentSubtitle(false);
+      }
+    } catch (e) {
+      return false;
+    }
+    this.subtitle = index;
+    if (index < 0) this.showSubtitle('', 0);
+    return true;
+  };
+
+  /** AVPlay's subtitle text for `duration` ms, drawn by the app (only while a track is chosen). */
+  AvPlayBackend.prototype.showSubtitle = function (text, duration) {
+    var el = $('subtitles');
+    clearTimeout(this.subtitleTimer);
+    var shown = this.subtitle >= 0 && text ? String(text).replace(/<[^>]*>/g, '') : '';
+    if (el && el.textContent !== shown) el.textContent = shown;
+    if (shown && duration > 0) this.subtitleTimer = setTimeout(function () { if (el) el.textContent = ''; }, duration);
   };
 
   /** <video> backend for desktop development (plays HLS only where the browser can). */
@@ -287,6 +339,18 @@
     this.seekTo(this.position() + deltaMs);
   };
 
+  Html5Backend.prototype.subtitleTracks = function () {
+    return CT.SubtitleTracks.fromTextTracks(this.video.textTracks);
+  };
+
+  Html5Backend.prototype.currentSubtitle = function () {
+    return CT.SubtitleTracks.shownTextTrack(this.video.textTracks);
+  };
+
+  Html5Backend.prototype.selectSubtitle = function (index) {
+    return CT.SubtitleTracks.showTextTrack(this.video.textTracks, index);
+  };
+
   /** The player overlay. `app` provides planner and close(). */
   function Player(app) {
     var self = this;
@@ -304,14 +368,15 @@
     this.zapTimer = null;
     this.zapBoxTimer = null;
     this.numberEntry = new CT.NumberEntry(function (n) { self.zapToNumber(n); });
-    this.tl = null; // TimelineController while an Anténa timeline plays
+    this.tl = null; // TimelineController while an Anténa timeline, a ČT start-over or the ČT archive plays (T62)
     this.timelineAt = null; // {id, time}: the timeline window and wall clock to continue at after re-resolving
     this.errorAction = null; // {label, run} under the error shown now (CT.Platform.playErrorAction), OK runs it
     this.mute = new CT.Mute.Session(); // muted or not for the whole app session (spec/apps.md "Mute (T34)")
     this.watchFor = null; // the request whose watch report is in progress (T53): re-resolving it is the same session
     var cb = {
       onReady: function () {
-        self.showHint(self.hintKind); // the platform's hint may depend on the stream (the web: its audio tracks)
+        self.applySubtitleChoice(); // subtitles start off; the viewer's choice holds across a re-resolve (T62)
+        self.showHint(self.hintKind); // the hint may depend on the stream (its audio tracks, its subtitles)
         self.hideMessage();
         self.showOsd();
         self.startBreaks();
@@ -330,7 +395,7 @@
     var hasAvPlay = root.webapis && root.webapis.avplay;
     var platformBackend = CT.Platform.playerBackend ? CT.Platform.playerBackend(cb) : null; // the web: <video> + hls.js
     this.backend = this.mainBackend = platformBackend || (hasAvPlay ? new AvPlayBackend(cb) : new Html5Backend(cb));
-    // ?demo: a simulated player for timelines, so the timeline bar can be checked in a browser
+    // ?demo: a simulated player for timelines and the ČT bar, so the bars can be checked in a browser
     this.demoBackend = CT.Demo.enabled ? CT.Demo.backend(cb) : null;
     $('avplayer').style.display = hasAvPlay ? 'block' : 'none';
     this.renderMute();
@@ -340,10 +405,38 @@
 
   /** The key hint under the bar: 'live' | 'other' | 'timeline'; the platform may word it (CT.Platform.playerHint). */
   Player.prototype.showHint = function (kind) {
-    var own = { live: HINT_LIVE, other: HINT_OTHER, timeline: HINT_TIMELINE }[kind];
+    var own = { live: HINT_LIVE, other: HINT_OTHER, timeline: this.subtitleCount() ? HINT_TIMELINE_SUBTITLES : HINT_TIMELINE }[kind];
     var hook = CT.Platform.playerHint;
     this.hintKind = kind;
     $('osd-hint').textContent = (hook ? hook(kind, this) : null) || own;
+  };
+
+  /** Subtitle renditions of what plays now (0 before the stream is there). */
+  Player.prototype.subtitleCount = function () {
+    try {
+      return this.target && this.backend.subtitleTracks ? this.backend.subtitleTracks().length : 0;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  /** The viewer picked subtitles in the long-OK list: `track` = {index, language, name}, null = off. */
+  Player.prototype.chooseSubtitle = function (track) {
+    this.subtitleChoice = track;
+  };
+
+  /**
+   * A stream became ready: every backend starts with subtitles off; the choice of this playback (kept across a
+   * re-resolve or the background, forgotten when another programme or channel opens) is put back, the same
+   * rendition by name and language, else by its index.
+   */
+  Player.prototype.applySubtitleChoice = function () {
+    var want = this.subtitleChoice;
+    if (!want || !this.backend.subtitleTracks) return;
+    var tracks = this.backend.subtitleTracks();
+    var same = tracks.filter(function (t) { return t.name === want.name && t.language === want.language; })[0] ||
+      tracks.filter(function (t) { return t.index === want.index; })[0];
+    if (same) this.backend.selectSubtitle(same.index);
   };
 
   Player.prototype.isOpen = function () {
@@ -352,6 +445,7 @@
 
   Player.prototype.open = function (request) {
     this.request = request;
+    this.subtitleChoice = null;
     this.lastReResolveAt = 0;
     this.timelineAt = null;
     // a new opening gets its own timeline controller: key-ups are trusted per opening (spec/apps.md T55), also when
@@ -392,6 +486,7 @@
     var item = this.zapList[index];
     this.reportStop(); // the channel changes: the old session ends now, the new one starts once it plays
     this.request = this.app.liveRequest(item);
+    this.subtitleChoice = null;
     this.lastReResolveAt = 0;
     this.updateTitle();
     this.showZapBox(index);
@@ -494,13 +589,15 @@
       self.reportStart(request, target);
       self.plannedAt = Date.now();
       self.timelineAt = null;
-      if (self.tl) self.tl.setWindow(target.timeline);
+      if (self.tl) self.tl.setWindow(self.tl.source.window(target));
       var start = resumeMs;
       if (start === null) {
         if (target.startPositionMs !== null) start = target.startPositionMs;
         else if (target.kind === 'timeshift') start = target.fallbackOffsetMs;
         else start = 0;
       }
+      // the ČT bar: the start is clamped too (T62: a programme that began almost 3 h ago starts at buffer start + 60 s)
+      if (self.tl && self.tl.source.kind === 'ct') start = Math.round(self.tl.inRange(start / 1000) * 1000);
       try {
         self.backend.open(target, start);
       } catch (e) {
@@ -551,21 +648,26 @@
     $('player-message').appendChild(button);
   };
 
-  /** The backend for `target` and the timeline controller for a timeline; returns nothing. */
+  /**
+   * The backend for `target` and the bar's controller: the Anténa timeline, or ČT start-over / archive with the same
+   * bar over a window of their own (T62, CT.CtBarSource); live, DVR recordings and the Chamber keep the plain OSD.
+   */
   Player.prototype.useTarget = function (target) {
     this.target = target;
-    var backend = target.kind === 'timeline' && this.demoBackend ? this.demoBackend : this.mainBackend;
+    var mode = CT.Timeline.barMode(target);
+    var backend = mode && this.demoBackend ? this.demoBackend : this.mainBackend;
     if (backend !== this.backend) {
       this.backend.close();
       this.backend = backend;
       this.attachMute();
     }
-    if (target.kind === 'timeline') {
-      if (!this.tl) this.tl = new CT.TimelineController(this);
-      this.showHint('timeline');
-    } else if (this.tl) {
+    if (this.tl && this.tl.source.mode !== mode) {
       this.tl.stop();
       this.tl = null;
+    }
+    if (mode) {
+      if (!this.tl) this.tl = new CT.TimelineController(this, mode === 'timeline' ? null : new CT.CtBarSource(this, mode));
+      this.showHint('timeline');
     }
   };
 
@@ -604,7 +706,9 @@
     if (this.lastReResolveAt === 0 || now - this.lastReResolveAt > RE_RESOLVE_COOLDOWN_MS) {
       this.lastReResolveAt = now;
       this.timelineAt = this.tl ? this.tl.continueAt() : null;
-      this.load(true, this.resumePosition());
+      var resumeMs = this.resumePosition();
+      if (this.tl && this.tl.source.kind === 'ct') this.tl.cancelKeys(); // a movement in progress ends there (T62)
+      this.load(true, resumeMs);
     } else {
       this.reportStop(); // failed again: nothing plays any more
       this.backend.close();
@@ -629,7 +733,8 @@
    */
   Player.prototype.resumePosition = function () {
     if (!this.target || this.target.kind === 'timeline') return null;
-    var position = this.backend.position();
+    // the ČT bar: its playhead (a seek on its way, a movement's point), as the Anténa timeline continues at it
+    var position = this.tl ? this.tl.playheadPosition() * 1000 : this.backend.position();
     if (this.target.kind === 'vod') return position;
     if (this.target.kind === 'timeshift') return Math.max(0, position - (Date.now() - this.plannedAt));
     return null;
@@ -663,6 +768,7 @@
     this.saveProgress();
     this.timelineAt = this.tl ? this.tl.continueAt() : null;
     this.suspendedAt = this.resumePosition();
+    if (this.tl && this.tl.source.kind === 'ct') this.tl.cancelKeys(); // a movement in progress ends there (T62)
     this.reportStop(); // in the background nothing is watched; back in front it is a new session
     this.loadToken++;
     this.stopBreaks();

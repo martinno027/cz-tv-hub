@@ -127,11 +127,11 @@ final class TimelinePlayerUITests: XCTestCase {
     }
 
     /// Rewind / fast-forward (T55, spec/apps.md "Keys"): held → starts `▶▶` at 60 s per second, → raises the speed
-    /// (at most 4), ← lowers it and from 1 turns round, Back returns to where it started. Needs channel 1's window to
-    /// have about 12 min recorded after the start position (`TEST_RUNNER_TIMELINE_HOLD=1`, a growing window grows
-    /// meanwhile).
+    /// (1, 2, 3, 4, 8, 16), ← lowers it and from 1 turns round, Back returns to where it started. Needs channel 1's
+    /// window to have about 45 min recorded after the start position (`TEST_RUNNER_TIMELINE_HOLD=1`; T62: speed 8
+    /// moves 8 min per second, with 30 min ahead it reached the live edge before the next read).
     func testTrickPlay() throws {
-        guard env["TIMELINE_HOLD"] != nil else { throw XCTSkip("set TEST_RUNNER_TIMELINE_HOLD with 12 min recorded ahead") }
+        guard env["TIMELINE_HOLD"] != nil else { throw XCTSkip("set TEST_RUNNER_TIMELINE_HOLD with 45 min recorded ahead") }
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         sleep(2)
         remote.press(.playPause)  // paused: the origin stays put while the clock is read
@@ -144,13 +144,16 @@ final class TimelinePlayerUITests: XCTestCase {
         XCTAssertLessThan(oneRate, 80)
         remote.press(.right)
         XCTAssertTrue(waitForLabel(trick, "▶▶ 2"))
-        for _ in 0..<3 { remote.press(.right) }
-        XCTAssertTrue(waitForLabel(trick, "▶▶ 4"), "4 is the most")
-        // At once: 240 s per second runs out of window fast, and XCUI reads take seconds at times (a measured rate
+        for _ in 0..<2 { remote.press(.right) }
+        XCTAssertTrue(waitForLabel(trick, "▶▶ 4"))
+        remote.press(.right)
+        XCTAssertTrue(waitForLabel(trick, "▶▶ 8"), "T62: after 4 comes 8")
+        // At once: 480 s per second runs out of window fast, and XCUI reads take seconds at times (a measured rate
         // here reached the live edge and stopped). The rates are golden (`trick`) in CTCoreTests.
         remote.press(.left)
-        XCTAssertTrue(waitForLabel(trick, "▶▶ 3"), "the other side lowers it")
-        shot("t2-speed-3")
+        XCTAssertTrue(waitForLabel(trick, "▶▶ 4"), "the other side lowers it")
+        shot("t2-speed-4")
+        remote.press(.left)
         remote.press(.left)
         remote.press(.left)
         XCTAssertTrue(waitForLabel(trick, "▶▶"))
@@ -170,6 +173,29 @@ final class TimelinePlayerUITests: XCTestCase {
         sleep(1)
         XCTAssertFalse(trick.exists, "a click does not start moving")
         XCTAssertGreaterThanOrEqual((try XCTUnwrap(clockSeconds)) - back, 10)
+    }
+
+    /// T62: speeds 1–4 move the playhead faster each (60 / 120 / 180 / 240 s per second), measured on the clock — T55
+    /// only checked the badge (8 and 16 would need hours recorded ahead: golden `trick` in CTCoreTests). Needs about
+    /// 20 min recorded after the start position (`TEST_RUNNER_TIMELINE_SPEEDS=1`).
+    func testTrickSpeeds() throws {
+        guard env["TIMELINE_SPEEDS"] != nil else { throw XCTSkip("set TEST_RUNNER_TIMELINE_SPEEDS with 20 min recorded ahead") }
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        sleep(2)
+        remote.press(.right, forDuration: 1)
+        XCTAssertTrue(trick.waitForExistence(timeout: 2))
+        var rates = [try rate(over: 1)]
+        print("T62 speed 1: \(Int(rates[0])) s per second")
+        for speed in 2...4 {
+            remote.press(.right)
+            XCTAssertTrue(waitForLabel(trick, "▶▶ \(speed)"))
+            rates.append(try rate(over: 1))
+            print("T62 speed \(speed): \(Int(rates.last!)) s per second")
+        }
+        // XCUI reads take a varying fraction of a second, so only the order and a rough size are checked.
+        XCTAssertGreaterThan(rates[0], 40, "speed 1 ≈ 60 s per second")
+        XCTAssertGreaterThan(rates[3], rates[0] * 2, "speed 4 well faster than 1")
+        remote.press(.select)
     }
 
     private var trick: XCUIElement { app.staticTexts["timeline.trick"] }

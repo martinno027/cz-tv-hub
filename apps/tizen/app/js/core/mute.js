@@ -135,22 +135,38 @@
   }
 
   /**
-   * The Anténa timeline's "Zvuk" choice: the broadcast tracks (only when there are several; else the note) and the
-   * mute item last. `current` = the selected track's index. Returns {note, items: [{kind: 'track' | 'mute', label,
-   * position (in `tracks`), current}], focus}; the focus starts on the current track, with one track on the mute item.
+   * The timeline / ČT bar's "Zvuk" choice: the broadcast tracks (only when there are several; else the note), the
+   * subtitles when the stream has any (T62: "Titulky: Vypnuto" + each rendition; `subtitles` [{index, language,
+   * name}], `currentSubtitle` = the shown one's index or -1) and the mute item last. `current` = the selected audio
+   * track's index. Returns {note, items: [{kind: 'track' | 'subtitle' | 'mute', label, position (in `tracks` /
+   * `subtitles`, -1 = subtitles off or the mute item), current}], focus}; the focus starts on the current track,
+   * with one track on the current subtitle item, else on the mute item.
    */
-  function choice(tracks, current, muted) {
+  function choice(tracks, current, muted, subtitles, currentSubtitle) {
     var items = [];
-    var focus = 0;
+    var focus = -1;
     var several = tracks.length >= 2;
     if (several) {
       tracks.forEach(function (t, i) {
         if (t.index === current) focus = i;
         items.push({ kind: 'track', label: CT.AudioTracks.label(t, i), position: i, current: t.index === current });
       });
+      if (focus < 0) focus = 0;
+    }
+    var subs = subtitles || [];
+    if (subs.length) {
+      var shown = typeof currentSubtitle === 'number' ? currentSubtitle : -1;
+      var off = shown < 0 || !subs.some(function (t) { return t.index === shown; });
+      if (focus < 0 && off) focus = items.length;
+      items.push({ kind: 'subtitle', label: CT.SubtitleTracks.OFF, position: -1, current: off });
+      subs.forEach(function (t, i) {
+        var on = !off && t.index === shown;
+        if (focus < 0 && on) focus = items.length;
+        items.push({ kind: 'subtitle', label: CT.SubtitleTracks.label(t, i), position: i, current: on });
+      });
     }
     items.push({ kind: 'mute', label: label(muted), position: -1, current: false });
-    return { note: several ? '' : ONE_TRACK, items: items, focus: several ? focus : items.length - 1 };
+    return { note: several ? '' : ONE_TRACK, items: items, focus: focus < 0 ? items.length - 1 : focus };
   }
 
   CT.Mute = {

@@ -43,7 +43,7 @@ function fakeHls(supported) {
     instances.push(this);
   }
   Hls.isSupported = () => supported !== false;
-  Hls.Events = { MANIFEST_PARSED: 'hlsManifestParsed', ERROR: 'hlsError' };
+  Hls.Events = { MANIFEST_PARSED: 'hlsManifestParsed', ERROR: 'hlsError', SUBTITLE_TRACKS_UPDATED: 'hlsSubtitleTracksUpdated' };
   Hls.prototype.on = function (name, f) { this.handlers[name] = f; };
   Hls.prototype.emit = function (name, data) { this.handlers[name](name, data); };
   Hls.prototype.loadSource = function (url) { this.url = url; };
@@ -271,6 +271,85 @@ test('audio tracks: hls.js renditions (LANGUAGE) and the browser\'s own audioTra
   assert.equal(native.b.currentAudio(), 0);
   assert.equal(native.b.selectAudio(1), true);
   assert.deepEqual(list.map((t) => t.enabled), [false, true]);
+});
+
+test('subtitles (T62): hls.js renditions by NAME, off = no track and no display; native text tracks; the list items', () => {
+  const Hls = fakeHls();
+  const { b } = backend(fakeVideo({}), Hls);
+  b.open({ url: 'https://cdn.example/ct.m3u8', kind: 'vod' }, 0);
+  const h = Hls.instances[0];
+  assert.deepEqual(b.subtitleTracks(), [], 'none before the manifest lists any');
+  h.subtitleTracks = [{ lang: 'cs', name: 'Skryté titulky' }, { lang: 'en', name: '' }];
+  h.subtitleTrack = -1;
+  h.subtitleDisplay = true;
+  const subs = b.subtitleTracks();
+  assert.deepEqual(subs, [{ index: 0, language: 'cs', name: 'Skryté titulky' }, { index: 1, language: 'en', name: '' }]);
+  assert.equal(b.currentSubtitle(), -1);
+  assert.equal(b.selectSubtitle(1), true);
+  assert.deepEqual([h.subtitleTrack, h.subtitleDisplay], [1, true]);
+  assert.equal(b.currentSubtitle(), 1);
+  assert.equal(b.selectSubtitle(-1), true);
+  assert.deepEqual([h.subtitleTrack, h.subtitleDisplay], [-1, false]);
+  assert.equal(b.currentSubtitle(), -1);
+  assert.equal(b.selectSubtitle(2), false, 'not there');
+  const c = CT.Mute.choice([{ index: 0, language: 'cs' }], 0, false, subs, -1);
+  assert.deepEqual(c.items.map((i) => i.label), ['Titulky: Vypnuto', 'Titulky: Skryté titulky', 'Titulky: Angličtina', 'Vypnout zvuk']);
+
+  const text = [{ kind: 'metadata', mode: 'hidden' }, { kind: 'subtitles', language: 'cs', label: 'Čeština', mode: 'disabled' },
+    { kind: 'captions', language: 'cs', label: 'Pro neslyšící', mode: 'showing' }];
+  const v = fakeVideo({ canPlay: [HLS_TYPE], audioTracks: [] });
+  v.textTracks = text;
+  const native = backend(v, fakeHls());
+  native.b.open({ url: 'https://cdn.example/ct.m3u8', kind: 'vod' }, 0);
+  assert.deepEqual(native.b.subtitleTracks().map((t) => [t.index, t.name]), [[1, 'Čeština'], [2, 'Pro neslyšící']]);
+  assert.equal(native.b.currentSubtitle(), 2);
+  assert.equal(native.b.selectSubtitle(1), true);
+  assert.deepEqual(text.map((t) => t.mode), ['hidden', 'showing', 'disabled'], 'metadata tracks untouched');
+  assert.equal(native.b.selectSubtitle(-1), true);
+  assert.equal(native.b.currentSubtitle(), -1);
+});
+
+test('subtitles start off (T62): hls.js\'s own default rendition is turned off, also when the list comes later', () => {
+  const Hls = fakeHls();
+  const { b } = backend(fakeVideo({}), Hls);
+  b.open({ url: 'https://cdn.example/ct.m3u8', kind: 'vod' }, 0);
+  const h = Hls.instances[0];
+  h.subtitleTracks = [{ lang: 'cs', name: 'Čeština' }];
+  h.subtitleTrack = 0; // hls.js picked the DEFAULT=YES rendition
+  h.subtitleDisplay = true;
+  h.emit(Hls.Events.MANIFEST_PARSED, {});
+  assert.deepEqual([h.subtitleTrack, h.subtitleDisplay], [-1, false]);
+  assert.equal(b.currentSubtitle(), -1);
+  h.subtitleTrack = 0;
+  h.subtitleDisplay = true;
+  h.emit(Hls.Events.SUBTITLE_TRACKS_UPDATED, {});
+  assert.equal(b.currentSubtitle(), -1, 'picked again by hls.js: off again');
+  b.selectSubtitle(0);
+  h.emit(Hls.Events.SUBTITLE_TRACKS_UPDATED, {});
+  assert.equal(b.currentSubtitle(), 0, 'the viewer\'s choice stays');
+  assert.equal(b.selectSubtitle(5), false);
+  assert.equal(b.currentSubtitle(), 0);
+
+  const text = [{ kind: 'subtitles', language: 'cs', label: 'Čeština', mode: 'showing' }];
+  const v = fakeVideo({ canPlay: [HLS_TYPE], audioTracks: [] });
+  v.textTracks = text;
+  const native = backend(v, fakeHls());
+  native.b.open({ url: 'https://cdn.example/ct.m3u8', kind: 'vod' }, 0);
+  v.onloadedmetadata();
+  assert.equal(text[0].mode, 'disabled', 'native: the browser\'s default one off');
+});
+
+test('seekableEnd (T62): the last seekable range of a live/timeshift stream (duration Infinity), else the duration', () => {
+  const v = fakeVideo({});
+  const { b } = backend(v, fakeHls());
+  b.open({ url: 'https://cdn.example/ts.m3u8', kind: 'timeshift' }, 0);
+  assert.equal(b.seekableEnd(), 0, 'nothing known yet');
+  v.duration = Infinity;
+  v.seekable = { length: 2, end: (i) => [100, 10610.5][i] };
+  assert.equal(b.seekableEnd(), 10610500);
+  v.seekable = { length: 0, end: () => { throw new Error('IndexSizeError'); } };
+  v.duration = 3600;
+  assert.equal(b.seekableEnd(), 3600000);
 });
 
 test('hls.js: never X-Cztvhub-Client (T37) — not to the gateway\'s media, not to a CDN (no custom header, no CORS preflight)', () => {

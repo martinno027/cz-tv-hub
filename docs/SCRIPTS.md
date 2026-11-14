@@ -243,6 +243,16 @@ requests (`http: 502 GET /dvb/live/*.m3u8`: the route with ids as `*`, no query 
 
 Logic tests in the CTCore package; the app is built from `project.yml` with XcodeGen.
 
+Opt-in UI tests (`TelevizeUITests`, skipped without their variables; not in CI):
+- `TimelinePlayerUITests` — the Anténa timeline player against a gateway: `TEST_RUNNER_TIMELINE_GATEWAY=host:port
+  TEST_RUNNER_TIMELINE_KEY=…`; `TEST_RUNNER_TIMELINE_HOLD=1` (rewind / fast-forward, about 45 min recorded after the
+  start position) and `TEST_RUNNER_TIMELINE_SPEEDS=1` (measures the playhead's rate at speeds 1–4, about 20 min
+  ahead); `TEST_RUNNER_TIMELINE_SHOTS=<dir>` saves screenshots. Against `dvb-fake` the recording starts only once a
+  channel is set to record on `/admin`, and on a nearly full Mac disk it pauses ("recording paused, disk full")
+  until the reserve on `/admin` is lowered.
+- `CTBarUITests` — the ČT bar of start-over (T62) through the real ČT API: `TEST_RUNNER_CT_BAR=1`
+  (`TEST_RUNNER_CT_BAR_SHOTS=<dir>`); needs internet in Czechia and fails while ČT is down.
+
 Can go wrong: `xcodegen generate` recreates `Televize.xcodeproj` and drops the signing team chosen in Xcode — pick it
 again before running on a device. `Televize.xcodeproj` is generated and not in git: after a pull that adds Swift files, Xcode
 reports "Cannot find type … in scope" until `xcodegen generate` runs again. In the simulator install `Televize.app`, not the UI-test runner.
@@ -292,11 +302,14 @@ half-written output, so a rerun builds again instead of using it.
 Tests include the Chromium 56 syntax guard. UI check in a browser: serve the repo root and open
 `apps/tizen/app/index.html?demo` (`&channels=60` for a big guide; `&psp=13` = invented Chamber streams 1 and 3
 on air, `&psp=0` none; the demo never contacts the Chamber's CDN; `&timeline` opens the Anténa timeline player bar
-over `spec/fixtures/dvb/dvb_timeline.json`, `&timeline=growing` as a growing window; the demo player is a
-clock-driven fake; Domů (T58): `&resume=none` = nothing to resume, `&status=down|badkey|paused` = the gateway notice
-for an unreachable gateway, a refused key, paused recording; T59 weather: `&weather=off|error` = `404` / `200` with
-`error` (date only), `&location=none|denied` = no location source / refused; the demo location is a stand-in (Prague),
-never the browser's; the consent answer is kept in memory only; requests sent are in `CT.Demo.weatherRequests`). The demo keeps "Pokračovat" in memory only (three
+over `spec/fixtures/dvb/dvb_timeline.json`, `&timeline=growing` as a growing window; `&ctbar=startover` opens ČT1
+"Od začátku" with the ČT player bar (T62), `&ctbar=vod` / `&ctbar=vodnostart` an archive VOD with / without a known
+broadcast start (the archive then answers `vod_ok.json`, ČT1 gets synthetic afternoon programmes); the demo player is
+a clock-driven fake, also for ČT start-over and archive opened from the guide; Domů (T58): `&resume=none` = nothing
+to resume, `&status=down|badkey|paused` = the gateway notice for an unreachable gateway, a refused key, paused
+recording; T59 weather: `&weather=off|error` = `404` / `200` with `error` (date only), `&location=none|denied` = no
+location source / refused; the demo location is a stand-in (Prague), never the browser's; the consent answer is kept
+in memory only; requests sent are in `CT.Demo.weatherRequests`). The demo keeps "Pokračovat" in memory only (three
 seeded entries, also in Archiv's demo row), never in the browser's storage, because the web demo shares its origin
 with the household's real web app. `build.py` packages `dist/Televize.wgt` with the
 Tizen Studio CLI; `--gateway`/`--key-file` preset the gateway in that build only.

@@ -2,16 +2,18 @@ import Foundation
 
 /// Rewind / fast-forward of the Anténa timeline player (spec/apps.md "Keys", T55; golden `trick` and `hold` in
 /// spec/fixtures/timeline_cases.json). A ← / → click steps 10 s; a press held ≥ 0.5 s starts moving the playhead
-/// in its direction at speed 1 (already while held); while it moves a press on the same side is speed + 1 (at most
-/// 4), on the other side speed − 1, and from speed 1 the other side turns it round. OK / play-pause stop it at the
-/// playhead, Back returns to where it started, anything else (▲ / ▼, a swipe) interrupts it.
+/// in its direction at speed 1 (already while held); while it moves a press on the same side is the next speed (1, 2,
+/// 3, 4, 8, 16; 8 and 16 since T62), on the other side the one before, and from speed 1 the other side turns it
+/// round. OK / play-pause stop it at the playhead, Back returns to where it started, anything else (▲ / ▼, a swipe)
+/// interrupts it.
 ///
 /// Times are monotonic seconds (`CACurrentMediaTime()` in the app); positions are playlist seconds of the window.
 /// The playhead's position is computed from the time, so it moves every frame, not in key-repeat steps.
 public struct TrickPlay: Sendable, Equatable {
-    /// Programme seconds per second of speed 1…4.
-    public static let rates: [Double] = [60, 120, 180, 240]
-    public static var maxSpeed: Int { rates.count }
+    /// The speeds in order; each moves 60 s of programme per second times the speed.
+    public static let speeds = [1, 2, 3, 4, 8, 16]
+    public static let secondsPerSpeed: Double = 60
+    public static var maxSpeed: Int { speeds.last! }
 
     /// What the stop does with the player.
     public enum Stop: String, Sendable, Equatable {
@@ -46,7 +48,7 @@ public struct TrickPlay: Sendable, Equatable {
 
     /// −1 back, 1 forward, 0 stopped.
     public private(set) var direction = 0
-    /// 1…4 while moving, 0 stopped.
+    /// One of `speeds` while moving, 0 stopped.
     public private(set) var speed = 0
     /// Where the last movement started (Back returns there), in the coordinates of the window it started in.
     public private(set) var origin: Double?
@@ -60,7 +62,7 @@ public struct TrickPlay: Sendable, Equatable {
     public var isMoving: Bool { direction != 0 }
 
     /// Programme seconds per second while moving, 0 stopped.
-    public var rate: Double { isMoving ? Self.rates[speed - 1] : 0 }
+    public var rate: Double { isMoving ? Self.secondsPerSpeed * Double(speed) : 0 }
 
     /// The bar's sign next to the playhead's clock: `◀◀` / `▶▶`, from speed 2 on with the number (`◀◀ 2`).
     public var badge: String? {
@@ -150,9 +152,9 @@ public struct TrickPlay: Sendable, Equatable {
     private mutating func change(_ sign: Int, at time: Double) -> Action {
         let here = position(at: time) ?? anchorPosition
         if sign == direction {
-            speed = min(Self.maxSpeed, speed + 1)
+            speed = Self.speeds.first { $0 > speed } ?? speed
         } else if speed > 1 {
-            speed -= 1
+            speed = Self.speeds.last { $0 < speed } ?? 1
         } else {
             direction = sign  // from speed 1 the other side turns it round
         }

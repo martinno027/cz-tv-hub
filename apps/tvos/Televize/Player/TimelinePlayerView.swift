@@ -27,7 +27,8 @@ private final class FocusableView: UIView {
 /// Keys of the timeline player (spec/apps.md "Anténa timeline player"): OK and play/pause pause, a ← / → click
 /// steps 10 s, held 0.5 s it starts rewind / fast-forward (`TrickPlay`: more clicks change the speed, OK plays
 /// there, Back returns), ⏪ / ⏩ media commands do the same, a horizontal swipe scrubs, ▲ / ▼ jump between
-/// programmes, a long OK press opens the audio list (with „Vypnout zvuk“ / „Zapnout zvuk“), Back closes the player.
+/// programmes, a long OK press opens the audio and subtitle list (with „Vypnout zvuk“ / „Zapnout zvuk“), Back closes
+/// the player. The same for Anténa windows and ČT start-over / archive (T62).
 /// While the bar is hidden the first key only shows it, except play/pause, Back, the long OK, ⏪ / ⏩, a held ← / →
 /// (they show it and act at once) and OK while "Přeskočit reklamu" is shown.
 final class TimelineHostViewController: UIViewController, UIGestureRecognizerDelegate {
@@ -256,7 +257,7 @@ final class TimelineHostViewController: UIViewController, UIGestureRecognizerDel
             MainActor.assumeIsolated {
                 guard let self, self.selectBegan != nil else { return }
                 self.selectConsumed = true
-                self.showAudioList()
+                self.showTrackList()
             }
         }
     }
@@ -308,12 +309,15 @@ final class TimelineHostViewController: UIViewController, UIGestureRecognizerDel
         }
     }
 
-    // MARK: audio
+    // MARK: audio and subtitles
 
-    /// The audio renditions; the Czech default is selected by the player's criteria, the list only changes it.
-    private func showAudioList() {
+    /// The audio renditions (the Czech default is selected by the player's criteria, the list only changes it), then
+    /// the subtitles ("Titulky: Vypnuto" + the stream's renditions by name, T62; none in the stream = no items).
+    private func showTrackList() {
         let (options, selected) = controller.audioChoices
-        let sheet = UIAlertController(title: "Zvuk", message: options.isEmpty ? "Pořad má jen jednu zvukovou stopu." : nil,
+        let (subtitles, subtitle) = controller.subtitleChoices
+        let sheet = UIAlertController(title: CTBarRules.trackListTitle(hasSubtitles: !subtitles.isEmpty),
+                                      message: options.isEmpty ? "Pořad má jen jednu zvukovou stopu." : nil,
                                       preferredStyle: .actionSheet)
         for option in options {
             let action = UIAlertAction(title: PlayerController.audioTitle(option), style: .default) { [weak self] _ in
@@ -322,13 +326,27 @@ final class TimelineHostViewController: UIViewController, UIGestureRecognizerDel
             sheet.addAction(action)
             if option == selected { sheet.preferredAction = action }
         }
+        if !subtitles.isEmpty {
+            // The selected one is marked (the focus stays on the audio track in use).
+            let items: [AVMediaSelectionOption?] = [nil] + subtitles
+            for (index, option) in items.enumerated() {
+                let title = option.map {
+                    CTBarRules.subtitleTitle(name: PlayerController.renditionName($0), language: $0.extendedLanguageTag,
+                                             index: index)
+                } ?? CTBarRules.subtitlesOff
+                let mark = option == subtitle ? " ✓" : ""
+                sheet.addAction(UIAlertAction(title: title + mark, style: .default) { [weak self] _ in
+                    self?.controller.selectSubtitle(option)
+                })
+            }
+        }
         // No transport bar here: the mute action sits with the audio choice (spec/apps.md "Mute (T34)").
         if let mute = controller.mute {
             sheet.addAction(UIAlertAction(title: mute.actionTitle, style: .default) { [weak self] _ in
                 self?.controller.toggleMute()
             })
         }
-        sheet.addAction(UIAlertAction(title: options.isEmpty ? "OK" : "Zrušit", style: .cancel))
+        sheet.addAction(UIAlertAction(title: options.isEmpty && subtitles.isEmpty ? "OK" : "Zrušit", style: .cancel))
         present(sheet, animated: true)
     }
 }
@@ -356,16 +374,14 @@ struct TimelineBar: View {
     let timeline: TimelineController
 
     var body: some View {
-        if let window = timeline.timeline {
+        if let window = timeline.window {
             let position = timeline.displayPosition
             let duration = max(timeline.duration, 1)
             let now = Date()
             let playhead = timeline.time(at: position) ?? now
             let title = timeline.title(at: position)
-            let start = window.map.startTime ?? now
             let end = timeline.time(at: duration) ?? now
-            let edges = TimelineRules.edgeLabels(start: start, end: end, playhead: playhead, now: now,
-                                                 growing: !window.complete)
+            let edges = window.edgeLabels(end: end, playhead: playhead, now: now)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 18) {
                     if timeline.isPaused && timeline.trickBadge == nil {
@@ -382,7 +398,7 @@ struct TimelineBar: View {
                         .accessibilityIdentifier("timeline.message")
                 }
                 TimelineTrack(window: window, timeline: timeline, position: position, duration: duration,
-                              label: TimelineRules.label(playhead, now: now), badge: timeline.trickBadge)
+                              label: window.clockLabel(position: position, now: now), badge: timeline.trickBadge)
                 HStack {
                     Text(edges.start)
                     Spacer()
@@ -402,7 +418,7 @@ struct TimelineBar: View {
 
 /// The window on a wall-clock axis, so gaps in the recording show as empty stretches.
 private struct TimelineTrack: View {
-    let window: DVBTimeline
+    let window: BarWindow
     let timeline: TimelineController
     let position: Double
     let duration: Double
@@ -481,7 +497,7 @@ private struct TimelineTrack: View {
 
 /// The window's outline and recorded pieces (under the played part).
 private struct TimelineTrackBackground: View, Equatable {
-    let window: DVBTimeline
+    let window: BarWindow
     let last: Date
     let width: CGFloat
 
@@ -503,7 +519,7 @@ private struct TimelineTrackBackground: View, Equatable {
 
 /// Programme boundaries as ticks (over the played part).
 private struct TimelineTrackTicks: View, Equatable {
-    let window: DVBTimeline
+    let window: BarWindow
     let last: Date
     let width: CGFloat
 
@@ -528,7 +544,7 @@ private struct TrackAxis {
     let span: TimeInterval
     let width: CGFloat
 
-    init(window: DVBTimeline, last: Date, width: CGFloat) {
+    init(window: BarWindow, last: Date, width: CGFloat) {
         first = window.map.startTime ?? last
         span = max(1, last.timeIntervalSince(first))
         self.width = width

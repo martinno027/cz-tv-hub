@@ -133,11 +133,12 @@ class TimelineTest {
 
     @Test fun trickSpeeds() {
         val speeds = trick.getValue("speeds").jsonArray.map { it.jsonObject }
-        assertEquals(TimelineRules.TRICK_MAX_SPEED, speeds.size)
+        assertEquals(TimelineRules.TRICK_SPEEDS, speeds.map { it.num("speed").toInt() })
         speeds.forEach { assertEquals(it.num("rate"), TimelineRules.trickRate(it.num("speed").toInt()), 0.001) }
         // spec: 10 min back takes 10 s at speed 1 and 2.5 s at speed 4.
         assertEquals(10.0, 600 / TimelineRules.trickRate(1), 0.001)
         assertEquals(2.5, 600 / TimelineRules.trickRate(4), 0.001)
+        assertEquals(0.625, 600 / TimelineRules.trickRate(16), 0.001) // T62
     }
 
     @Test fun trick() {
@@ -467,6 +468,43 @@ class TimelineTest {
         assertNull(t.programmes[2].id)
         assertEquals("bnova1-1792810800-1792821600", t.previous)
         assertNull(t.next)
+    }
+
+    @Test fun barWindowDrawsTheAntennaWindowAsBefore() {
+        // T62: the Anténa window behind the shared bar keeps the T05 rules.
+        val t = parse(sample)
+        val bar = DvbBarWindow(t)
+        val now = Instant.parse("2026-10-24T19:00:00Z")
+        val frame = bar.frame(11400.0, BarClock(now), "Nova")
+        assertEquals("Zprávy", frame.title)
+        assertEquals("Nova · Ranní vydání", frame.subtitle)
+        assertEquals("Dnes 11:15:00", frame.clock)
+        assertEquals("8:00", frame.startLabel)
+        assertEquals("14:00", frame.endLabel)
+        assertEquals("the gap stays empty", listOf(
+            Instant.parse("2026-10-24T06:00:00Z").toEpochMilli() to Instant.parse("2026-10-24T09:00:00Z").toEpochMilli(),
+            Instant.parse("2026-10-24T09:05:00Z").toEpochMilli() to Instant.parse("2026-10-24T12:00:00.500Z").toEpochMilli(),
+        ), frame.pieces)
+        assertEquals(t.programmes.map { it.start.toEpochMilli() }, frame.ticks)
+        assertEquals(t.programmes[1].start.toEpochMilli() to t.programmes[1].end.toEpochMilli(), frame.highlight)
+        assertEquals("in a gap the channel", "Nova", DvbBarWindow(t.copy(programmes = emptyList())).frame(11400.0, BarClock(now), "Nova").title)
+        // Edges, clamps and jumps are the T05 ones; previous exists, next not.
+        val clock = BarClock(now)
+        assertEquals(TimelineEdge.PREVIOUS, bar.edge(-1.0, clock))
+        assertEquals(TimelineEdge.CLAMP, bar.edge(t.duration, clock))
+        assertEquals(TimelineEdge.SEEK, bar.edge(100.0, clock))
+        assertEquals(t.duration, bar.clamp(1e9, clock), 0.001)
+        assertEquals(TimelineRules.jumpTarget(t, 11400.0, up = true), bar.jumpTarget(11400.0, up = true, clock = clock))
+        // A growing window: the player's longer length counts, clamped 6 s before its live edge, the end is "Teď".
+        val growing = DvbBarWindow(t.copy(complete = false, previous = null))
+        val live = BarClock(Instant.parse("2026-10-24T12:10:00Z"), knownDuration = t.duration + 600)
+        assertEquals(t.duration + 600, growing.duration(live), 0.001)
+        assertEquals(t.duration + 594, growing.clamp(1e9, live), 0.001)
+        assertEquals(TimelineEdge.CLAMP, growing.edge(-1.0, live))
+        assertEquals("Teď", growing.frame(100.0, live, "Nova").endLabel)
+        val trick = TimelineTrick()
+        trick.media(forward = true, atMs = 0, from = t.duration + 590)
+        assertEquals(TimelineEdge.CLAMP, growing.movingEdge(trick, 1_000, live))
     }
 
     private fun mutated(edit: (JsonObject) -> Map<String, kotlinx.serialization.json.JsonElement>): String =

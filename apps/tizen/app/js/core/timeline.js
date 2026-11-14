@@ -14,9 +14,12 @@
   var NOW_EDGE_MS = 30 * 1000;
   var HOLD_FROM_S = 0.5; // released sooner = a click (±10 s)
   var CLICK_STEP_S = 10;
-  var TRICK_RATES = [60, 120, 180, 240]; // seconds of programme per second at speed 1–4 (T55)
+  var TRICK_SPEEDS = [1, 2, 3, 4, 8, 16]; // rewind / fast-forward speeds (T55; 8 and 16: T62)
+  var TRICK_SECONDS = 60; // seconds of programme per second at speed 1, times the speed
   var SEEK_ARRIVED_S = 3; // a fast seek lands on a keyframe up to ~2 s off
   var SEEK_SETTLE_MS = 10000; // both chosen (T55, as Android), not measured on a TV: how long AVPlay takes to land is unknown
+  var CT_BUFFER_GONE_MS = 60 * 1000; // T62: the oldest minute of ČT's buffer may already be gone from the CDN
+  var CT_LIVE_GUARD_MS = 10 * 1000; // T62: as the players' live-edge guard (and the VOD's end)
   // The gateway's continuous-recording id (server archive.py RECORDING_ID_RE). TVHeadend DVR ids are hex uuids,
   // which can start with "b" too, so the first letter alone is not enough.
   var RECORDING_ID = /^b[A-Za-z0-9_]{1,40}-\d{9,11}-\d{9,11}$/;
@@ -165,9 +168,9 @@
       return held < HOLD_FROM_S ? 'click' : 'hold';
     },
 
-    /** Seconds of programme per second at trick-play speed 1–4 (`trick.speeds`). */
+    /** Seconds of programme per second at a trick-play speed (`trick.speeds`: 1, 2, 3, 4, 8, 16). */
     trickRate: function (speed) {
-      return TRICK_RATES[Math.max(1, Math.min(TRICK_RATES.length, speed)) - 1];
+      return TRICK_SECONDS * Math.max(1, Math.min(TRICK_SPEEDS[TRICK_SPEEDS.length - 1], speed));
     },
 
     /** The bar's sign while moving: `◀◀` / `▶▶`, from speed 2 on with the number (`◀◀ 2`). */
@@ -176,16 +179,15 @@
     },
 
     /**
-     * Rewind / fast-forward (T55, golden `trick`): `state` null = stopped, else {direction: -1|1, speed: 1–4};
+     * Rewind / fast-forward (T55, golden `trick`): `state` null = stopped, else {direction: -1|1, speed: 1|2|3|4|8|16};
      * `event` {type: 'click' | 'hold' | 'ok' | 'back', direction} (a click = a press under 0.5 s, a hold = one held
      * from 0.5 s; ⏪/⏩ count as a hold); `barHidden` = the bar was hidden before this event. Returns {state, step
      * (s, a click while stopped; 0 when it only showed the hidden bar), seek: 'play-here' | 'return' | 'none'}.
-     * While moving a click or a hold on the same side = speed + 1 (at most 4), on the other side − 1, and from 1
-     * the other side turns round.
+     * While moving a click or a hold on the same side = the next speed (at most 16), on the other side the one
+     * before, and from 1 the other side turns round.
      */
     trick: function (state, event, barHidden) {
       var dir = event.direction < 0 ? -1 : 1;
-      var max = TRICK_RATES.length;
       if (!state) {
         if (event.type === 'click') return { state: null, step: barHidden ? 0 : dir * CLICK_STEP_S, seek: 'none' };
         if (event.type === 'hold') return { state: { direction: dir, speed: 1 }, step: 0, seek: 'none' };
@@ -194,8 +196,9 @@
       if (event.type === 'ok') return { state: null, step: 0, seek: 'play-here' };
       if (event.type === 'back') return { state: null, step: 0, seek: 'return' };
       var next;
-      if (dir === state.direction) next = { direction: dir, speed: Math.min(max, state.speed + 1) };
-      else if (state.speed > 1) next = { direction: state.direction, speed: state.speed - 1 };
+      var at = TRICK_SPEEDS.indexOf(state.speed);
+      if (dir === state.direction) next = { direction: dir, speed: TRICK_SPEEDS[Math.min(TRICK_SPEEDS.length - 1, at + 1)] };
+      else if (at > 0) next = { direction: state.direction, speed: TRICK_SPEEDS[at - 1] };
       else next = { direction: dir, speed: 1 };
       return { state: next, step: 0, seek: 'none' };
     },
@@ -278,6 +281,62 @@
       var origin = programme.start - START_MARGIN_MS;
       var to = CT.AdBreaks.skipTarget(breaks, (time - origin) / 1000);
       return to === null ? null : origin + to * 1000;
+    },
+
+    // -- ČT player bar (T62, spec/apps.md "ČT player bar", golden spec/fixtures/ct_bar_cases.json) -----------------
+
+    /**
+     * Which bar a resolved target plays with: 'timeline' (the Anténa timeline), 'timeshift' / 'vod' (ČT start-over
+     * and archive, T62), or null = the plain OSD (ČT and Anténa live, TVHeadend DVR recordings, the Chamber).
+     */
+    barMode: function (target) {
+      if (!target) return null;
+      if (target.kind === 'timeline') return 'timeline';
+      if (target.dvb || target.psp) return null;
+      return target.kind === 'timeshift' || target.kind === 'vod' ? target.kind : null;
+    },
+
+    CT_BUFFER_GONE_MS: CT_BUFFER_GONE_MS,
+    CT_LIVE_GUARD_MS: CT_LIVE_GUARD_MS,
+
+    /**
+     * The one window of a ČT playback (`window`): 'timeshift' = the buffer `now − 3 h` … `now`, growing (its start
+     * slides with now); 'vod' = `programmeStart` … `+ duration` (s), complete; a VOD without a known start has no
+     * wall clock (start/end null). Times epoch ms.
+     */
+    ctWindow: function (kind, now, programmeStart, duration) {
+      if (kind === 'timeshift') return { start: now - CT.Decisions.TIMESHIFT_WINDOW_MS, end: now, growing: true };
+      if (!num(programmeStart)) return { start: null, end: null, growing: false };
+      return { start: programmeStart, end: programmeStart + Math.round(duration * 1000), growing: false };
+    },
+
+    /**
+     * Where a seek or the moving playhead may go (`clamp`): timeshift targets are wall clocks (ms) inside
+     * [now − 3 h + 60 s, now − 10 s] (the oldest minute may be gone from the CDN; 10 s = the live-edge guard), VOD
+     * targets positions (s) inside [0, duration − 10]; an unknown duration (0) has no upper limit yet.
+     */
+    ctClamp: function (kind, now, target, duration) {
+      if (kind === 'timeshift') {
+        var low = now - CT.Decisions.TIMESHIFT_WINDOW_MS + CT_BUFFER_GONE_MS;
+        return Math.max(low, Math.min(now - CT_LIVE_GUARD_MS, target));
+      }
+      var high = duration > 0 ? Math.max(0, duration - CT_LIVE_GUARD_MS / 1000) : Infinity;
+      return Math.max(0, Math.min(high, target));
+    },
+
+    /** A VOD without a known start: the playhead's label = the elapsed position `H:MM:SS` (`0:12:34`). */
+    elapsedLabel: function (seconds) {
+      var s = Math.max(0, Math.floor(seconds));
+      var m = Math.floor(s / 60) % 60;
+      var sec = s % 60;
+      return Math.floor(s / 3600) + ':' + (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec;
+    },
+
+    /** …and the bar's ends: `0:00` and the duration `H:MM` (whole minutes, floored). */
+    elapsedEdges: function (duration) {
+      var minutes = Math.max(0, Math.floor(duration / 60));
+      var m = minutes % 60;
+      return { start: '0:00', end: Math.floor(minutes / 60) + ':' + (m < 10 ? '0' : '') + m };
     }
   };
 

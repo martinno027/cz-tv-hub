@@ -91,6 +91,7 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    the programme's end, and at least every minute). Without guide data for now: the channel name as before.
    Start-over, archive and recordings: the programme title, subtitle = channel name (+ episode title if any). Live: seek within the timeshift buffer when started from it.
    Archive: normal VOD seeking. Subtitles/audio tracks from the HLS manifest via native UI if cheap.
+   ČT start-over / "Zpět v čase" and archive use the own bar of "ČT player bar (T62)" instead of the native controls.
    **Audio choice for Anténa** (continuous recording, `spec/dvb-gateway.md`): a programme or live channel with several
    broadcast audio tracks comes as a master playlist with one `#EXT-X-MEDIA TYPE=AUDIO` rendition per track (Czech
    labels such as "Čeština", "Angličtina (Dolby)", "Čeština (pro nevidomé)"). The player starts with the default
@@ -182,8 +183,8 @@ A recorded Anténa programme of the continuous recording (`b…` id = matching
 uuids are hex and can start with `b`) (airing or ended) plays in a **window of its
 channel's recording** (`spec/dvb-gateway.md` "Channel timeline": programme ± 3 h, at most 12 h), not as the bare
 programme, so the viewer can go before the EPG start (EPG times are often off) and on into the neighbouring
-programmes, as far as the recording reaches. TVHeadend DVR recordings (uuid ids), ČT and live keep the native
-player as before; "Od začátku" of a growing DVR recording seeks to 0 explicitly (players start a growing playlist
+programmes, as far as the recording reaches. TVHeadend DVR recordings (uuid ids) and live keep the native
+player as before; ČT start-over and archive use the same bar (T62, "ČT player bar" below); "Od začátku" of a growing DVR recording seeks to 0 explicitly (players start a growing playlist
 at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
 - **Open**: `GET /dvb/timeline/<id>` (JSON), then play its `playlist` (accepted only as a gateway path: starts with
   `/`, not `//`; the key goes with every request). A failed JSON or playlist fetch for `previous`/`next` keeps the
@@ -217,10 +218,12 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
     smerem, kdyz jeste jednou klikne na danou stranu zacne se posouvat 2x rychleji a zobrazi se 2 … to same pro 4
     (maximalni rychlost), kdyz klikne zpet, tak se rychlost zase o jednu snizi, pripadne se zacne pretacet zpet …
     tak jak to standardne na televiznich aplikacich je")**: a press **held ≥ 0.5 s** starts moving the playhead in
-    that direction at **speed 1** (already while held; releasing keeps it moving, the hold adds nothing else); while it moves, a click on the **same side** = speed + 1 (at most
-    **4**), on the **other side** = speed − 1, and from speed 1 the other side turns it round (speed 1 the other
-    way). Speeds: 1 = 60 s of programme per second, 2 = 120, 3 = 180, 4 = 240 (`trick`; 10 min back: 10 s at 1,
-    2.5 s at 4). The bar shows `◀◀` / `▶▶` and, from 2 on, the number (`◀◀ 2`) next to the playhead's clock.
+    that direction at **speed 1** (already while held; releasing keeps it moving, the hold adds nothing else); while it moves, a click on the **same side** = the next speed (at most
+    **16**), on the **other side** = the speed before, and from speed 1 the other side turns it round (speed 1 the
+    other way). Speeds **1, 2, 3, 4, 8, 16** (8 and 16 added in T62, owner 2026-11-14: „pridej jeste rychlost 8x a
+    16x"), each 60 s of programme per second times the speed: 60, 120, 180, 240, 480, 960 (`trick`; 10 min back:
+    10 s at 1, 2.5 s at 4, 0.6 s at 16). The bar shows `◀◀` / `▶▶` and, from 2 on, the speed (`◀◀ 2`, `◀◀ 16`)
+    next to the playhead's clock.
     **OK / play-pause** = stop here and play from the playhead; **Back** = stop and return to where it started
     (playing); **▲ / ▼** = stop and jump as below. Reaching the start of the window (with `previous`) or its end
     (with `next`) continues in that window (edge rule); without one, or at a growing window's live edge, it stops
@@ -232,7 +235,7 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
     While it moves the video stays paused and its picture follows the playhead at most once a
     second with a fast seek where the player can (AVPlayer tolerance ±2 s, `video.fastSeek`; Android/AVPlay: the
     picture stays until the stop); on the stop one exact seek. ⏪ / ⏩ (media keys): a press = start (speed 1) /
-    speed + 1 in its direction / − 1 against it, as the clicks while moving. The playhead and clock move every frame
+    the next speed in its direction / the one before against it, as the clicks while moving. The playhead and clock move every frame
     (smooth, not in key-repeat steps); after the stop the bar shows the target until the player is within 3 s of it,
     at most 10 s. **Without a key-up** (remotes that only repeat): repeats lasting ≥ 0.5 s are a hold (the movement
     starts then); its end is noticed 0.8 s after the last repeat, and a new press after that is a new click. tvOS: clickpad left/right click = the same, a horizontal swipe on the touch surface
@@ -256,6 +259,61 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
   they now resume 30 s later (accepted).
 - Golden cases: `spec/fixtures/timeline_cases.json` (`map`, `edge`, `hold`, `trick`, `labels`, `edges`, `programmeAt`,
   `jump`, `resume`), tested in all three apps.
+
+## ČT player bar (T62)
+Owner 2026-11-14 (T62, after a recording of the ČT player: „rychlost 8x a 16x nefunguje"; asked whether the
+Anténa rewind should also go into the ČT player: „Ano, všude stejně"): **ČT start-over / "Zpět v čase"
+(`timeshift`) and the ČT archive (iVysílání VOD)** play with the **same own bar and keys as the Anténa timeline
+player** (above) in all three apps and the web, instead of the native controls. Unchanged (native controls / the
+Samsung OSD as before): ČT **Živě** (`main`, not seekable), Anténa live, TVHeadend DVR recordings and the Chamber
+of Deputies (live only, no rewind: hard rule). Nothing changes in which stream plays or how it is resolved (no
+recording, caching or proxying; redirect only, as before).
+- **One window per playback**, no `previous`/`next` (the edges clamp), no ad breaks:
+  - **timeshift**: the window is the buffer, **wall clock `now − 3 h` … `now`**, growing, its start sliding with
+    `now` (`ct_bar_cases.json` `window`). The playhead's wall clock comes from `#EXT-X-PROGRAM-DATE-TIME` where the
+    player has it (AVPlayer `currentDate()`, ExoPlayer `windowStartTimeMs`), else the platform's estimate already
+    used for start-over and "Pokračovat" (Android: `now − window duration + position`; Samsung and the web always:
+    buffer start = the moment of planning − 3 h). The bar's coordinates are wall clock, so the movement and the
+    clamps do not drift while the buffer slides. **`now` of the timeshift window is the end of the stream** (the
+    wall clock of the seekable range's end: measured on tvOS in T62, ČT's stream ended 184–207 s behind the real
+    clock in three readings, so a clamp at the real `now − 10 s` lay beyond what can play and a fast-forward seek
+    there never finished); the real clock only where the player knows no end. The `window`/`clamp` golden cases
+    use that `now`.
+  - **VOD**: wall clock = the programme's start (guide / archive `aired`) + position, window `start` …
+    `start + duration`, complete. Without a known start the labels are the **elapsed position** `H:MM:SS` (`0:12:34`)
+    and the bar's ends `0:00` and the duration (`ct_bar_cases.json` `labels`).
+- **Clamps** (`ct_bar_cases.json` `clamp`): every seek and the moving playhead stay inside **[window start + 60 s,
+  now − 10 s]** for timeshift (the oldest minute may already be gone from the CDN; 10 s = the existing live-edge
+  guard) and **[0, duration − 10 s]** for VOD. Reaching a clamp while moving stops there and plays (as a window
+  edge without a neighbour). The lower timeshift clamp slides with `now` also while the movement goes on. The
+  **start position** is clamped too (start-over of a programme that began almost 3 h ago starts at buffer start +
+  60 s), and a playhead that fell below the lower clamp during a pause seeks to it when playback resumes. A
+  ▼ target in the future (the programme airing now) clamps to the live edge. The end of a VOD behaves as before
+  on each platform (Samsung closes the player; tvOS and Android stay at the end, checked on tvOS in T62).
+- **Bar**: as the Anténa bar with one piece (no gaps): title = the programme at the playhead from the ČT guide of
+  that channel (timeshift; ticks at its programme boundaries) or the programme itself (VOD, no ticks); second line =
+  channel (· episode); the clock label and the ends as `labels`/`edges` above (timeshift right end = "Teď").
+- **Keys**: as the Anténa player — ← / → click ±10 s, held = rewind / fast-forward at speeds 1, 2, 3, 4, 8, 16
+  (`trick`), OK / play-pause, Back, ⏪ / ⏩, ▲ / ▼ = programme start / next programme (`jump`, from the ČT guide;
+  VOD: ▲ = start of the programme, ▼ nothing). No zapping and no digits (as before in these modes); Samsung's ▲ no
+  longer switches the audio track here (AUDIO/MTS, green and long OK do).
+- **Audio and subtitles**: long OK opens the list (as the Anténa player) with the audio renditions **and the
+  subtitles** of the stream: **"Titulky: Vypnuto"** and one item per subtitle rendition, **"Titulky: <name>"**
+  (its name, else its language in Czech) or, with neither, **"Titulky <n>"**; no subtitles in the stream = no subtitle items and the
+  list is titled "Zvuk" as before, with them "Zvuk a titulky". Subtitles **start off** on every platform (the web
+  turns off hls.js's default track); the choice holds across a re-resolve. The mute item as before. Samsung draws
+  the AVPlay subtitle text itself (above the bar while it is shown). The Anténa timeline player gets the same
+  subtitle items. ČT archive subtitle files outside the HLS stream (API `subtitles[].files`) are not used (open
+  item).
+- **Pokračovat** as before (`ct:<idec>`): the programme at the playhead with an `idec` is remembered, progress =
+  its wall clock − programme start (timeshift), the position (VOD). While the playhead is in the 30 s margin
+  before the opened programme's start, it counts as the opened programme (progress 0), so starting a programme
+  does not clear the previous one's "Pokračovat". Re-resolve after an error resumes at the
+  playhead's wall clock / position as before; a movement in progress ends there.
+- **Picture while moving**: as the Anténa player (AVPlayer and `video.fastSeek` follow at most once a second,
+  Android / AVPlay / Chrome keep the last picture until the stop).
+- Golden cases: `spec/fixtures/ct_bar_cases.json` (`window`, `clamp`, `labels`) plus the Anténa `trick`, `hold`,
+  `jump`, `labels`, `edges`, `programmeAt` cases, tested in all three apps.
 
 ## Programme page (T15)
 Selecting a programme in the **TV průvodce** opens a full-screen **page of that programme** instead of the

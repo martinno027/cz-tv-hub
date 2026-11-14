@@ -12,7 +12,8 @@ struct PlayerSession: Identifiable {
     let controller: PlayerController
     /// Live only: ▲/▼ and digits switch channels (spec/apps.md "Channel numbers and zapping").
     var zapper: ChannelZapper?
-    /// A `b…` recording in its channel's timeline (spec/apps.md "Anténa timeline player"): own bar and keys.
+    /// A `b…` recording in its channel's timeline (spec/apps.md "Anténa timeline player"), or ČT start-over / archive
+    /// ("ČT player bar", T62): own bar and keys.
     var timeline: TimelineController?
 }
 
@@ -379,9 +380,29 @@ final class AppModel {
         let watch = { (source: PlaybackSource) -> WatchStart? in
             WatchStart(.ct(channelID: watched.1?.id, playing: source.mode, idec: watched.0.idec, title: watched.0.title))
         }
-        open(resumeTarget: target, title: title, watch: watch) {
-            try await planner.resolve(request, resumeAt: resumeAt)
+        let resolve: @MainActor () async throws -> PlaybackSource = { try await planner.resolve(request, resumeAt: resumeAt) }
+        let schedules = schedules
+        // Start-over / timeshift and the archive play with the timeline bar (spec/apps.md "ČT player bar", T62).
+        let ctBar = { (source: PlaybackSource) -> TimelineController? in
+            guard CTBarRules.usesBar(source.mode) else { return nil }
+            let (programme, channel) = watched
+            var guide: (@Sendable () async -> [Programme])?
+            if let channel { guide = { await Self.guide(schedules, channel: channel) } }
+            return TimelineController(source: CTTimelineSource(mode: source.mode, programme: programme, channel: channel,
+                                                               card: card, resolve: resolve, guide: guide))
         }
+        open(resumeTarget: target, title: title, timeline: ctBar, watch: watch, resolve)
+    }
+
+    /// A ČT channel's programmes of today's and yesterday's broadcast day (the 3 h buffer can reach back over the
+    /// day's start); empty when neither loads.
+    private nonisolated static func guide(_ schedules: ScheduleStore, channel: Channel) async -> [Programme] {
+        let today = BroadcastDay(containing: Date())
+        var list: [Programme] = []
+        for day in [today.adding(days: -1), today] {
+            list += (try? await schedules.schedule(for: day))?[channel.slug] ?? []
+        }
+        return list
     }
 
     /// Offered "Pokračovat" position of a CT programme, if any.
@@ -503,15 +524,14 @@ final class AppModel {
     /// programme start − 30 s, "Pokračovat" at start + progress, through the window's map.
     private func playAntennaTimeline(id: String, event: DVBEvent, resumeAt: TimeInterval?, channelName: String?,
                                      card: ResumeCard?, client: DVBClient) {
-        let timeline = TimelineController(
+        let timeline = TimelineController(source: AntennaTimelineSource(
             client: client, programmeID: id,
             startTime: TimelineRules.startTime(programmeStart: event.start, resumeAt: resumeAt),
             channelName: channelName ?? event.title, firstCard: card
-        )
+        ))
         // the window as the gateway answered (its channel, the programme at the start); a later window is a new session
         let fallback = WatchStart(.dvb(.timeline, recordingID: id, channelID: event.channel, title: event.title))
-        open(progressAt: { [weak timeline] position in timeline?.progress(at: position) },
-             title: .programme(event.title, channel: channelName, episode: event.subtitle), timeline: timeline,
+        open(title: .programme(event.title, channel: channelName, episode: event.subtitle), timeline: { _ in timeline },
              watch: { [weak timeline] _ in timeline?.watchStart ?? fallback }) {
             try await timeline.resolve()
         }
@@ -522,10 +542,12 @@ final class AppModel {
         return PlaybackSource(url: url, title: title, mode: mode, headers: client.config.authorizationHeaders)
     }
 
+    /// `timeline` gives the resolved source its own bar and keys (Anténa windows, ČT start-over / archive); the bar
+    /// then decides what "Pokračovat" remembers (the programme at the playhead) instead of `resumeTarget`.
     private func open(adBreaks: (@Sendable () async throws -> [AdBreak])? = nil, resumeTarget: ResumeTarget? = nil,
-                      progressAt: (@MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)? = nil,
                       title: PlayerTitle? = nil, liveTitle: (@MainActor () async -> PlayerTitle)? = nil,
-                      timeline: TimelineController? = nil, offAir: (@MainActor () -> Void)? = nil,
+                      timeline makeTimeline: ((PlaybackSource) -> TimelineController?)? = nil,
+                      offAir: (@MainActor () -> Void)? = nil,
                       zapFrom channel: MixedChannel? = nil, watch watchStart: ((PlaybackSource) -> WatchStart?)? = nil,
                       _ resolve: @escaping @MainActor () async throws -> PlaybackSource) {
         guard !isResolving else {
@@ -543,9 +565,14 @@ final class AppModel {
             do {
                 let source = try await resolve()
                 log.info("resolved \(source.title, privacy: .public) mode=\(String(describing: source.mode), privacy: .public) host=\(source.url.host() ?? "", privacy: .public)")
+                let timeline = makeTimeline?(source)
+                var progressAt: (store: ResumeStore, at: @MainActor (Double) -> (target: ResumeTarget, progress: TimeInterval)?)?
+                if let timeline {
+                    progressAt = (resume, { [weak timeline] position in timeline?.progress(at: position) })
+                }
                 let controller = PlayerController(source: source, resolve: resolve, adBreaks: adBreaks,
-                                                  progress: resumeTarget.map { ($0, resume) },
-                                                  progressAt: progressAt.map { (resume, $0) },
+                                                  progress: timeline == nil ? resumeTarget.map { ($0, resume) } : nil,
+                                                  progressAt: progressAt,
                                                   title: title, liveTitle: liveTitle, offAir: offAir, mute: mute,
                                                   watch: watch, watchStart: watchStart?(source))
                 controller.onFatalError = { [weak self] message in self?.closePlayer(showing: message) }

@@ -46,12 +46,14 @@ test('hold: a press under 0.5 s is a click of 10 s', () => {
   assert.equal(T.HOLD_MS, 500);
 });
 
-test('trick (T55): speeds 1–4 are 60/120/180/240 s of programme per second', () => {
+test('trick (T55, T62): speeds 1, 2, 3, 4, 8, 16 are 60 s of programme per second times the speed', () => {
+  assert.deepEqual(cases.trick.speeds.map((s) => s.speed), [1, 2, 3, 4, 8, 16]);
   for (const s of cases.trick.speeds) assert.equal(T.trickRate(s.speed), s.rate, 'speed ' + s.speed);
   // spec: 10 min back takes 10 s at speed 1, 2.5 s at 4
   assert.equal(T.trickPosition(1000, -1, 1, 10000), 400);
   assert.equal(T.trickPosition(1000, -1, 4, 2500), 400);
   assert.equal(T.trickPosition(1000, 1, 2, 500), 1060);
+  assert.equal(T.trickPosition(1000, -1, 16, 625), 400); // T62: 10 min in 0.6 s at 16
 });
 
 /** "click L" → {type: 'click', direction: -1}; "ok" → {type: 'ok'}. */
