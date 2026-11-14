@@ -271,15 +271,21 @@ recording, caching or proxying; redirect only, as before).
 - **One window per playback**, no `previous`/`next` (the edges clamp), no ad breaks:
   - **timeshift**: the window is the buffer, **wall clock `now − 3 h` … `now`**, growing, its start sliding with
     `now` (`ct_bar_cases.json` `window`). The playhead's wall clock comes from `#EXT-X-PROGRAM-DATE-TIME` where the
-    player has it (AVPlayer `currentDate()`, ExoPlayer `windowStartTimeMs`), else the estimate already used for
-    start-over and "Pokračovat" (buffer start = the moment of planning − 3 h; Samsung and the web always).
+    player has it (AVPlayer `currentDate()`, ExoPlayer `windowStartTimeMs`), else the platform's estimate already
+    used for start-over and "Pokračovat" (Android: `now − window duration + position`; Samsung and the web always:
+    buffer start = the moment of planning − 3 h). The bar's coordinates are wall clock, so the movement and the
+    clamps do not drift while the buffer slides.
   - **VOD**: wall clock = the programme's start (guide / archive `aired`) + position, window `start` …
     `start + duration`, complete. Without a known start the labels are the **elapsed position** `H:MM:SS` (`0:12:34`)
     and the bar's ends `0:00` and the duration (`ct_bar_cases.json` `labels`).
 - **Clamps** (`ct_bar_cases.json` `clamp`): every seek and the moving playhead stay inside **[window start + 60 s,
   now − 10 s]** for timeshift (the oldest minute may already be gone from the CDN; 10 s = the existing live-edge
   guard) and **[0, duration − 10 s]** for VOD. Reaching a clamp while moving stops there and plays (as a window
-  edge without a neighbour). The lower timeshift clamp slides with `now` also while the movement goes on.
+  edge without a neighbour). The lower timeshift clamp slides with `now` also while the movement goes on. The
+  **start position** is clamped too (start-over of a programme that began almost 3 h ago starts at buffer start +
+  60 s), and a playhead that fell below the lower clamp during a pause seeks to it when playback resumes. A
+  ▼ target in the future (the programme airing now) clamps to the live edge. The end of a VOD closes the player
+  as before.
 - **Bar**: as the Anténa bar with one piece (no gaps): title = the programme at the playhead from the ČT guide of
   that channel (timeshift; ticks at its programme boundaries) or the programme itself (VOD, no ticks); second line =
   channel (· episode); the clock label and the ends as `labels`/`edges` above (timeshift right end = "Teď").
@@ -288,10 +294,17 @@ recording, caching or proxying; redirect only, as before).
   VOD: ▲ = start of the programme, ▼ nothing). No zapping and no digits (as before in these modes); Samsung's ▲ no
   longer switches the audio track here (AUDIO/MTS, green and long OK do).
 - **Audio and subtitles**: long OK opens the list (as the Anténa player) with the audio renditions **and the
-  subtitles** ("Titulky: Vypnuto" + the stream's subtitle renditions, by their names; no subtitles in the stream =
-  no subtitle items), the mute item as before. The Anténa timeline player gets the same subtitle items.
+  subtitles** of the stream: **"Titulky: Vypnuto"** and one **"Titulky: <name>"** per subtitle rendition (its
+  name, else its language in Czech, else "Titulky <n>"); no subtitles in the stream = no subtitle items and the
+  list is titled "Zvuk" as before, with them "Zvuk a titulky". Subtitles **start off** on every platform (the web
+  turns off hls.js's default track); the choice holds across a re-resolve. The mute item as before. Samsung draws
+  the AVPlay subtitle text itself (above the bar while it is shown). The Anténa timeline player gets the same
+  subtitle items. ČT archive subtitle files outside the HLS stream (API `subtitles[].files`) are not used (open
+  item).
 - **Pokračovat** as before (`ct:<idec>`): the programme at the playhead with an `idec` is remembered, progress =
-  its wall clock − programme start (timeshift), the position (VOD). Re-resolve after an error resumes at the
+  its wall clock − programme start (timeshift), the position (VOD). While the playhead is in the 30 s margin
+  before the opened programme's start, it counts as the opened programme (progress 0), so starting a programme
+  does not clear the previous one's "Pokračovat". Re-resolve after an error resumes at the
   playhead's wall clock / position as before; a movement in progress ends there.
 - **Picture while moving**: as the Anténa player (AVPlayer and `video.fastSeek` follow at most once a second,
   Android / AVPlay / Chrome keep the last picture until the stop).
