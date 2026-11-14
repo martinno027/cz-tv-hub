@@ -197,6 +197,18 @@ class CtClientTest(unittest.TestCase):
         self.assertIsNone(ac.parse_episode({"id": "1 2", "title": "x"}))
         self.assertIsNone(ac._iso("2026-04-08T08:35:00"))  # no zone: not guessed
 
+    def test_episode_named_by_its_topics_when_cz_names_it_by_date(self):
+        """T56: ČT names news and magazine episodes only by their date; golden archive_cases.json "episodeTitles"."""
+        for case in GOLDEN["episodeTitles"]:
+            self.assertEqual(ac.episode_name(case["title"], case["description"]), case["name"], case)
+            self.assertLessEqual(len(ac.episode_name(case["title"], case["description"])), ac.EPISODE_NAME_MAX)
+        episode = ac.parse_episode({"id": "123", "title": "29.\u00a0října", "description": "Volba prezidenta",
+                                    "date": {"datetime": "2026-10-29T20:35:00.000Z"}})
+        self.assertEqual((episode["title"], episode["description"]), ("Volba prezidenta", "Volba prezidenta"))
+        named = ac.parse_episode({"id": "124", "title": "Virus II", "description": "Odkud se vzal virus."})
+        self.assertEqual(named["title"], "Virus II")
+        self.assertNotEqual(episode["title"], "29.\u00a0října")
+
     def test_post_as_api_py_with_a_size_cap(self):
         sent = []
 
