@@ -1524,6 +1524,28 @@ main {
   border-top: 2px solid var(--surface-hi);
 }
 
+/* AVPlay's subtitle text (T62): AVPlay hands it to the app, which draws it; above the bar's place */
+#subtitles {
+  position: absolute;
+  left: 160px;
+  right: 160px;
+  bottom: 120px;
+  text-align: center;
+  font-size: 44px;
+  line-height: 58px;
+  white-space: pre-line;
+  text-shadow: 0 0 6px #000, 0 2px 4px #000;
+  pointer-events: none;
+}
+
+#subtitles:empty {
+  display: none;
+}
+
+#osd.visible ~ #subtitles {
+  bottom: 360px;
+}
+
 /* "Přeskočit reklamu" (spec/ad-breaks.md): bottom right, above the OSD */
 #skip-ad {
   position: absolute;

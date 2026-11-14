@@ -24,16 +24,18 @@
 
   /**
    * The player's key hint on the web (the keyboard, not the remote): the audio part only when the stream has
-   * several audio tracks. `kind` = 'live' | 'other' | 'timeline' (player.js).
+   * several audio tracks, in the timeline / ČT bar also when it has subtitles (`subtitles` = their count, T62: the
+   * long-Enter list offers them). `kind` = 'live' | 'other' | 'timeline' (player.js).
    */
-  function hint(kind, tracks) {
+  function hint(kind, tracks, subtitles) {
     var audio = tracks > 1;
     if (kind === 'live') {
       return 'Mezerník pauza · ▲ ▼ kanál · 0–9 číslo kanálu · ' + (audio ? 'A zvuk · ' : '') + MUTE_HINT + END_HINT;
     }
     if (kind === 'timeline') {
+      var list = subtitles > 0 ? (audio ? 'zvuk a titulky' : 'titulky') : audio ? 'zvuk' : '';
       return 'Mezerník pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · ' +
-        (audio ? 'A nebo podržet Enter zvuk · ' : '') + MUTE_HINT + END_HINT;
+        (list ? 'A nebo podržet Enter ' + list + ' · ' : '') + MUTE_HINT + END_HINT;
     }
     return 'Mezerník pauza · ◀ ▶ posun o 10 s · ' + (audio ? '▲ zvuk · ' : '') + MUTE_HINT + END_HINT;
   }
@@ -41,12 +43,15 @@
   /** The tracks of what plays now (none before the stream is ready). */
   function playerHint(kind, player) {
     var tracks = 0;
+    var subtitles = 0;
     try {
       tracks = player.target ? player.backend.audioTracks().length : 0;
+      subtitles = player.target && player.backend.subtitleTracks ? player.backend.subtitleTracks().length : 0;
     } catch (e) {
       tracks = 0;
+      subtitles = 0;
     }
-    return hint(kind, tracks);
+    return hint(kind, tracks, subtitles);
   }
 
   /** Before the app starts: the links and buttons in the Samsung markup, the player's hint. */

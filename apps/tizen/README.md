@@ -86,6 +86,9 @@ zvolený den; nic se nepřehrává. Přenosy Poslanecké sněmovny jsou v ukázc
 nenačte pro žádný den: řádky ČT v průvodci a karty ČT na Živě říkají „Program se nepodařilo načíst“. Ovládání: šipky, Enter, Esc/Backspace = Zpět, PageUp/PageDown = o stránku řádků.
 `?demo&timeline` rovnou otevře lištu anténní nahrávky nad `spec/fixtures/dvb/dvb_timeline.json` (přehrávání jen
 simulované, poloha běží s hodinami), `?demo&timeline=growing` totéž pro ještě rostoucí okno („Teď“).
+`?demo&ctbar=startover` otevře „Od začátku“ na ČT1 s lištou ČT (T62), `?demo&ctbar=vod` / `?demo&ctbar=vodnostart`
+pořad z archivu se známým / bez známého začátku vysílání (archiv pak odpovídá `vod_ok.json`, ČT1 dostane vymyšlené
+odpolední pořady); přehrávání je simulované, s dvěma ukázkovými titulky.
 Nastavení → Profil mluví v ukázce s vymyšlenou bránou v paměti (profil **Demo**, heslo **1234**); po obnovení
 stránky brána profily zapomene, takže přihlášená ukázka projde odhlášením (401). `?demo&profile=offline` = čtení
 a ukládání profilu selže jako při nedostupné bráně (stav „Čeká na uložení“).

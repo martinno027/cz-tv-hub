@@ -38,6 +38,7 @@ require('../app/js/ui/platform.js');
 require('../app/js/ui/keys.js');
 require('../app/js/ui/zap.js');
 require('../app/js/ui/timeline.js');
+require('../app/js/ui/ct-bar.js');
 require('../app/js/ui/player.js');
 CT.Demo = { enabled: false };
 

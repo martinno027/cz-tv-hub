@@ -54,10 +54,69 @@
     return el;
   }
 
-  /** `player` = the CT.Player that owns the backend, the OSD and the "Přeskočit reklamu" button. */
-  function TimelineController(player) {
+  /**
+   * Where the windows of the Anténa timeline come from (the gateway): its JSON, the neighbouring windows, a growing
+   * window's refresh, ad breaks, "Pokračovat" under `dvb:<id>`. The ČT player bar (ui/ct-bar.js, T62) has its own
+   * source with the same methods.
+   */
+  function AntennaSource(player) {
+    this.player = player;
+    this.kind = 'dvb';
+    this.mode = 'timeline';
+  }
+
+  /** The tick runs while the player plays this source's target. */
+  AntennaSource.prototype.owns = function (target) {
+    return !!target && target.kind === 'timeline';
+  };
+
+  /** The window of a target the planner resolved. */
+  AntennaSource.prototype.window = function (target) {
+    return target.timeline;
+  };
+
+  /** The neighbouring window `id`, continuing at the wall clock `time`. */
+  AntennaSource.prototype.openWindow = function (id, time) {
+    return this.player.app.planner.timelineWindow(id, this.player.request.title, time);
+  };
+
+  AntennaSource.prototype.errorText = function (e) {
+    return e && e.userMessage ? e.userMessage : CT.DvbMessages.GENERIC;
+  };
+
+  /** A growing window's JSON again (null = nothing to fetch). */
+  AntennaSource.prototype.refresh = function (tl) {
+    return this.player.target.dvb.timeline(tl.id);
+  };
+
+  AntennaSource.prototype.breaks = function (id) {
+    return this.player.target.dvb.breaks(id);
+  };
+
+  /**
+   * "Pokračovat" of the programme at the playhead; the Archiv row gets the request's title and image when that is
+   * the programme that was opened, else the neighbour's own title and thumbnail path.
+   */
+  AntennaSource.prototype.save = function (store, request, programme, time) {
+    if (!programme || !programme.id) return;
+    var meta = request && request.recordingId === programme.id && request.resumeMeta ? request.resumeMeta
+      : CT.ResumeRules.meta(programme.title, programme.subtitle, CT.Thumbs.path(programme.id), 'dvb');
+    store.save('dvb:' + programme.id, T.progress(programme, time), (programme.end - programme.start) / 1000, meta);
+  };
+
+  /** Where to continue after re-resolving: this window (or the one opening), same wall clock. */
+  AntennaSource.prototype.continueAt = function (id, time) {
+    return { id: id, time: time };
+  };
+
+  /**
+   * `player` = the CT.Player that owns the backend, the OSD and the "Přeskočit reklamu" button; `source` = where the
+   * windows come from (default: the Anténa timeline of the gateway).
+   */
+  function TimelineController(player, source) {
     var self = this;
     this.player = player;
+    this.source = source || new AntennaSource(player);
     this.tl = null;
     this.press = null; // {key, dir, startedAt, lastAt, acted, timer, holdTimer}: ◀/▶/⏪/⏩ down
     this.trick = null; // {direction, speed, base (s), since, from: {id, position, time}, frame, previewAt}: moving
@@ -71,7 +130,8 @@
     this.ended = false;
     this.breaks = {}; // programme id → {at, list}
     this.refreshedAt = 0;
-    this.audioList = null; // {tracks, items, note, focus} (CT.Mute.choice)
+    this.audioList = null; // {tracks, subtitles, items, note, focus} (CT.Mute.choice)
+    if (this.source.attach) this.source.attach(this);
     this.timer = setInterval(function () { self.tick(); }, TICK_MS);
   }
 
@@ -110,6 +170,7 @@
     this.pending = null;
     this.refreshedAt = Date.now();
     if (changed) this.breaks = {};
+    this.sync();
     $('osd').classList.add('timeline');
     this.buildBar();
     this.render();
@@ -117,6 +178,27 @@
 
   TimelineController.prototype.backend = function () {
     return this.player.backend;
+  };
+
+  /** The source moves its window with the clock (the ČT buffer slides with now; Anténa: nothing). */
+  TimelineController.prototype.sync = function () {
+    if (this.tl && this.source.update) this.source.update(this.tl, Date.now());
+  };
+
+  /** Extra bounds (s) of seeks and of the moving playhead (the ČT clamps, T62), or null. */
+  TimelineController.prototype.range = function () {
+    return this.source.range ? this.source.range(this.tl, Date.now()) : null;
+  };
+
+  TimelineController.prototype.inRange = function (target) {
+    var r = this.range();
+    return r ? Math.max(r.lo, Math.min(r.hi, target)) : target;
+  };
+
+  /** The playhead (s) as the player should continue at it: a movement's point (clamped), else what the bar shows. */
+  TimelineController.prototype.playheadPosition = function () {
+    if (this.trick) return this.inRange(this.trickAt(Date.now()));
+    return this.shownPosition();
   };
 
   /** Seconds of the window; a growing one also as far as the player already sees. */
@@ -153,6 +235,7 @@
   /** Wall clock a seek target leads to: past an end with a neighbouring window it runs on, else the edge. */
   TimelineController.prototype.targetTime = function (target) {
     var tl = this.tl;
+    target = this.inRange(target);
     var where = T.edge(target, this.duration(), tl.complete, !!tl.previous, !!tl.next);
     if (where === 'previous' || where === 'next') return T.extrapolate(tl.pieces, target);
     return this.timeOf(Math.min(this.duration(), Math.max(0, target)));
@@ -389,11 +472,17 @@
     var self = this;
     if (this.trick !== tr) return;
     var now = Date.now();
+    this.sync();
     if (this.switching !== null) {
       tr.since = now; // waits at the switch: base is rebased in setWindow
     } else {
       var position = this.trickAt(now);
       var tl = this.tl;
+      var r = this.range(); // the ČT clamps (T62): reached while moving = stop there and play; the lower one slides
+      if (r && (position < r.lo && tr.direction < 0 || position > r.hi && tr.direction > 0)) {
+        this.finishAt(position < r.lo ? r.lo : r.hi);
+        return;
+      }
       var where = T.edge(position, this.duration(), tl.complete, !!tl.previous, !!tl.next);
       if (where === 'previous' || where === 'next') {
         tr.base = position;
@@ -462,6 +551,12 @@
       this.reopen(this.position());
       return;
     }
+    // the ČT buffer slid past a paused playhead: playing again starts at the lower clamp (T62)
+    var r = this.range();
+    if (r && this.backend().paused() && this.shownPosition() < r.lo) {
+      this.seekTo(r.lo, this.targetTime(r.lo), true);
+      return;
+    }
     this.backend().togglePause();
     this.render();
   };
@@ -505,6 +600,7 @@
     }
     if (this.switching !== null) return; // one switch at a time
     var tl = this.tl;
+    target = this.inRange(target);
     var duration = this.duration();
     switch (inside ? 'clamp' : T.edge(target, duration, tl.complete, !!tl.previous, !!tl.next)) {
       case 'previous':
@@ -546,14 +642,14 @@
     this.switching = time;
     this.switchingId = id;
     this.render();
-    player.app.planner.timelineWindow(id, player.request.title, time).then(function (target) {
+    this.source.openWindow(id, time).then(function (target) {
       if (token !== player.loadToken || player.tl !== self) return;
       player.switchTarget(target);
     }, function (e) {
       if (token !== player.loadToken || player.tl !== self) return;
       self.switching = null;
       self.switchingId = null;
-      $('osd-state').textContent = e && e.userMessage ? e.userMessage : CT.DvbMessages.GENERIC;
+      $('osd-state').textContent = self.source.errorText(e);
       // moving into a window that did not open: it stops inside this window at that edge and plays there (not
       // through the edge rule again, which would ask for the same window at once)
       if (self.trick) self.finishAt(self.trick.base < 0 ? 0 : self.duration() - END_SLACK_S, true);
@@ -563,6 +659,10 @@
 
   /** Playback reached the end of the window: the next one, if any, else stay at the end. */
   TimelineController.prototype.onEnded = function () {
+    if (this.source.closesAtEnd) {
+      this.player.close(); // ČT: the end of the stream closes the player as before
+      return;
+    }
     if (this.switching !== null) return;
     var tl = this.tl;
     var end = T.duration(tl.pieces);
@@ -576,12 +676,19 @@
 
   // -- audio list (long OK) ------------------------------------------------------------------------------------
 
-  /** The "Zvuk" choice: the tracks (several only) and „Vypnout zvuk"/„Zapnout zvuk" (spec/apps.md "Mute (T34)"). */
+  /**
+   * The "Zvuk" choice: the tracks (several only), the subtitles (T62, when the stream has any) and „Vypnout
+   * zvuk"/„Zapnout zvuk" (spec/apps.md "Mute (T34)").
+   */
   TimelineController.prototype.openAudioList = function () {
-    var tracks = this.backend().audioTracks();
-    var current = this.backend().currentAudio();
-    var choice = CT.Mute.choice(tracks, current, this.player.mute.muted);
-    this.audioList = { tracks: tracks, items: choice.items, note: choice.note, focus: choice.focus };
+    var b = this.backend();
+    var tracks = b.audioTracks();
+    var current = b.currentAudio();
+    var subtitles = b.subtitleTracks ? b.subtitleTracks() : [];
+    var shown = b.currentSubtitle ? b.currentSubtitle() : -1;
+    var choice = CT.Mute.choice(tracks, current, this.player.mute.muted, subtitles, shown);
+    this.audioList = { tracks: tracks, subtitles: subtitles, items: choice.items, note: choice.note, focus: choice.focus };
+    $('audio-list-title').textContent = subtitles.length ? 'Zvuk a titulky' : 'Zvuk';
     this.renderAudioList();
     $('audio-list').classList.add('visible');
   };
@@ -621,6 +728,12 @@
         var item = list.items[list.focus];
         if (item.kind === 'mute') {
           this.player.toggleMute();
+        } else if (item.kind === 'subtitle') {
+          var track = item.position < 0 ? null : list.subtitles[item.position];
+          if (this.backend().selectSubtitle(track ? track.index : -1)) {
+            $('osd-state').textContent = item.label;
+            if (this.player.chooseSubtitle) this.player.chooseSubtitle(track); // holds across a re-resolve
+          }
         } else if (this.backend().selectAudio(list.tracks[item.position].index)) {
           $('osd-state').textContent = CT.AudioTracks.osd(list.tracks, item.position);
         }
@@ -686,6 +799,8 @@
 
   TimelineController.prototype.render = function () {
     if (!this.tl) return;
+    this.sync();
+    var tl = this.tl;
     var player = this.player;
     var playhead = this.playheadTime();
     var a = this.axis(playhead);
@@ -693,8 +808,12 @@
     var pct = function (t) { return Math.max(0, Math.min(100, (t - a.start) / (a.end - a.start || 1) * 100)); };
     var now = Date.now();
     var programme = this.programmeAt(playhead);
-    var channel = player.channelName();
-    var t = programme ? CT.PlayerTitle.programme(programme.title, channel, programme.subtitle) : { title: channel, subtitle: '' };
+    var channel = tl.channelName || player.channelName();
+    var t;
+    if (programme) t = CT.PlayerTitle.programme(programme.title, channel, programme.subtitle);
+    // no programmes known (the ČT guide not there): what was opened, as the plain OSD said
+    else if (!tl.programmes.length && tl.fallback) t = CT.PlayerTitle.programme(tl.fallback.title, channel, tl.fallback.subtitle);
+    else t = { title: channel, subtitle: '' };
     setText($('osd-title'), t.title);
     setText($('osd-subtitle'), t.subtitle);
 
@@ -702,7 +821,8 @@
     $('tl-played').style.width = at + '%';
     $('tl-head').style.left = at + '%';
     var label = $('tl-label');
-    setText($('tl-clock'), T.label(playhead, now));
+    // a ČT VOD without a known start: the elapsed position (T62)
+    setText($('tl-clock'), tl.elapsed ? T.elapsedLabel((playhead - a.span.start) / 1000) : T.label(playhead, now));
     var tr = this.trick;
     var badge = $('tl-trick');
     setText(badge, tr ? T.trickBadge(tr.direction, tr.speed) : '');
@@ -719,7 +839,8 @@
     } else {
       highlight.style.display = 'none';
     }
-    var ends = T.edgeLabels(a.span.start, a.span.end, playhead, now, !this.tl.complete);
+    var ends = tl.elapsed ? T.elapsedEdges((a.span.end - a.span.start) / 1000)
+      : T.edgeLabels(a.span.start, a.span.end, playhead, now, !tl.complete);
     setText($('tl-start'), ends.start);
     setText($('tl-end'), ends.end);
     var text = this.switching !== null ? 'Načítání…' : this.ended ? 'Konec nahrávky' :
@@ -735,7 +856,8 @@
 
   TimelineController.prototype.tick = function () {
     var player = this.player;
-    if (!this.tl || !player.isOpen() || !player.target || player.target.kind !== 'timeline') return;
+    if (!this.tl || !player.isOpen() || !this.source.owns(player.target)) return;
+    if (this.source.tick) this.source.tick(this.tl, Date.now());
     var tl = this.tl;
     var position = this.position();
     if (tl.complete && tl.next && !this.ended && this.switching === null && position >= T.duration(tl.pieces) - END_SLACK_S) {
@@ -751,9 +873,10 @@
   TimelineController.prototype.refresh = function () {
     var self = this;
     var tl = this.tl;
-    var dvb = this.player.target.dvb;
     this.refreshedAt = Date.now();
-    dvb.timeline(tl.id).then(function (fresh) {
+    var fetched = this.source.refresh(tl);
+    if (!fetched) return;
+    fetched.then(function (fresh) {
       if (self.tl !== tl || self.switching !== null) return;
       self.tl = fresh;
       self.buildBar();
@@ -774,33 +897,29 @@
     var cached = this.breaks[programme.id];
     if (!cached || Date.now() - cached.at >= BREAKS_REFRESH_MS) {
       var entry = this.breaks[programme.id] = { at: Date.now(), list: cached ? cached.list : [] };
-      this.player.target.dvb.breaks(programme.id).then(function (list) { entry.list = list; }, function () {});
+      this.source.breaks(programme.id).then(function (list) { entry.list = list; }, function () {});
       cached = entry;
     }
     var to = T.skipTime(programme, cached.list, time);
     this.player.setSkip(to === null ? null : T.toPosition(this.tl.pieces, to));
   };
 
-  /** "Pokračovat": the programme at the playhead (with an id), seconds from its start. */
-  /**
-   * "Pokračovat" of the programme at the playhead; the Archiv row gets the request's title and image when that is
-   * the programme that was opened, else the neighbour's own title and thumbnail path.
-   */
+  /** "Pokračovat": the programme at what plays (the source decides under which key and how far). */
   TimelineController.prototype.saveProgress = function (store, request) {
     var time = this.playingTime();
-    var programme = time === null ? null : this.programmeAt(time);
-    if (!programme || !programme.id) return;
-    var meta = request && request.recordingId === programme.id && request.resumeMeta ? request.resumeMeta
-      : CT.ResumeRules.meta(programme.title, programme.subtitle, CT.Thumbs.path(programme.id), 'dvb');
-    store.save('dvb:' + programme.id, T.progress(programme, time), (programme.end - programme.start) / 1000, meta);
+    if (time !== null) this.source.save(store, request, this.programmeAt(time), time, this.position());
   };
 
-  /** Where to continue after re-resolving or coming back from the background: this window, same wall clock. */
+  /**
+   * Where to continue after re-resolving or coming back from the background: this window, same wall clock (the
+   * Anténa timeline; null = the player's own position, the ČT bar).
+   */
   TimelineController.prototype.continueAt = function () {
     if (!this.tl) return null;
-    if (this.switching !== null) return { id: this.switchingId, time: this.switching };
-    return { id: this.tl.id, time: this.timeOf(this.shownPosition()) }; // a seek on its way counts as done
+    if (this.switching !== null) return this.source.continueAt(this.switchingId, this.switching);
+    return this.source.continueAt(this.tl.id, this.timeOf(this.shownPosition())); // a seek on its way counts as done
   };
 
   CT.TimelineController = TimelineController;
+  CT.TimelineAntennaSource = AntennaSource;
 })(window);
