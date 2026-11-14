@@ -12,13 +12,17 @@ private let playerLog = Logger(subsystem: "cz.cztvhub.tv", category: "player")
 /// Programmes and recordings save their progress for "Pokračovat" (never live).
 @MainActor
 final class PlayerController {
-    private enum Resume {
+    /// Where a reload after a failure goes on: a wall clock (timeshift) or a position.
+    enum Resume {
         case date(Date)
         case seconds(Double)
     }
 
     let player = AVPlayer()
     var onFatalError: ((String) -> Void)?
+    /// The timeline player's playhead for a reload after a failure (ČT bar, T62: the moving playhead, a wall clock
+    /// also without `PROGRAM-DATE-TIME`); nil from it = the player's own position.
+    var resumeOverride: (@MainActor () -> Resume?)?
 
     private var resolve: @MainActor () async throws -> PlaybackSource
     private var source: PlaybackSource
@@ -69,6 +73,11 @@ final class PlayerController {
     var isStartApplied: Bool { positionApplied }
     /// Audio renditions of the current item (gateway master playlists with several broadcast tracks).
     private var audioGroup: AVMediaSelectionGroup?
+    /// Subtitle renditions of the current item (the timeline player's long-OK list, T62).
+    private var legibleGroup: AVMediaSelectionGroup?
+    /// The timeline player: subtitles start off, also after a reload, until the viewer picks one in its list.
+    var subtitlesStartOff = false
+    private var pickedSubtitle: AVMediaSelectionOption??
     /// The app's one mute state (spec/apps.md "Mute (T34)"); this player takes it on creation.
     let mute: PlayerMute?
     /// Watch reports to the gateway (spec/dvb-gateway.md "Watch log (T53)"): `start` when this player starts, `stop`
@@ -175,6 +184,7 @@ final class PlayerController {
         backgroundObserver = nil
         positionApplied = false
         audioGroup = nil
+        legibleGroup = nil
         statusObservation = nil
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         failureObserver = nil
@@ -376,6 +386,8 @@ final class PlayerController {
                             await self.applyStartPosition(item, source: source, resume: resume)
                             if self.player.currentItem === item { self.positionApplied = true }
                             self.player.play()
+                            // Only the timeline player's own list reads them: not on the way to the first picture.
+                            Task { await self.loadSubtitleOptions(item) }
                             await self.keepRecordingStart(item)
                         }
                     case .failed:
@@ -426,7 +438,10 @@ final class PlayerController {
         case (.recording, .seconds(let seconds)?):
             await seekRecording(item, to: seconds)
         case (.startOver, .date(let date)?):
-            await seek(item, to: date, fallbackOffset: nil)
+            // Without dates in the stream: as far after the buffer's oldest point as the date is (T62: the ČT bar
+            // resumes by an estimated wall clock).
+            let offset = max(0, date.timeIntervalSince(Date().addingTimeInterval(-DecisionRules.timeshiftWindow)))
+            await seek(item, to: date, fallbackOffset: offset)
         case (.startOver(let date, let offset), _):
             await seek(item, to: date, fallbackOffset: offset)
         case (.vod, _):
@@ -510,7 +525,7 @@ final class PlayerController {
             return
         }
         hasRetried = true
-        let resume = currentResume()
+        let resume = resumeOverride?() ?? currentResume()
         keepSelectedAudio()
         Task {
             do {
@@ -559,10 +574,34 @@ final class PlayerController {
         return (group.options, item.currentMediaSelection.selectedMediaOption(in: group))
     }
 
+    /// The subtitle renditions of the current item with the selected one (nil = off); none in the stream = empty.
+    var subtitleChoices: (options: [AVMediaSelectionOption], selected: AVMediaSelectionOption?) {
+        guard let group = legibleGroup, let item = player.currentItem else { return ([], nil) }
+        return (group.options, item.currentMediaSelection.selectedMediaOption(in: group))
+    }
+
+    /// A subtitle rendition, or off (nil).
+    func selectSubtitle(_ option: AVMediaSelectionOption?) {
+        guard let group = legibleGroup, let item = player.currentItem else { return }
+        if option == nil, !group.allowsEmptySelection {
+            playerLog.error("subtitles cannot be switched off in this stream")
+            return
+        }
+        item.select(option, in: group)
+        pickedSubtitle = .some(option)
+        playerLog.info("subtitles \(option?.displayName ?? "off", privacy: .public)")
+    }
+
     func selectAudio(_ option: AVMediaSelectionOption) {
         guard let group = audioGroup, let item = player.currentItem else { return }
         item.select(option, in: group)
         playerLog.info("audio selected \(option.displayName, privacy: .public)")
+    }
+
+    /// The rendition's NAME from the playlist, nil without one.
+    static func renditionName(_ option: AVMediaSelectionOption) -> String? {
+        AVMetadataItem.metadataItems(from: option.commonMetadata, filteredByIdentifier: .commonIdentifierTitle)
+            .first?.stringValue
     }
 
     static func audioTitle(_ option: AVMediaSelectionOption) -> String {
@@ -590,6 +629,21 @@ final class PlayerController {
         }.joined(separator: ", ")
         let selected = item.currentMediaSelection.selectedMediaOption(in: group)?.displayName ?? "-"
         playerLog.info("audio options: \(names, privacy: .public); selected \(selected, privacy: .public)")
+    }
+
+    private func loadSubtitleOptions(_ item: AVPlayerItem) async {
+        legibleGroup = nil
+        guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible),
+              player.currentItem === item else { return }
+        legibleGroup = group
+        if subtitlesStartOff {
+            // Off at the start; after a reload the viewer's pick again (by language: a new item has new options).
+            let picked = pickedSubtitle.flatMap { $0 }
+            let again = picked.flatMap { old in group.options.first { $0.extendedLanguageTag == old.extendedLanguageTag } }
+            if again != nil || group.allowsEmptySelection { item.select(again, in: group) }
+        }
+        let names = group.options.map { "\($0.displayName) [\($0.extendedLanguageTag ?? "-")]" }.joined(separator: ", ")
+        playerLog.info("subtitle options: \(names, privacy: .public)")
     }
 
     /// Before a reload: the new item should start on the track the viewer was listening to.

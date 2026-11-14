@@ -6,15 +6,17 @@ import os
 
 private let timelineLog = Logger(subsystem: "cz.cztvhub.tv", category: "timeline")
 
-/// "Anténa timeline player" (spec/apps.md): a `b…` programme plays inside a window of its channel's recording.
-/// Owns the window (`/dvb/timeline/<id>`), maps player positions to wall clock, seeks (clicks, held keys, swipes,
-/// ▲/▼ jumps), opens the previous/next window at the edges, re-fetches a growing window every 60 s, offers
-/// "Přeskočit reklamu" for the programme at the playhead and tells the player what to remember for "Pokračovat".
-/// The `PlayerController` keeps loading, re-resolving after failures, diagnostics and audio.
+/// The timeline player (spec/apps.md "Anténa timeline player", T05, and "ČT player bar", T62): the own bar and keys
+/// over a window of a `TimelineWindowSource` (an Anténa window of the channel's recording, or the one window of a ČT
+/// start-over / archive playback). Maps player positions to wall clock through the window, seeks (clicks, held keys,
+/// swipes, ▲/▼ jumps), keeps ČT seeks inside the window's limits, opens the previous/next Anténa window at the edges,
+/// offers "Přeskočit reklamu" for the programme at the playhead and tells the player what to remember for
+/// "Pokračovat". The `PlayerController` keeps loading, re-resolving after failures, diagnostics and audio.
 @MainActor
 @Observable
 final class TimelineController {
-    private(set) var timeline: DVBTimeline?
+    /// The window the bar shows; nil until the source knows it (ČT: once the stream is ready).
+    private(set) var window: BarWindow?
     /// The player's position, refreshed while the bar is on screen.
     private(set) var position: Double = 0
     /// A seek being chosen (rewind / fast-forward moving, a swipe): the playhead and its label follow it, the video
@@ -30,14 +32,9 @@ final class TimelineController {
     private(set) var message: String?
     let channelName: String
 
-    @ObservationIgnored private let client: DVBClient
-    /// What the Archiv row shows for the programme the player was opened for (its show's title and image).
-    @ObservationIgnored private let firstCard: ResumeCard?
+    @ObservationIgnored private let source: TimelineWindowSource
     @ObservationIgnored private weak var controller: PlayerController?
     @ObservationIgnored private var player: AVPlayer? { controller?.player }
-    /// Wall clock the next resolve starts at (the programme start − 30 s, "Pokračovat", or a window hand-off).
-    @ObservationIgnored private var startTime: Date
-    @ObservationIgnored private var firstID: String
     /// A seek on its way: the playhead stays there until the player has arrived. Observed like `position`:
     /// while it is set the bar does not read `position`, so clearing it must redraw the bar.
     private var pendingSeek: Double?
@@ -51,7 +48,6 @@ final class TimelineController {
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var rateObservation: NSKeyValueObservation?
     @ObservationIgnored private var hideTask: Task<Void, Never>?
-    @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var breaksTask: Task<Void, Never>?
     @ObservationIgnored private var breaksProgrammeID: String?
     @ObservationIgnored private var windowBreaks: [AdBreak] = []
@@ -75,42 +71,53 @@ final class TimelineController {
     /// A full swipe across the touch surface scrubs about this far.
     static let swipeSeconds: Double = 600
 
-    init(client: DVBClient, programmeID: String, startTime: Date, channelName: String, firstCard: ResumeCard? = nil) {
-        self.client = client
-        self.firstCard = firstCard
-        self.firstID = programmeID
-        self.startTime = startTime
-        self.channelName = channelName
+    init(source: TimelineWindowSource) {
+        self.source = source
+        self.channelName = source.channelName
+        source.onChange = { [weak self] in self?.refreshWindow() }
     }
 
     // MARK: resolving
 
-    /// Fetches the window's JSON and prepares its playlist; the source starts at `startTime` mapped into the window.
-    /// Also the player's re-resolve after a failure (same window, it then resumes at its own position).
+    /// The source's stream (Anténa: the window's JSON and playlist, starting where it was asked to). Also the player's
+    /// re-resolve after a failure.
     func resolve() async throws -> PlaybackSource {
-        let window = try await client.timeline(id: timeline?.id ?? firstID)
-        let source = try await source(for: window)
-        apply(window)
-        return source
+        let next = try await source.resolve()
+        refreshWindow()
+        return next
     }
 
-    private func source(for window: DVBTimeline) async throws -> PlaybackSource {
-        let url = client.timelinePlaylistURL(window)
-        try await client.preparePlaylist(url)
-        let start = window.map.position(at: startTime)
-        timelineLog.info("window \(window.id, privacy: .public) pieces=\(window.map.pieces.count) duration=\(window.map.duration, format: .fixed(precision: 1)) complete=\(window.complete) start=\(start, format: .fixed(precision: 1))")
-        return .antennaRecording(url: url, title: channelName, headers: client.config.authorizationHeaders, resumeAt: start)
-    }
-
-    private func apply(_ window: DVBTimeline) {
-        timeline = window
-        if !window.complete { startRefreshing() }
+    /// The source's window with the player as it is now; redraws only when it changed.
+    private func refreshWindow() {
+        let next = source.window(item: player?.currentItem, now: Date())
+        if next != window { window = next }
     }
 
     // MARK: lifecycle
 
     func attach(_ controller: PlayerController) {
         self.controller = controller
+        // A re-resolve after a failure resumes at the playhead where the source says so (ČT); a movement ends there.
+        controller.resumeOverride = { [weak self] in self?.resumeForReload() }
+        // The own list offers subtitles; they start off (T62, all platforms alike).
+        controller.subtitlesStartOff = true
+        refreshWindow()
+    }
+
+    private func resumeForReload() -> PlayerController.Resume? {
+        guard let window else { return nil }
+        let here = trickPosition(at: CACurrentMediaTime())
+        guard let resume = source.resume(at: here, in: window) else { return nil }
+        if trick.isMoving {
+            timelineLog.info("trick stopped: the stream is resolved again")
+            _ = trick.interrupt()
+            trickBadge = nil
+            scrubPosition = nil
+            pressDown = false
+        }
+        clearPendingSeek()
+        position = here
+        return resume
     }
 
     func start() {
@@ -148,15 +155,16 @@ final class TimelineController {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
         rateObservation = nil
-        [hideTask, refreshTask, breaksTask].forEach { $0?.cancel() }
+        [hideTask, breaksTask].forEach { $0?.cancel() }
+        source.stop()
     }
 
     // MARK: what the bar shows
 
     /// Length of the window: what the JSON lists, or more while a growing window is ahead of the last fetch.
     var duration: Double {
-        let listed = timeline?.map.duration ?? 0
-        guard timeline?.complete == false, let range = player?.currentItem?.seekableTimeRanges.last?.timeRangeValue else {
+        let listed = window?.map.duration ?? 0
+        guard window?.complete == false, let range = player?.currentItem?.seekableTimeRanges.last?.timeRangeValue else {
             return listed
         }
         return max(listed, CMTimeRangeGetEnd(range).seconds.isFinite ? CMTimeRangeGetEnd(range).seconds : 0)
@@ -164,20 +172,15 @@ final class TimelineController {
 
     var displayPosition: Double { scrubPosition ?? pendingSeek ?? position }
 
-    func time(at position: Double) -> Date? { timeline?.map.time(at: position) }
+    func time(at position: Double) -> Date? { window?.map.time(at: position) }
 
-    /// The watch report of the window now playing (spec/dvb-gateway.md "Watch log (T53)"): its id and channel, the
-    /// programme at the start time.
-    var watchStart: WatchStart? {
-        guard let timeline else { return nil }
-        let title = TimelineRules.programmeAt(startTime, in: timeline.programmes).map { timeline.programmes[$0].title }
-        return WatchStart(.dvb(.timeline, recordingID: timeline.id, channelID: timeline.channel, title: title))
-    }
+    /// The watch report of the window now playing (spec/dvb-gateway.md "Watch log (T53)"); nil = the player's own.
+    var watchStart: WatchStart? { source.watchStart }
 
     func programme(at position: Double) -> DVBTimeline.Programme? {
-        guard let timeline, let time = timeline.map.time(at: position),
-              let index = TimelineRules.programmeAt(time, in: timeline.programmes) else { return nil }
-        return timeline.programmes[index]
+        guard let window, let time = window.map.time(at: position),
+              let index = TimelineRules.programmeAt(time, in: window.programmes) else { return nil }
+        return window.programmes[index]
     }
 
     /// Title = the programme at the playhead (in a gap the channel), second line channel · episode.
@@ -188,26 +191,26 @@ final class TimelineController {
 
     /// "Pokračovat": the programme at the playhead (with an id) and the seconds since its start.
     func progress(at position: Double) -> (target: ResumeTarget, progress: TimeInterval)? {
-        guard let programme = programme(at: position), let id = programme.id, let time = time(at: position) else { return nil }
-        // the opened programme with what the archive showed, the neighbours with their own title and still
-        let card = firstCard != nil && id == firstID ? firstCard : .programme(
-            title: programme.title, episode: programme.subtitle,
-            image: ArchiveImage.thumbnail(recordingID: id).stored, source: .dvb, start: programme.start,
-            channel: channelName)
-        let target = ResumeTarget(key: ResumeRules.dvbKey(recordingID: id), programmeStart: programme.start,
-                                  length: programme.length, card: card)
-        return (target, TimelineRules.resumeProgress(time: time, programmeStart: programme.start))
+        guard let window else { return nil }
+        return source.progress(at: position, in: window)
     }
 
     private func tick(_ seconds: Double) {
         // Before the start position is applied the new item still reports 0.
         guard seconds.isFinite, !stopped, controller?.isStartApplied == true else { return }
+        currentPosition = seconds
+        refreshWindow()
         if !playbackStarted {
             // "Shown at the start": the 5 s count from the first picture, not from the screen opening.
             playbackStarted = true
             showBar()
+            // A ČT window's start position is kept inside its limits too (start-over of a programme that began near
+            // the buffer's start: not in the oldest minute).
+            if let window, let range = window.positionLimits(now: Date()), !range.contains(seconds) {
+                timelineLog.info("start position \(seconds, format: .fixed(precision: 1)) outside the limits")
+                seek(to: window.clamped(seconds, now: Date()), kind: .jump)
+            }
         }
-        currentPosition = seconds
         if barVisible || scrubPosition != nil { position = seconds }
         if let target = pendingSeek, let since = pendingSince,
            !TimelineRules.showsSeekTarget(target, position: seconds, elapsed: Date().timeIntervalSince(since)) {
@@ -247,7 +250,16 @@ final class TimelineController {
     func togglePlay() {
         if trickOK() { return }
         guard let player else { return }
-        if player.timeControlStatus == .paused { player.play() } else { player.pause() }
+        if player.timeControlStatus == .paused {
+            // A timeshift playhead left below the lower clamp by a long pause goes to the clamp first.
+            if let window, let range = window.positionLimits(now: Date()), displayPosition < range.lowerBound {
+                timelineLog.info("resume below the lower clamp: to \(range.lowerBound, format: .fixed(precision: 1))")
+                seek(to: range.lowerBound, kind: .jump)
+            }
+            player.play()
+        } else {
+            player.pause()
+        }
         showBar()
     }
 
@@ -316,16 +328,14 @@ final class TimelineController {
             pressDown = false
             handle(action, at: now)
         }
-        guard trick.isMoving, !switching, let timeline, let target = trick.position(at: now) else { return }
+        guard trick.isMoving, !switching, let window, let target = trick.position(at: now) else { return }
         trickFrames += 1
-        let duration = duration
-        switch TimelineRules.edge(target: target, duration: duration, complete: timeline.complete,
-                                  hasPrevious: timeline.previous != nil, hasNext: timeline.next != nil) {
+        switch edge(target, in: window) {
         case .seek:
             break
         case .clamp:
-            // No neighbour, or a growing window's live edge: stop there and play.
-            timelineLog.info("trick reached the window's \(target < 0 ? "start" : "end", privacy: .public)")
+            // No neighbour, a growing window's live edge, a ČT limit: stop there and play.
+            timelineLog.info("trick reached the window's \(self.trick.direction < 0 ? "start" : "end", privacy: .public)")
             finishTrick(trick.interrupt(.playHere), at: target)
             return
         case .previous, .next:
@@ -373,7 +383,7 @@ final class TimelineController {
             followSeeks = 0
             followAt = nil
             trickOriginTime = trick.origin.flatMap { time(at: $0) }
-            trickOriginWindow = timeline?.id
+            trickOriginWindow = window?.id
             clearPendingSeek()
             player?.pause()
             trickBadge = trick.badge
@@ -403,11 +413,11 @@ final class TimelineController {
         case .playHere:
             seek(to: here, kind: .trick)
         case .return:
-            if let id = trickOriginWindow, id != timeline?.id, let time = trickOriginTime {
+            if let id = trickOriginWindow, id != window?.id, let time = trickOriginTime {
                 // Crossed into another window: open the one it started in, at the start position.
                 openWindow(id, at: time)
             } else {
-                let back = trickOriginTime.flatMap { timeline?.map.unclampedPosition(at: $0) } ?? trick.origin ?? here
+                let back = trickOriginTime.flatMap { window?.map.unclampedPosition(at: $0) } ?? trick.origin ?? here
                 seek(to: back, kind: .trick)
             }
         case .none:
@@ -420,7 +430,8 @@ final class TimelineController {
 
     /// While a swipe moves: the playhead moves, nothing is seeked yet. No redraw when nothing changed.
     func scrub(from base: Double, offset: Double) {
-        let target = min(max(base + offset, -1), duration + 1)
+        let range = window?.positionLimits(now: Date()) ?? -1...(duration + 1)
+        let target = min(max(base + offset, range.lowerBound), range.upperBound)
         if !barVisible { showBar() }
         if target != scrubPosition { scrubPosition = target }
     }
@@ -453,8 +464,8 @@ final class TimelineController {
             stoppedAt = here
         }
         defer { if stoppedAt != nil { scrubPosition = nil } }
-        guard let timeline, let target = TimelineRules.jumpTarget(from: displayPosition, direction, map: timeline.map,
-                                                                  programmes: timeline.programmes) else {
+        guard let window, let target = TimelineRules.jumpTarget(from: displayPosition, direction, map: window.map,
+                                                                programmes: window.programmes) else {
             timelineLog.info("jump \(direction.rawValue, privacy: .public): nothing there")
             if let stoppedAt { seek(to: stoppedAt, kind: .trick) }
             return
@@ -475,34 +486,42 @@ final class TimelineController {
     /// `kind` decides the tolerance (spec/apps.md "Fast seek"): a scrub lands on the nearest keyframe within ±2 s,
     /// a click, a jump and "Přeskočit reklamu" exactly.
     func seek(to target: Double, kind: TimelineRules.SeekKind) {
-        guard let timeline, !switching else { return }
+        guard let window, !switching else { return }
         let duration = duration
-        switch TimelineRules.edge(target: target, duration: duration, complete: timeline.complete,
-                                  hasPrevious: timeline.previous != nil, hasNext: timeline.next != nil) {
+        switch edge(target, in: window) {
         case .seek:
             seekPlayer(to: target, tolerance: TimelineRules.seekTolerance(kind))
         case .clamp:
             // The end of a finished window stops just before it (exactly: a tolerance could land past the end);
-            // a growing one goes to its live edge.
-            if target < 0 {
+            // a growing one goes to its live edge; a ČT window to its limit.
+            if window.positionLimits(now: Date()) != nil {
+                seekPlayer(to: window.clamped(target, now: Date()), tolerance: 0)
+            } else if target < 0 {
                 seekPlayer(to: 0, tolerance: 0)
             } else {
-                seekPlayer(to: max(0, duration - (timeline.complete ? 1 : 0)), tolerance: 0)
+                seekPlayer(to: max(0, duration - (window.complete ? 1 : 0)), tolerance: 0)
             }
         case .previous:
-            if let id = timeline.previous, let first = timeline.map.startTime {
+            if let id = window.previous, let first = window.map.startTime {
                 // The playhead waits at the window's start (the map clamps) while the neighbour loads.
                 pendingSeek = target
                 pendingSince = nil
                 openWindow(id, at: first.addingTimeInterval(target))
             }
         case .next:
-            if let id = timeline.next, let last = timeline.map.endTime {
+            if let id = window.next, let last = window.map.endTime {
                 pendingSeek = target
                 pendingSince = nil
-                openWindow(id, at: last.addingTimeInterval(max(0, target - timeline.map.duration)))
+                openWindow(id, at: last.addingTimeInterval(max(0, target - window.map.duration)))
             }
         }
+    }
+
+    /// The edge rule of an Anténa window; a ČT window (T62) has limits instead (clamp outside them, sliding with now).
+    private func edge(_ target: Double, in window: BarWindow) -> TimelineRules.Edge {
+        if let range = window.positionLimits(now: Date()) { return range.contains(target) ? .seek : .clamp }
+        return TimelineRules.edge(target: target, duration: duration, complete: window.complete,
+                                  hasPrevious: window.previous != nil, hasNext: window.next != nil)
     }
 
     private func seekPlayer(to target: Double, tolerance: Double) {
@@ -551,9 +570,11 @@ final class TimelineController {
     }
 
     private func reachedEnd() {
-        guard let timeline, !trick.isMoving else { return }
-        timelineLog.info("window \(timeline.id, privacy: .public) played to its end")
-        if timeline.complete, timeline.next != nil { seek(to: timeline.map.duration, kind: .jump) } else { showBar() }
+        guard let window, !trick.isMoving else { return }
+        timelineLog.info("window \(window.id, privacy: .public) played to its end")
+        // A ČT archive item stays at its end with the bar, as the native player stayed on its last picture before
+        // T62 (checked in the simulator 2026-11-14: AVPlayerViewController did not close).
+        if window.complete, window.next != nil { seek(to: window.map.duration, kind: .jump) } else { showBar() }
     }
 
     /// Opens `id`'s window and continues at `time` there. One switch at a time; the bar stays on screen.
@@ -569,22 +590,12 @@ final class TimelineController {
             defer { switching = false; scheduleHide() }
             do {
                 message = nil
-                let window = try await client.timeline(id: id)
-                let previousStart = startTime
-                startTime = time
-                let next: PlaybackSource
-                do {
-                    next = try await source(for: window)
-                } catch {
-                    startTime = previousStart
-                    throw error
-                }
+                let next = try await source.openNeighbour(id, at: time)
                 guard !stopped else { return }
-                refreshTask?.cancel()
                 breaksProgrammeID = nil
                 windowBreaks = []
                 skipTarget = nil
-                apply(window)
+                refreshWindow()
                 let start = next.startPosition ?? 0
                 pendingSeek = start
                 pendingSince = nil
@@ -630,26 +641,6 @@ final class TimelineController {
         }
     }
 
-    // MARK: growing window
-
-    private func startRefreshing() {
-        refreshTask?.cancel()
-        refreshTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(DVBTimeline.refreshInterval))
-                guard let self, !Task.isCancelled, let id = self.timeline?.id else { return }
-                do {
-                    let window = try await self.client.timeline(id: id)
-                    guard !Task.isCancelled, window.id == self.timeline?.id else { return }
-                    self.timeline = window
-                    if window.complete { return }
-                } catch {
-                    timelineLog.info("refresh failed: \(String(describing: error), privacy: .public)")
-                }
-            }
-        }
-    }
-
     // MARK: "Přeskočit reklamu"
 
     /// Breaks of the programme at the playhead (finished, with an id and stored breaks), fetched when it changes
@@ -672,8 +663,8 @@ final class TimelineController {
             while !Task.isCancelled {
                 guard let self else { return }
                 do {
-                    let breaks = try await self.client.adBreaks(recordingID: id)
-                    guard !Task.isCancelled, let map = self.timeline?.map else { return }
+                    let breaks = try await self.source.adBreaks(programmeID: id)
+                    guard !Task.isCancelled, let map = self.window?.map else { return }
                     self.windowBreaks = TimelineRules.windowBreaks(breaks, programmeStart: programmeStart, map: map)
                     timelineLog.info("ad breaks of \(id, privacy: .public): \(breaks.count)")
                 } catch {
