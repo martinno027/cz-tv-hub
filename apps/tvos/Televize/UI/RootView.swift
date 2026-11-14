@@ -2,10 +2,11 @@ import CTCore
 import SwiftUI
 
 struct RootView: View {
-    enum Tab: Hashable { case live, guide, archive, settings }
+    enum Tab: Hashable { case home, live, guide, archive, settings }
 
     @Environment(AppModel.self) private var model
-    @State private var tab: Tab = .live
+    /// Every start opens Domů (spec/apps.md "Domů"); back from the player the tab stays.
+    @State private var tab: Tab = .home
     /// Every open of the guide (its tab chosen, the app back in front on it) shows now again (spec/apps.md).
     @State private var guideOpens = 0
     /// Every open of Archiv starts its menu afresh (spec/apps.md "Archiv"); the show page and the player keep it.
@@ -19,6 +20,9 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $tab) {
+            HomeView { tab = .live }
+                .tabItem { Text("Domů") }
+                .tag(Tab.home)
             LiveView()
                 .tabItem { Text("Živě") }
                 .tag(Tab.live)
@@ -44,15 +48,15 @@ struct RootView: View {
             // its connections may have died while suspended (spec/apps.md "Back in front (T18)")
             if phase == .active { Task { await model.tailnet.checkBridge() } }
         }
-        // Digits on Živě and the guide start that channel live (spec/apps.md "Number keys").
+        // Digits on Domů, Živě and the guide start that channel live (spec/apps.md "Number keys").
         .onKeyPress(characters: .decimalDigits, phases: .down) { press in
-            guard tab == .live || tab == .guide, model.session == nil, let digit = Int(press.characters) else { return .ignored }
+            guard [.home, .live, .guide].contains(tab), model.session == nil, let digit = Int(press.characters) else { return .ignored }
             model.numberEntry.type(digit, count: model.visibleChannels.count)
             return .handled
         }
         .clockTopRight()
         .overlay(alignment: .topTrailing) {
-            if tab == .live || tab == .guide { NumberEntryBadge(entry: model.numberEntry) }
+            if [.home, .live, .guide].contains(tab) { NumberEntryBadge(entry: model.numberEntry) }
         }
         // Household default and profile read at start (pending profile changes sent first), failed sends again every 60 s.
         .task { await model.runProfileSync() }
@@ -91,6 +95,8 @@ struct RootView: View {
                 }
             }
             switch arguments.string(forKey: "tab") {
+            case "home": tab = .home
+            case "live": tab = .live
             case "guide": tab = .guide
             case "archive": tab = .archive
             case "settings": tab = .settings

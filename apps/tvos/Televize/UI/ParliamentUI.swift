@@ -42,10 +42,3 @@ extension View {
         modifier(ParliamentWatch(streams: streams))
     }
 }
-
-extension MixedChannel {
-    var parliamentStream: PSPStream? {
-        if case .parliament(let stream) = self { return stream }
-        return nil
-    }
-}
