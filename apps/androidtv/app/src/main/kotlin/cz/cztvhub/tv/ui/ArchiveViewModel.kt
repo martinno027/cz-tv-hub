@@ -85,8 +85,11 @@ class ArchiveViewModel(application: Application) : AndroidViewModel(application)
     private val grids = GridLoader(viewModelScope)
     val grid: StateFlow<ArchiveGrid> = grids.grid
 
-    /** "Pokračovat ve sledování", read from this TV's resume entries. */
-    private val _continueRow = MutableStateFlow<List<ContinueItem>>(emptyList())
+    /**
+     * "Pokračovat ve sledování", read from this TV's resume entries; also Domů's "Pokračovat", so read at once (Domů's
+     * first focus goes to it).
+     */
+    private val _continueRow = MutableStateFlow(app.resume.continueRow())
     val continueRow: StateFlow<List<ContinueItem>> = _continueRow.asStateFlow()
 
     private val _query = MutableStateFlow("")

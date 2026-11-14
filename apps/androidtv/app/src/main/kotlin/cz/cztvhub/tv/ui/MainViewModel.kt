@@ -54,6 +54,12 @@ data class DvbState(
     val error: String? = null,
     /** The gateway allows programme thumbnails (`/dvb/status`). */
     val thumbnails: Boolean = false,
+    /** The last `/dvb/status` failed: Domů says "Brána antény není dostupná." (T58). */
+    val statusFailed: Boolean = false,
+    /** That failure was a `401` (the key was refused): Domů points to Nastavení → Server instead (T58). */
+    val statusRejected: Boolean = false,
+    /** `/dvb/status` says continuous recording stopped for lack of disk space (T58). */
+    val recordingPaused: Boolean = false,
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -164,8 +170,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun pspState(streamId: String): PspState = _psp.value[streamId] ?: PspState.UNKNOWN
 
     /**
-     * Checks the visible streams one after another, each at most once a minute (spec/apps.md). Called only by Živě
-     * and the guide while they are on screen and the app is visible; cancelling it stops all checks.
+     * Checks the visible streams one after another, each at most once a minute (spec/apps.md). Called only by Domů,
+     * Živě and the guide while they are on screen and the app is visible; cancelling it stops all checks.
      */
     suspend fun pollPsp() {
         while (true) {
@@ -205,8 +211,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The Živě screen grabs focus only on first display. */
-    var initialFocusDone = false
+    /** Domů's first card takes the focus once, at app start (spec/apps.md "Domů"). */
+    var homeInitialFocusDone = false
+
+    /** The Domů card that opened the player: it gets the focus back when the app returns (null = none). */
+    var homePlayedCard: String? = null
+
+    /** Domů's "Další kanály" opened Živě: its first card takes the focus. */
+    var focusLiveFirstCard = false
 
     private var dayJob: Job? = null
 
@@ -260,16 +272,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val repo = app.dvb() ?: return
         viewModelScope.launch {
             val state = withContext(Dispatchers.IO) {
-                try {
-                    val thumbnails = try {
-                        repo.status().thumbnails
-                    } catch (_: CtException) {
-                        _dvb.value?.thumbnails ?: false
-                    }
-                    DvbState(repo.channels(), repo.onAir(Instant.now()), thumbnails = thumbnails)
+                var rejected = false
+                val status = try {
+                    repo.status()
                 } catch (e: CtException) {
-                    DvbState(_dvb.value?.channels.orEmpty(), _dvb.value?.onAir.orEmpty(), e.userMessage,
-                        _dvb.value?.thumbnails ?: false)
+                    rejected = e.status == "401"
+                    null
+                }
+                val thumbnails = status?.thumbnails ?: _dvb.value?.thumbnails ?: false
+                val paused = status?.recordingPaused ?: false
+                try {
+                    DvbState(repo.channels(), repo.onAir(Instant.now()), thumbnails = thumbnails,
+                        statusFailed = status == null, statusRejected = rejected, recordingPaused = paused)
+                } catch (e: CtException) {
+                    DvbState(_dvb.value?.channels.orEmpty(), _dvb.value?.onAir.orEmpty(), e.userMessage, thumbnails,
+                        statusFailed = status == null, statusRejected = rejected, recordingPaused = paused)
                 }
             }
             if (app.dvb() === repo) _dvb.value = state
@@ -313,7 +330,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * While Živě ([live]) or the guide is on screen and the app is visible (spec/apps.md, T42): a ČT day showing
+     * While Domů or Živě ([live]) or the guide is on screen and the app is visible (spec/apps.md, T42): a ČT day showing
      * "Program se nepodařilo načíst" there is asked again until it loads, every 30 s for the first 5 minutes of the
      * outage, then every 2 minutes; a success replaces the failure text in the guide and on Živě. Cancelling stops it.
      */
@@ -327,7 +344,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The ČT days whose failure text Živě's cards or the guide's grid show now. */
+    /** The ČT days whose failure text the channel cards (Domů, Živě) or the guide's grid show now. */
     private fun failedOnScreen(live: Boolean): List<LocalDate> =
         if (live) {
             listOfNotNull(Days.openDay(Instant.now()).takeIf { _onAir.value is Load.Failed })

@@ -1,6 +1,7 @@
 package cz.cztvhub.tv.ui
 
 import android.view.KeyEvent
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,22 +55,17 @@ import java.time.Instant
 @Composable
 fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: PlayWithCard) {
     val play: (PlayRequest) -> Unit = remember(onPlay) { { onPlay(it, null) } }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    // Every start opens Domů; back from the player keeps the tab (spec/apps.md "Domů").
+    var tab by rememberSaveable { mutableStateOf(MainTab.HOME) }
     // An open Nastavení section is full screen: no tab row (spec/apps.md).
     var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
-    val tabs = listOf(
-        stringResource(R.string.tab_live),
-        stringResource(R.string.tab_guide),
-        stringResource(R.string.tab_archive),
-        stringResource(R.string.tab_settings),
-    )
 
     val numbers = rememberNumberKeys(viewModel, play)
     val notice by viewModel.notice.collectAsStateWithLifecycle()
 
     CompositionLocalProvider(LocalContentColor provides Palette.text) {
-    // Number keys zap on Živě and the guide only (the archive's search field takes digits).
-    Box(Modifier.fillMaxSize().onPreviewKeyEvent { tab <= 1 && numbers.onKey(it.nativeKeyEvent) }) {
+    // Number keys zap on Domů, Živě and the guide only (the archive's search field takes digits).
+    Box(Modifier.fillMaxSize().onPreviewKeyEvent { tab.numberKeys && numbers.onKey(it.nativeKeyEvent) }) {
     Column(
         Modifier
             .fillMaxSize()
@@ -78,7 +74,7 @@ fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
     ) {
         // The tab row, or an open section's title in its place; the clock stays top right on both (spec/apps.md
         // "Clock"), at the height the tab row had.
-        val section = settingsSection.takeIf { tab == SETTINGS_TAB }
+        val section = settingsSection.takeIf { tab == MainTab.SETTINGS }
         val density = LocalDensity.current
         var tabRowHeight by remember { mutableIntStateOf(0) }
         Row(
@@ -90,16 +86,16 @@ fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
         ) {
             if (section != null) {
                 Text(stringResource(section.title), style = MaterialTheme.typography.headlineMedium)
-            } else TabRow(selectedTabIndex = tab) {
-                tabs.forEachIndexed { index, title ->
+            } else TabRow(selectedTabIndex = tab.ordinal) {
+                MainTab.entries.forEach { entry ->
                     val open = {
                         // Every open of the guide shows now (spec/apps.md), whatever day it showed before.
-                        if (index == 1 && tab != 1) viewModel.openGuide()
-                        tab = index
+                        if (entry == MainTab.GUIDE && tab != MainTab.GUIDE) viewModel.openGuide()
+                        tab = entry
                     }
-                    Tab(selected = tab == index, onFocus = open, onClick = open) {
+                    Tab(selected = tab == entry, onFocus = open, onClick = open) {
                         Text(
-                            title,
+                            stringResource(entry.title),
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                         )
@@ -111,10 +107,14 @@ fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
         }
         Spacer(Modifier.height(12.dp))
         when (tab) {
-            0 -> LiveScreen(viewModel, play)
-            1 -> GuideScreen(viewModel, play, onPlay)
-            2 -> ArchiveScreen(archive, viewModel, onPlay)
-            else -> SettingsScreen(viewModel, settingsSection) { settingsSection = it }
+            MainTab.HOME -> HomeScreen(viewModel, archive, onPlay) {
+                viewModel.focusLiveFirstCard = true
+                tab = MainTab.LIVE
+            }
+            MainTab.LIVE -> LiveScreen(viewModel, play)
+            MainTab.GUIDE -> GuideScreen(viewModel, play, onPlay)
+            MainTab.ARCHIVE -> ArchiveScreen(archive, viewModel, onPlay)
+            MainTab.SETTINGS -> SettingsScreen(viewModel, settingsSection) { settingsSection = it }
         }
     }
     // The number buffer, else a short notice (e.g. "Poslanecká sněmovna teď nevysílá.").
@@ -135,9 +135,16 @@ fun MainScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
     }
 }
 
-private const val SETTINGS_TAB = 3
+/** The tabs in their order; [numberKeys] = digits start a channel there (spec/apps.md "Channel numbers"). */
+enum class MainTab(@StringRes val title: Int, val numberKeys: Boolean) {
+    HOME(R.string.tab_home, numberKeys = true),
+    LIVE(R.string.tab_live, numberKeys = true),
+    GUIDE(R.string.tab_guide, numberKeys = true),
+    ARCHIVE(R.string.tab_archive, numberKeys = false),
+    SETTINGS(R.string.tab_settings, numberKeys = false),
+}
 
-/** Number keys on Živě and the guide start that channel live (spec/apps.md "Channel numbers and zapping"). */
+/** Number keys on Domů, Živě and the guide start that channel live (spec/apps.md "Channel numbers and zapping"). */
 private class NumberKeys(private val entry: DigitEntry) {
     /** The buffer (`2_`) or "Kanál 9 není"; empty = nothing shown. */
     var text by mutableStateOf("")
