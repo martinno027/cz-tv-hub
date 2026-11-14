@@ -115,4 +115,7 @@ tasks.withType<Test>().configureEach {
     inputs.file("src/main/res/drawable/tmdb_logo_short.xml").withPropertyName("tmdbLogo")
     inputs.file(specApps).withPropertyName("specApps")
     inputs.file("src/main/res/values/strings.xml").withPropertyName("strings")
+    // WeatherUiTest (T59) parses the weather icons and reads the icon keys of the golden weather cases.
+    inputs.files(fileTree("src/main/res/drawable") { include("weather_*.xml") }).withPropertyName("weatherIcons")
+    inputs.file(specAssets.resolveSibling("fixtures/weather_cases.json")).withPropertyName("weatherCases")
 }

@@ -16,7 +16,11 @@ import cz.cztvhub.core.dvb.DetailsQuery
 import cz.cztvhub.core.dvb.DvbChannel
 import cz.cztvhub.core.dvb.DvbEvent
 import cz.cztvhub.core.dvb.DvbThumbnails
+import cz.cztvhub.core.dvb.DvbConfig
 import cz.cztvhub.core.dvb.ProgrammeDetails
+import cz.cztvhub.core.dvb.Weather
+import cz.cztvhub.core.dvb.WeatherRules
+import cz.cztvhub.tv.DeviceLocation
 import cz.cztvhub.tv.tvApp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -148,6 +152,60 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun poster(path: String): ImageRequest? {
         val client = app.dvb()?.client ?: return null
         return client.posterUrl(path)?.let { ImageRequest(it, client.config.authHeaders, gateway = true) }
+    }
+
+    /** Domů's weather (T59): the last answer without `error`; null = Domů shows the date only. */
+    private val _weather = MutableStateFlow<Weather?>(null)
+    val weather: StateFlow<Weather?> = _weather.asStateFlow()
+    private var weatherAt: Instant? = null
+    private var weatherFrom: DvbConfig? = null
+    private var weatherJob: Job? = null
+
+    /** "Počasí podle polohy této televize": the one-time question answered, and its switch. */
+    val weatherAsked: StateFlow<Boolean> = app.weatherPrefs.asked
+    val weatherByLocation: StateFlow<Boolean> = app.weatherPrefs.on
+
+    /** The question was closed with Back: not again until the app starts again. */
+    var weatherQuestionPostponed = false
+
+    /** Povolit / Nepoužívat or the switch; the next Domů asks again with (or without) the location. */
+    fun setWeatherByLocation(on: Boolean) {
+        if (app.weatherPrefs.set(on)) weatherAt = null
+    }
+
+    /**
+     * Domů shown (spec/apps.md "Location for weather"): location and weather again when the last answer is older
+     * than [WeatherRules.REFRESH] or [force]; nothing in the background. The location is only passed on, rounded.
+     * Any HTTP answer counts (a `404` or `error` = no weather until the next refresh); an unreachable gateway shows
+     * none and asks again next time.
+     */
+    fun refreshWeather(force: Boolean = false) {
+        val client = app.dvb()?.client ?: run {
+            _weather.value = null
+            return
+        }
+        if (client.config != weatherFrom) {
+            weatherFrom = client.config
+            weatherAt = null
+            _weather.value = null
+            weatherJob?.cancel()
+        }
+        if (!force && (weatherJob?.isActive == true || !WeatherRules.isDue(weatherAt, Instant.now()))) return
+        weatherJob?.cancel()
+        weatherJob = viewModelScope.launch {
+            val location = if (app.weatherPrefs.on.value) DeviceLocation.current(app) else null
+            val place = location?.let { WeatherRules.place(it.latitude, it.longitude) }
+            val answer = withContext(Dispatchers.IO) {
+                try {
+                    client.weather(place)
+                } catch (e: CtException) {
+                    if (e.status != null) Weather(error = e.userMessage) else null
+                }
+            }
+            if (weatherFrom != client.config) return@launch
+            if (answer != null) weatherAt = Instant.now()
+            _weather.value = answer?.takeIf { it.error == null }
+        }
     }
 
     private val _now = MutableStateFlow(Instant.now())

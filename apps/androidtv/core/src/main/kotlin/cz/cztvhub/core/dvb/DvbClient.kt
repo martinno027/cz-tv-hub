@@ -46,6 +46,13 @@ class DvbClient(
     /** TMDb facts of a programme (T15); `404` when the gateway has no `[tmdb] key` or does not know the id. */
     fun details(query: DetailsQuery): ProgrammeDetails = call(query.path()) { s, b -> DvbParser.parseDetails(s, b) }
 
+    /**
+     * Domů's weather (T59); [place] = this TV's rounded location, null = the gateway's household place. `404` when
+     * the gateway has neither (or no weather).
+     */
+    fun weather(place: WeatherPlace?): Weather =
+        call("/dvb/weather" + (place?.let { "?${it.query}" } ?: "")) { s, b -> WeatherParser.parse(s, b) }
+
     /** A poster of [details] (needs [DvbConfig.authHeaders]); null for anything but a gateway image path. */
     fun posterUrl(path: String): String? = path.takeIf(DvbParser::isPosterPath)?.let(config::url)
 
