@@ -18,6 +18,7 @@ body.web #player {
 }
 
 /* Živě and Nastavení scroll like a page (wheel, trackpad, touch); the remote's focus still scrolls them too */
+body.web #screen-home,
 body.web #screen-live,
 body.web #screen-settings {
   overflow-y: auto;
@@ -256,6 +257,7 @@ body.web #player-message .button {
   pointer-events: none;
 }
 
+body.web-nokey #screen-home,
 body.web-nokey #screen-live,
 body.web-nokey #screen-guide,
 body.web-nokey #screen-archive {

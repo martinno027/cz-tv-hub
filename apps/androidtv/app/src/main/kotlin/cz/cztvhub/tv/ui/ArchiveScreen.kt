@@ -566,7 +566,7 @@ private fun CardSurface(
  * "Odebrat z řady".
  */
 @Composable
-private fun ContinueCard(
+internal fun ContinueCard(
     item: ContinueItem,
     images: ArchiveImages,
     imageOf: (String?) -> ImageRequest?,
@@ -605,7 +605,7 @@ private fun ContinueCard(
 }
 
 @Composable
-private fun RemoveDialog(item: ContinueItem, onRemove: () -> Unit, onDismiss: () -> Unit) {
+internal fun RemoveDialog(item: ContinueItem, onRemove: () -> Unit, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss) {
         Column(
             Modifier.background(Palette.surface, RoundedCornerShape(16.dp)).padding(32.dp),

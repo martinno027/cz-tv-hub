@@ -106,6 +106,98 @@ main {
   display: block;
 }
 
+/* Domů (spec/apps.md "Domů", T58): the date, then rows of cards that scroll sideways with the focus */
+#screen-home {
+  overflow: hidden;
+}
+
+.home-header {
+  margin: 4px 0 18px;
+}
+
+.home-date {
+  font-size: 44px;
+  font-weight: 700;
+}
+
+.home-name {
+  font-size: 30px;
+  margin-top: 6px;
+}
+
+.home-line {
+  font-size: 26px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.home-notice {
+  font-size: 26px;
+  color: #ff9c8f;
+  margin-bottom: 16px;
+}
+
+.home-heading {
+  font-size: 28px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.home-row {
+  margin-bottom: 22px;
+}
+
+/* one line of cards; the focus scrolls it (no scrollbar on the TV) */
+.home-strip {
+  position: relative; /* the cards' offsetLeft is within the strip */
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 4px; /* room for the focused card's scale and border */
+}
+
+.home-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* room after the last card to scroll to (the strip's own right padding does not count in Chromium 56) */
+.home-strip::after {
+  content: "";
+  flex: none;
+  width: 16px;
+}
+
+.home-strip .card {
+  flex: none;
+  margin-bottom: 0;
+}
+
+.home-strip .ar-card {
+  position: relative;
+  flex: none;
+  width: 384px;
+  height: 300px;
+  margin-right: 20px;
+}
+
+.home-strip .ar-image {
+  height: 206px;
+}
+
+.home-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.home-more.focused {
+  color: var(--text);
+}
+
 /* Živě */
 #screen-live {
   overflow: hidden;

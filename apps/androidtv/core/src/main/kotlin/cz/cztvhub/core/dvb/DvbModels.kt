@@ -36,6 +36,8 @@ data class DvbStatus(
     val thumbnails: Boolean = false,
     /** The household logs what is watched (`/admin` "Sledování", T53): the apps send watch reports only then. */
     val watchLog: Boolean = false,
+    /** Continuous recording stopped because the recordings disk is full (T58); Domů says so. Missing = false. */
+    val recordingPaused: Boolean = false,
 )
 
 /**

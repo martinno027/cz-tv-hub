@@ -144,7 +144,9 @@
         // gateway switch for programme thumbnails (spec/dvb-gateway.md "Thumbnails"); missing = off
         thumbnails: J.bool(root, 'thumbnails'),
         // the gateway's watch log (spec/dvb-gateway.md "Watch log", T53): report playback only while true; missing = off
-        watchLog: J.bool(root, 'watchLog')
+        watchLog: J.bool(root, 'watchLog'),
+        // continuous recording stopped, the recordings disk is full (T58, Domů's notice); missing = false
+        recordingPaused: J.bool(root, 'recordingPaused')
       };
     },
 

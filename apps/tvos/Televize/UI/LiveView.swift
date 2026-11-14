@@ -5,25 +5,14 @@ import SwiftUI
 /// order (Nastavení → Kanály: hidden channels and switched-off sources left out). Select → live playback.
 struct LiveView: View {
     @Environment(AppModel.self) private var model
-    @State private var onAir = ScheduleStore.OnAir()
-    /// When ČT's schedule last failed and was asked (T42); kept while hidden, so back on screen it asks when due.
-    @State private var retry = ScheduleRetry()
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var antennaChannels: [DVBChannel] = []
-    @State private var antennaOnAir: [String: DVBEvent] = [:]
-    @State private var antennaError: String?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 3)
 
-    private struct LoadKey: Equatable {
-        let gateway: GatewayConfig?
-        let reloads: Int
-        /// Live in front, no player over it (T42: no asking behind the player or in the background).
-        let visible: Bool
-    }
-
     var body: some View {
         let prefs = model.channelPrefs
+        let live = model.liveNow
+        let antennaChannels = live.antennaChannels
+        let antennaError = live.antennaError
         let channels = prefs.channels(antenna: antennaChannels).visible
         // Tailscale is being checked or not connected yet: "Připojuji se k Tailscale…" (or the wait for a login)
         // instead of the gateway's error (spec/apps.md T18, T21).
@@ -50,7 +39,7 @@ struct LiveView: View {
                     }
                     LazyVGrid(columns: columns, spacing: 56) {
                         ForEach(Array(channels.enumerated()), id: \.element.id) { index, channel in
-                            card(channel, number: index + 1, now: context.date)
+                            LiveChannelButton(channel: channel, number: index + 1, now: context.date)
                                 .id(channel.key)
                         }
                     }
@@ -79,37 +68,32 @@ struct LiveView: View {
         }
         // "Is it on now?" of the Chamber's streams shown here, only while this screen is on screen.
         .watchesParliament(channels.compactMap(\.parliamentStream))
-        .task(id: LoadKey(gateway: model.gateway, reloads: model.gatewayReloads,
-                          visible: scenePhase == .active && model.session == nil)) {
-            // Schedules are cached, so this only hits the network when today's plan is stale or failed. A failed
-            // ČT day is asked again after 30 s, after 5 minutes every 2 min (spec/apps.md T42, ScheduleRetry), and
-            // only while Živě is visible: not behind the player, not in the background.
-            guard scenePhase == .active, model.session == nil else { return }
-            if retry.failing, let wait = retry.delay(now: Date()), wait > 0 {
-                do { try await Task.sleep(for: .seconds(wait)) } catch { return }  // back on screen before it is due
-            }
-            while !Task.isCancelled {
-                onAir = await model.schedules.onAirNow(at: Date())
-                await loadAntenna()
-                retry.record(failed: !onAir.failed.isEmpty, at: Date())
-                do { try await Task.sleep(for: .seconds(retry.liveWait(now: Date()))) } catch { return }
-            }
-        }
+        // What is on air, shared with Domů: one loop while either is on screen.
+        .refreshesLiveNow()
     }
+}
 
-    private func card(_ channel: MixedChannel, number: Int, now: Date) -> some View {
+/// A channel card of Živě and Domů's "Teď běží": what is on air now; OK plays the channel live.
+struct LiveChannelButton: View {
+    let channel: MixedChannel
+    let number: Int
+    let now: Date
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let live = model.liveNow
         Button {
             model.playLive(channel)
         } label: {
             switch channel {
             case .ct(let ct):
-                let programme = onAir.programmes[ct.slug]
+                let programme = live.onAir.programmes[ct.slug]
                 // the day's ČT schedule failed: its text instead of a programme (spec/apps.md, T36)
                 ChannelCard(number: number, name: ct.name, source: .ct, title: programme?.title,
                             start: programme?.start, end: programme?.end, now: now,
-                            placeholder: onAir.failed.contains(ct.slug) ? CTError.scheduleFailed : nil)
+                            placeholder: live.onAir.failed.contains(ct.slug) ? CTError.scheduleFailed : nil)
             case .antenna(let dvb):
-                let event = antennaOnAir[dvb.id]
+                let event = live.antennaOnAir[dvb.id]
                 ChannelCard(number: number, name: dvb.name, source: .dvb, title: event?.title,
                             start: event?.start, end: event?.end, now: now)
             case .parliament(let stream):
@@ -118,21 +102,6 @@ struct LiveView: View {
             }
         }
         .buttonStyle(.card)
-    }
-
-    private func loadAntenna() async {
-        guard let antenna = model.antenna else {
-            antennaChannels = []
-            antennaOnAir = [:]
-            return
-        }
-        do {
-            antennaChannels = try await antenna.channels()
-            antennaOnAir = await antenna.onAir(at: Date())
-            antennaError = nil
-        } catch {
-            antennaError = AppModel.message(for: error)
-        }
     }
 }
 

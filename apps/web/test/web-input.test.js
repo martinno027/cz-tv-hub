@@ -67,12 +67,12 @@ test('player bar: the pointer position as a fraction of the bar', () => {
   assert.equal(I.barFraction(600, rect(0, 0, 0, 0)), 0);
 });
 
-test('long OK where the screens have it (Archiv cards, show episodes): a right click / long press reaches them', () => {
+test('long OK where the screens have it (Archiv cards, show episodes, Domů\'s "Pokračovat"): a right click / long press reaches them', () => {
   const longOnes = CT.WebFocus.ADAPTERS.filter((a) => a.long).map((a) => a.match).sort();
-  assert.deepEqual(longOnes, ['.ar-card', '.sh-ep']);
+  assert.deepEqual(longOnes, ['#screen-home .home-item', '.ar-card', '.sh-ep']);
   const all = fs.readdirSync(path.join(APP, 'js', 'ui')).filter((f) => f.endsWith('.js'))
     .filter((f) => /new Cards\.LongPress\(/.test(fs.readFileSync(path.join(APP, 'js', 'ui', f), 'utf8')));
-  assert.deepEqual(all.sort(), ['archive.js', 'show.js']); // a new long OK place needs an adapter with `long`
+  assert.deepEqual(all.sort(), ['archive.js', 'home.js', 'show.js']); // a new long OK place needs an adapter with `long`
 });
 
 test('F toggles fullscreen, not while typing and not with a shortcut modifier', () => {

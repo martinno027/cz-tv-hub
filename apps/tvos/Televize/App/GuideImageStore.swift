@@ -47,6 +47,10 @@ final class GuideImageStore {
 
     /// The household allows thumbnails (`/dvb/status`); refreshed at most every 5 minutes.
     private(set) var gatewayAllows = false
+    /// How the last `/dvb/status` failed (no answer, an error, 401), nil when it answered: Domů's notice (T58).
+    private(set) var statusFailure: HomeRules.StatusFailure?
+    /// The last `/dvb/status` said continuous recording is paused (disk full): Domů's notice (T58).
+    private(set) var recordingPaused = false
     /// This TV's switch "Náhledy anténních pořadů" (Nastavení → Server), default on.
     var tvAllows: Bool {
         didSet {
@@ -92,6 +96,8 @@ final class GuideImageStore {
         data.removeAll { $0.hasPrefix("poster|") }
         decoded.removeAll { $0.hasPrefix("poster|") }
         gatewayAllows = false
+        statusFailure = nil
+        recordingPaused = false
         statusCheckedAt = nil
         client = config.map { DVBClient(config: $0, transport: URLSessionTransport.memoryOnly(), clientHeader: BuildInfo.clientHeader) }
         Task { await refreshStatus() }
@@ -101,10 +107,18 @@ final class GuideImageStore {
         guard let client else { return }
         if !force, let checked = statusCheckedAt, Date().timeIntervalSince(checked) < Self.statusMaxAge { return }
         statusCheckedAt = Date()
-        if let status = try? await client.status() {
+        do {
+            let status = try await client.status()
+            guard client.config == self.client?.config else { return }  // the gateway changed meanwhile
+            statusFailure = nil
+            recordingPaused = status.recordingPaused
             onStatus(status)
             gatewayAllows = status.thumbnails
             if !gatewayAllows { clearThumbnails() }
+        } catch {
+            guard client.config == self.client?.config else { return }
+            // nobody waits any more (the screen left): not a failure, asked again next time (T57)
+            if let failure = HomeRules.statusFailure(error) { statusFailure = failure } else { statusCheckedAt = nil }
         }
     }
 

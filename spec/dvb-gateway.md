@@ -75,7 +75,8 @@ HLS playlists and media segments, so players must send the header on all request
 Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cztvhub_key=<key>`
 (`setStreamingProperty("COOKIE", …)`); the gateway accepts either.
 - `GET /dvb/status` → `{"enabled": true, "retentionDays": 3, "tuners": [{"name": "...", "inUse": false}],
-  "disk": {"freeBytes": 0, "totalBytes": 0}, "tvheadendReachable": true}`
+  "disk": {"freeBytes": 0, "totalBytes": 0}, "tvheadendReachable": true, "recordingPaused": false}`
+  (`recordingPaused`, T58: continuous recording stopped because the recordings disk is full; Domů shows it)
   (always 200; `tuners` is `[]` and `tvheadendReachable` false when TVHeadend does not answer; `disk` = the
   filesystem of `hls_dir`)
 - `GET /dvb/channels` → `{"channels": [{"id": "<tvh channel uuid>", "number": 1, "name": "ČT1 HD", "icon": "/dvb/icon/<id>" | null}]}`
@@ -728,6 +729,13 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     "countries"? [names], "seasons": [{"id","title"}], "groups": [{"title", "episodes": [episode…]}],
     "attribution"?, "error"?}`. The show page's `card` always has the show's own `kind` and `year` (from ČT's
     `showType`/`year`), also when the card in a list came from a search without them.
+  - **Episode names (T56)**: ČT names many news and magazine episodes only by their date ("29. října", "16. června
+    2024", "8. března 13:05"; Události, Máte slovo, Reportéři ČT, 168 hodin, Objektiv …, checked 2026-11-03) and puts
+    the episode's topics in its description ("Pantanal — Diyarbakır — Dunhuang"); ČT has no other field for them
+    (`subtitle`, `episodeTitle` are not in its schema). Such an episode's `title` is its description, cut to 80
+    characters after a whole topic (" — "), else after a whole word, with "…"; `description` stays whole. A date
+    title without a description, and every other title, stays as ČT sends it. Golden: `archive_cases.json`
+    "episodeTitles"; only the gateway applies it, so all apps and the web show the same names.
   - **ČT's window**: an episodes request with offset + limit over 10 000 is an error at ČT (measured 2026-11-01:
     offset 9909 limit 100 fails, 9900 gives the last 70), so chunks are cut to the window; in a list longer than
     10 000 the oldest episodes past it cannot be read newest-first (Události: 9970, just inside).

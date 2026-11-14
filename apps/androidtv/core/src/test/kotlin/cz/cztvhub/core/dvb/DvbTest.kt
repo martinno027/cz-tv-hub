@@ -68,6 +68,23 @@ class DvbTest {
         assertFalse(client("/dvb/status" to "dvb_status.json").status().thumbnails)
     }
 
+    @Test fun statusRecordingPausedFlag() {
+        val paused = DvbParser.parseStatus(200, """{"enabled": true, "retentionDays": 3, "tuners": [], "recordingPaused": true}""")
+        assertTrue(paused.recordingPaused)
+        val running = DvbParser.parseStatus(200, """{"enabled": true, "retentionDays": 3, "tuners": [], "recordingPaused": false}""")
+        assertFalse(running.recordingPaused)
+        // older gateways without the field: not paused
+        assertFalse(client("/dvb/status" to "dvb_status.json").status().recordingPaused)
+    }
+
+    @Test fun statusRefusedKeyIsTold() {
+        // Domů tells a refused key (status "401") from an unreachable gateway (T58).
+        val refused = runCatching { DvbParser.parseStatus(401, """{"error": "unauthorized"}""") }.exceptionOrNull()
+        assertEquals("401", (refused as CtException).status)
+        val down = runCatching { DvbParser.parseStatus(502, "") }.exceptionOrNull()
+        assertEquals("502", (down as CtException).status)
+    }
+
     @Test fun thumbnailOnlyForRecordedEventsWhenBothAllow() {
         fun event(state: RecordingState?) = DvbEvent("e", ct1, "t", captured, captured.plusSeconds(1800),
             recording = state?.let { DvbRecording("rec-${it.name}", it) })

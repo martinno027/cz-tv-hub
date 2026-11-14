@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Televize</string>
+    <string name="tab_home">Domů</string>
     <string name="tab_live">Živě</string>
+    <string name="home_continue">Pokračovat</string>
+    <string name="home_now">Teď běží</string>
+    <string name="home_more_channels">Další kanály</string>
+    <string name="home_psp">Sněmovna</string>
+    <string name="home_gateway_unavailable">Brána antény není dostupná.</string>
+    <string name="home_gateway_key_rejected">Brána antény odmítla klíč. Zkontrolujte ho v Nastavení → Server.</string>
+    <string name="home_recording_paused">Nahrávání je pozastavené: na disku nahrávek dochází místo.</string>
     <string name="tab_guide">TV průvodce</string>
     <string name="tab_archive">Archiv</string>
     <string name="archive_search_hint">Hledat v archivu</string>

@@ -551,6 +551,38 @@ def parse_show(item: Any, image_re: re.Pattern = CT_IMAGE_RE) -> dict | None:
     }
 
 
+EPISODE_NAME_MAX = 80  # characters of a description used as an episode's name (T56)
+_MONTHS = "ledna|února|března|dubna|května|června|července|srpna|září|října|listopadu|prosince"
+# "29. října", "16. června 2024", "8. března 13:05" (ČT puts a no-break space after the dot): ČT's name for many news
+# and magazine episodes (Události, Máte slovo, Reportéři ČT, 168 hodin …, 2026-11-03)
+_DATE_TITLE = re.compile(rf"^\d{{1,2}}\.[ \u00a0]*(?:{_MONTHS})(?:[ \u00a0]+\d{{4}})?(?:[ \u00a0]+\d{{1,2}}:\d{{2}})?$",
+                         re.IGNORECASE)
+_TOPIC_BREAK = re.compile(r"[ \u00a0]+—[ \u00a0]+")
+
+
+def episode_name(title: str, description: str | None) -> str:
+    """The episode's name in the archive (golden archive_cases.json "episodeTitles"): ČT's title, unless it is only
+    a date and there is a description; then the description (the episode's topics), cut to ``EPISODE_NAME_MAX``
+    after a whole topic, else after a whole word, with "…"."""
+    text = _text(description)
+    if not text or not _DATE_TITLE.match(title.strip()):
+        return title
+    if len(text) <= EPISODE_NAME_MAX:
+        return text
+    room = text[:EPISODE_NAME_MAX - 1]  # the "…" takes one character
+    breaks = [m.start() for m in _TOPIC_BREAK.finditer(room)]
+    if _TOPIC_BREAK.match(text, len(room)):
+        cut = room  # the last topic ends right at the limit
+    elif breaks:
+        cut = room[:breaks[-1]]
+    elif text[len(room)] in " \u00a0":
+        cut = room  # the last word ends right at the limit
+    else:
+        space = max(room.rfind(" "), room.rfind("\u00a0"))
+        cut = room[:space] if space > 0 else room
+    return cut.rstrip(" \u00a0,;:—–-") + "…"
+
+
 def parse_episode(item: Any) -> dict | None:
     if not isinstance(item, dict):
         return None
@@ -562,7 +594,7 @@ def parse_episode(item: Any) -> dict | None:
     return {
         "source": "ct",
         "idec": idec,
-        "title": title,
+        "title": episode_name(title, item.get("description")),
         "description": _text(item.get("description")),
         "durationSeconds": int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool)
         and duration > 0 else 0,

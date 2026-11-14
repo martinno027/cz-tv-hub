@@ -6,7 +6,7 @@
 (function (root) {
   'use strict';
   var CT = root.CT = root.CT || {};
-  var TABS = ['live', 'guide', 'archive', 'settings'];
+  var TABS = ['home', 'live', 'guide', 'archive', 'settings'];
   var REFRESH_MS = 30 * 1000;
   var PSP_TICK_MS = 1000;
   var PROFILE_RETRY_MS = 60 * 1000;
@@ -67,7 +67,7 @@
     now: Date.now(),
     minute: -1, // last minute tick() handled
     tickTimer: null,
-    tab: 'live',
+    tab: 'home',
     zone: 'tabs', // 'tabs' | 'content'
     dvbConfig: null,
     dvbRepo: null,
@@ -79,6 +79,7 @@
     profile: null, // "Profil" (CT.Profile.ProfileSync)
     household: null, // "Kanály" household default (CT.Household.HouseholdList)
     dvbThumbs: false, // the gateway has thumbnails on (from /dvb/status)
+    dvbStatus: null, // the last /dvb/status check for Domů's notice: {failed, badKey, recordingPaused}; null before one
     images: null, // guide images (CT and gateway thumbnails), memory only
 
     start: function () {
@@ -103,13 +104,16 @@
         return self.dvbRepo ? self.dvbRepo.client : null;
       }, { monitor: this.psp, playUrl: CT.Demo.enabled ? CT.Demo.pspPlayUrl : null });
       this.screens = {
+        home: null, // after the resume store (its "Pokračovat" row reads it)
         live: new CT.LiveScreen(this),
         guide: new CT.GuideScreen(this),
         archive: null, // after the resume store (its rows read it)
         settings: new CT.SettingsScreen(this)
       };
-      this.resumeStore = new CT.ResumeStore(localBackend('cztvhub.resume'));
+      // the demo keeps positions in memory (seeded), never in this browser's real store
+      this.resumeStore = new CT.ResumeStore(CT.Demo.enabled ? CT.Demo.resumeBackend() : localBackend('cztvhub.resume'));
       this.screens.archive = new CT.ArchiveScreen(this);
+      this.screens.home = new CT.HomeScreen(this);
       this.channelPrefs = CT.ChannelPrefsStore.load();
       this.profile = this.makeProfile();
       this.household = this.makeHousehold();
@@ -128,7 +132,7 @@
       document.addEventListener('keyup', function (e) {
         var key = CT.Keys.name(e);
         if (key && self.player.isOpen()) self.player.onKeyUp(key);
-        else if (key && self.tab === 'archive') self.screens.archive.onKeyUp(key);
+        else if (key && (self.tab === 'archive' || self.tab === 'home')) self.screens[self.tab].onKeyUp(key);
       });
       this.watchVisibility(document);
       this.watchPageHide(root);
@@ -136,7 +140,7 @@
       root.addEventListener('resize', function () { self.fitStage(); });
 
       this.zone = 'content';
-      this.showTab('live');
+      this.showTab('home'); // every start (spec/apps.md "Domů")
       this.refresh();
       setInterval(function () { self.refresh(); }, REFRESH_MS);
       setInterval(function () { self.pspTick(); }, PSP_TICK_MS);
@@ -271,21 +275,26 @@
     },
 
     /**
-     * Poslanecká sněmovna "is it on now?": only while Živě or the guide is on screen (not in Nastavení, not behind
-     * the player, not in the background), only the visible streams; PspMonitor keeps one check at a time and the
-     * 60 s / 120 s limits.
+     * Poslanecká sněmovna "is it on now?": only while Domů, Živě or the guide is on screen (not in Archiv or
+     * Nastavení, not behind the player, not in the background), only the visible streams; PspMonitor keeps one check
+     * at a time and the 60 s / 120 s limits.
      */
     pspTick: function () {
-      if (document.hidden || this.player.isOpen() || (this.tab !== 'live' && this.tab !== 'guide')) return;
+      if (document.hidden || this.player.isOpen() || !this.channelTab()) return;
       var ids = this.channelList(this.dvbChannels).filter(function (item) {
         return item.source === 'psp';
       }).map(function (item) { return item.channel.id; });
       this.psp.tick(ids);
     },
 
-    /** A stream's state may have changed (also when it just went stale): Živě cards and the guide's psp cells. */
+    /** Domů, Živě or the guide: the tabs with the Chamber checks and the number keys. */
+    channelTab: function () {
+      return this.tab === 'home' || this.tab === 'live' || this.tab === 'guide';
+    },
+
+    /** A stream's state may have changed (also when it just went stale): Domů and Živě cards, the guide's psp cells. */
     onPspChange: function () {
-      if (this.tab === 'live') this.renderLive();
+      if (this.tab === 'live' || this.tab === 'home') this.renderLive();
       this.screens.guide.refreshPsp();
     },
 
@@ -316,6 +325,7 @@
       this.minute = minute;
       this.now = now;
       this.screens.guide.onMinute();
+      this.screens.home.onMinute(); // the date after midnight
       this.programme.refresh();
     },
 
@@ -330,6 +340,7 @@
       this.dvbChannels = [];
       this.dvbState = config ? { channels: [], onAir: {}, error: null } : null;
       this.dvbThumbs = false;
+      this.dvbStatus = null;
       this.watch.setEnabled(false); // until this gateway's status says otherwise
       if (CT.Platform.onGatewayConfig) CT.Platform.onGatewayConfig(config);
       this.images.clear('gw');
@@ -349,7 +360,7 @@
 
     /**
      * The gateway's status (on setup and every few minutes): whether it offers thumbnails and keeps the watch log
-     * (T53); both off when it does not answer.
+     * (T53), both off when it does not answer; and for Domů's notice whether it answered and recording is paused.
      */
     checkThumbs: function () {
       var self = this;
@@ -358,13 +369,23 @@
       this.thumbsCheckedAt = Date.now();
       repo.client.status().then(function (st) {
         if (self.dvbRepo !== repo) return;
+        self.setDvbStatus({ failed: false, badKey: false, recordingPaused: st.recordingPaused });
         self.setDvbThumbs(st.thumbnails);
         self.watch.setEnabled(st.watchLog);
-      }, function () {
+      }, function (e) {
         if (self.dvbRepo !== repo) return;
+        self.setDvbStatus({ failed: true, badKey: !!e && e.status === '401', recordingPaused: false });
         self.setDvbThumbs(false);
         // the watch log keeps the last answer (initially off): a missed check must not end sessions (T53)
       });
+    },
+
+    setDvbStatus: function (status) {
+      var before = this.dvbStatus;
+      this.dvbStatus = status;
+      if (before && before.failed === status.failed && before.badKey === status.badKey &&
+        before.recordingPaused === status.recordingPaused) return;
+      if (this.tab === 'home') this.screens.home.render();
     },
 
     setDvbThumbs: function (on) {
@@ -432,8 +453,10 @@
       if (this.dvbRepo && Date.now() - (this.thumbsCheckedAt || 0) > 5 * 60 * 1000) this.checkThumbs();
     },
 
+    /** Živě, and Domů while it is on screen (its rows show the same data). */
     renderLive: function () {
       this.screens.live.render(this.ctState, this.dvbState, this.now);
+      if (this.tab === 'home') this.screens.home.render();
       if (this.tab === 'settings') this.screens.settings.renderChannels();
     },
 
@@ -488,7 +511,7 @@
       return info ? info.current : null;
     },
 
-    /** Number entry on Živě and the guide: that channel live, or "Kanál <n> není". */
+    /** Number entry on Domů, Živě and the guide: that channel live, or "Kanál <n> není". */
     playNumber: function (number) {
       var list = this.channelList(this.dvbChannels);
       var key = CT.ChannelNumbers.resolve(list.map(function (item) { return item.key; }), number);
@@ -531,6 +554,7 @@
 
     showTab: function (tab) {
       if (tab !== 'archive') this.screens.archive.hide();
+      if (tab !== 'home') this.screens.home.hide();
       this.tab = tab;
       Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
         t.classList.toggle('selected', t.dataset.tab === tab);
@@ -613,7 +637,7 @@
       }
     },
 
-    /** Digits (and OK/Return while typing) on Živě and the guide; true = handled. Other screens ignore digits. */
+    /** Digits (and OK/Return while typing) on Domů, Živě and the guide; true = handled. Other screens ignore digits. */
     onNumberKey: function (key, event) {
       var digit = CT.Keys.digit(key);
       var screen = this.screens[this.tab];
@@ -626,7 +650,7 @@
       }
       if (screen.editing && screen.editing()) return false; // typing into a field
       event.preventDefault();
-      if (this.tab === 'live' || this.tab === 'guide') this.numberEntry.digit(digit, this.channelList(this.dvbChannels).length);
+      if (this.channelTab()) this.numberEntry.digit(digit, this.channelList(this.dvbChannels).length);
       return true;
     },
 
@@ -662,6 +686,7 @@
       if (request && CT.LIVE_PREFIX[request.kind]) this.screens.live.focusKey(CT.LIVE_PREFIX[request.kind] + request.channelId);
       this.programme.refresh(true); // a "Pokračovat" position may have been saved
       this.screens.archive.onPlayerClosed();
+      this.screens.home.onPlayerClosed(request);
       this.refresh();
     },
 

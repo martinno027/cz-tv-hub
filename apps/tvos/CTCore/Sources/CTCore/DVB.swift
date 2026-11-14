@@ -123,6 +123,8 @@ public struct DVBStatus: Sendable, Equatable {
     public var thumbnails: Bool = false
     /// The household logs what is watched (spec/dvb-gateway.md "Watch log (T53)"): report playback; missing = off.
     public var watchLog: Bool = false
+    /// Continuous recording stopped because the recordings disk is full (T58, Domů's notice); missing = false.
+    public var recordingPaused: Bool = false
 }
 
 /// "Anténa thumbnails" (spec/apps.md): which recording's still the guide detail may show.
@@ -217,7 +219,8 @@ public enum DVBParser {
             tuners: tuners,
             tvheadendReachable: root["tvheadendReachable"] as? Bool ?? false,
             thumbnails: root["thumbnails"] as? Bool ?? false,
-            watchLog: root["watchLog"] as? Bool ?? false
+            watchLog: root["watchLog"] as? Bool ?? false,
+            recordingPaused: root["recordingPaused"] as? Bool ?? false
         )
     }
 

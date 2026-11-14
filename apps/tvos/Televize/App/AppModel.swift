@@ -45,8 +45,10 @@ final class AppModel {
     let profile: ProfileSyncController
     /// The household default channel list from the gateway, for a TV not signed in that never changed its list.
     let household: HouseholdDefaultController
-    /// "Is it on now?" of the Chamber of Deputies' streams, checked only while Živě or the guide is on screen.
+    /// "Is it on now?" of the Chamber of Deputies' streams, checked only while Domů, Živě or the guide is on screen.
     let parliament = PSPLiveMonitor()
+    /// What is on air now, for Živě and Domů's "Teď běží" (one loop, the same caches).
+    let liveNow = LiveNowStore()
     /// Mute of every player until the app closes (spec/apps.md "Mute (T34)"); never stored.
     let mute = PlayerMute()
     /// Watch reports to the gateway while its `/dvb/status` says `watchLog` (spec/dvb-gateway.md "Watch log (T53)").
@@ -69,7 +71,7 @@ final class AppModel {
     var isPlayerOnScreen = false
     /// The channels shown on this TV in its order (numbers = position + 1), refreshed by `refreshVisibleChannels`.
     private(set) var visibleChannels: [MixedChannel] = []
-    /// Digits typed on Živě and the guide: start that channel live.
+    /// Digits typed on Domů, Živě and the guide: start that channel live.
     @ObservationIgnored private(set) var numberEntry: NumberEntry!
 
     /// "Anténa" (DVB-T2 gateway) as everything talks to it: the saved one, or the Tailscale bridge to it. Nil when not
