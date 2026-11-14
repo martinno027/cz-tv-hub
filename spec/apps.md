@@ -284,8 +284,8 @@ recording, caching or proxying; redirect only, as before).
   edge without a neighbour). The lower timeshift clamp slides with `now` also while the movement goes on. The
   **start position** is clamped too (start-over of a programme that began almost 3 h ago starts at buffer start +
   60 s), and a playhead that fell below the lower clamp during a pause seeks to it when playback resumes. A
-  ▼ target in the future (the programme airing now) clamps to the live edge. The end of a VOD closes the player
-  as before.
+  ▼ target in the future (the programme airing now) clamps to the live edge. The end of a VOD behaves as before
+  on each platform (Samsung and tvOS close the player, Android stays at the end).
 - **Bar**: as the Anténa bar with one piece (no gaps): title = the programme at the playhead from the ČT guide of
   that channel (timeshift; ticks at its programme boundaries) or the programme itself (VOD, no ticks); second line =
   channel (· episode); the clock label and the ends as `labels`/`edges` above (timeshift right end = "Teď").
@@ -294,8 +294,8 @@ recording, caching or proxying; redirect only, as before).
   VOD: ▲ = start of the programme, ▼ nothing). No zapping and no digits (as before in these modes); Samsung's ▲ no
   longer switches the audio track here (AUDIO/MTS, green and long OK do).
 - **Audio and subtitles**: long OK opens the list (as the Anténa player) with the audio renditions **and the
-  subtitles** of the stream: **"Titulky: Vypnuto"** and one **"Titulky: <name>"** per subtitle rendition (its
-  name, else its language in Czech, else "Titulky <n>"); no subtitles in the stream = no subtitle items and the
+  subtitles** of the stream: **"Titulky: Vypnuto"** and one item per subtitle rendition, **"Titulky: <name>"**
+  (its name, else its language in Czech) or, with neither, **"Titulky <n>"**; no subtitles in the stream = no subtitle items and the
   list is titled "Zvuk" as before, with them "Zvuk a titulky". Subtitles **start off** on every platform (the web
   turns off hls.js's default track); the choice holds across a re-resolve. The mute item as before. Samsung draws
   the AVPlay subtitle text itself (above the bar while it is shown). The Anténa timeline player gets the same
