@@ -83,7 +83,7 @@ global.document = page;
 page.reset(fakeVideo());
 require(path.join(APP, 'js', 'ui', 'platform.js'));
 require(path.join(WEB, 'js', 'platform-web.js'));
-['keys', 'zap', 'timeline', 'player', 'app'].forEach((name) => require(path.join(APP, 'js', 'ui', name + '.js')));
+['keys', 'zap', 'timeline', 'ct-bar', 'player', 'app'].forEach((name) => require(path.join(APP, 'js', 'ui', name + '.js')));
 CT.Demo = { enabled: false };
 
 let sink = null;

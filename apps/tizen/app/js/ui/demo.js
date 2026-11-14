@@ -27,6 +27,10 @@
  * its 1st and 2nd season, so it comes a month at a time (2012–2026, a daily episode, 15 a page; the 3rd season
  * has none); 2005–2011 are weekly, so those years come whole with no month row (T51); dvb_archive_show_periods.json answers for its own card when the sample is there (the card first in the
  * Seriály grid).
+ * ČT player bar (T62): `?demo&ctbar=startover` opens ČT1 "Od začátku" of the programme on air (else 70 min back),
+ * `?demo&ctbar=vod` a ČT archive programme with a known broadcast start, `?demo&ctbar=vodnostart` one without (the
+ * archive then answers vod_ok.json). ČT start-over and archive targets play in the simulated player like timelines
+ * (also when opened from the guide), with two synthetic subtitle tracks.
  */
 (function (root) {
   'use strict';
@@ -201,6 +205,32 @@
   var WATCH_LOG = /[?&]watch\b/.test(root.location.search);
   var watchReports = [];
 
+  // `?demo&ctbar=…` (T62): which ČT playback opens by itself (see the top)
+  var CT_BAR = (/[?&]ctbar=(startover|vod|vodnostart)\b/.exec(root.location.search) || [])[1] || null;
+
+  /**
+   * `?demo&ctbar`: the fixture day has ČT1 programmes only in the morning; synthetic ones from noon to the end of
+   * the broadcast day (35 and 50 min in turn) give the ČT bar programmes, ticks and ▲/▼ at any hour.
+   */
+  function withAfternoon(response, day) {
+    var body = JSON.parse(response.body);
+    var plan = body.data.TVProgramDailyChannelsPlanV2.filter(function (c) { return c.channel === 'ct1'; })[0];
+    if (!plan || !plan.program.length) return response;
+    var template = plan.program[0];
+    var minute = 12 * 60;
+    for (var n = 1; minute < 29 * 60; n++) {
+      var length = n % 2 ? 35 : 50;
+      var p = Object.assign({}, template, {
+        idec: 'DEMO' + day.replace(/-/g, '') + n, title: 'Odpolední pořad ' + n, episodeTitle: n % 3 ? '' : 'Díl ' + n,
+        start: new Date(CT.Days.atMinute(day, minute)).toISOString(),
+        end: new Date(CT.Days.atMinute(day, minute + length)).toISOString(), isPlayableNow: true
+      });
+      plan.program.push(p);
+      minute += length;
+    }
+    return { status: response.status, body: JSON.stringify(body) };
+  }
+
   function transport(request) {
     var url = request.url;
     if (/\/dvb\/watch$/.test(url) && request.method === 'POST') {
@@ -220,10 +250,16 @@
       if (CT_SCHEDULE_DOWN) return load('graphql_error.json');
       var date = JSON.parse(request.body).variables.date.split('.'); // MM.DD.YYYY
       var day = date[2] + '-' + date[0] + '-' + date[1];
-      return load('schedule_ct1_ct24.json').then(function (r) { return shifted(r, CT_DAY, day); });
+      return load('schedule_ct1_ct24.json').then(function (r) {
+        var moved = shifted(r, CT_DAY, day);
+        return CT_BAR ? withAfternoon(moved, day) : moved;
+      });
     }
     if (url.indexOf('/stream-data/channel/') >= 0) return load('live_CH_1.json');
-    if (url.indexOf('/media/external/') >= 0) return load(/1$/.test(url) ? 'vod_drm.json' : 'vod_no_licence.json');
+    if (url.indexOf('/media/external/') >= 0) {
+      if (CT_BAR === 'vod' || CT_BAR === 'vodnostart') return load('vod_ok.json');
+      return load(/1$/.test(url) ? 'vod_drm.json' : 'vod_no_licence.json');
+    }
     if (url.indexOf('/dvb/status') >= 0) {
       return load('dvb/dvb_status.json').then(function (r) {
         var body = JSON.parse(r.body);
@@ -575,8 +611,9 @@
   }
 
   /**
-   * A simulated player for timeline targets (nothing plays in the demo): the position runs with the clock, a
-   * growing window grows with it, and the end of a finished window reports "stream completed".
+   * A simulated player for timeline targets and ČT start-over / archive (nothing plays in the demo): the position
+   * runs with the clock, a growing window (and ČT's buffer: position 0 = 3 h before it opened) grows with it, and
+   * the end of a finished window or of a VOD reports "stream completed".
    */
   function DemoBackend(cb) {
     this.cb = cb;
@@ -590,11 +627,19 @@
   }
 
   var SEEK_MS = 600;
+  var DEMO_VOD_MS = 11228160; // vod_ok.json's duration
+
+  /** Whether the stream has an end (a finished window, a VOD) or grows with the clock. */
+  DemoBackend.prototype.complete = function () {
+    var tl = this.target.timeline;
+    return tl ? tl.complete : this.target.kind === 'vod';
+  };
 
   DemoBackend.prototype.limit = function () {
     var tl = this.target.timeline;
-    var d = CT.Timeline.duration(tl.pieces) * 1000;
-    return tl.complete ? d : d + (Date.now() - this.openedAt);
+    var d = tl ? CT.Timeline.duration(tl.pieces) * 1000
+      : this.target.kind === 'vod' ? DEMO_VOD_MS : CT.Decisions.TIMESHIFT_WINDOW_MS;
+    return this.complete() ? d : d + (Date.now() - this.openedAt);
   };
 
   DemoBackend.prototype.open = function (target, startMs) {
@@ -607,7 +652,7 @@
     this.playing = true;
     this.seekUntil = 0;
     this.endedTimer = setInterval(function () {
-      if (self.playing && self.target.timeline.complete && self.position() >= self.limit()) {
+      if (self.playing && self.complete() && self.position() >= self.limit()) {
         self.base = self.limit();
         self.playing = false;
         self.cb.onEnded();
@@ -618,6 +663,7 @@
 
   DemoBackend.prototype.close = function () {
     clearInterval(this.endedTimer);
+    this.selectSubtitle(-1);
     this.target = null;
     this.playing = false;
   };
@@ -654,7 +700,7 @@
   /** Seeks (ms) and returns where to. */
   DemoBackend.prototype.seekTo = function (ms) {
     this.seekFrom = this.position();
-    this.base = Math.max(0, Math.min(ms, this.limit() - (this.target.timeline.complete ? 0 : 10000)));
+    this.base = Math.max(0, Math.min(ms, this.limit() - (this.complete() ? 0 : 10000)));
     this.seekUntil = this.since = Date.now() + SEEK_MS;
     return this.base;
   };
@@ -676,8 +722,55 @@
     return true;
   };
 
+  /** Two synthetic subtitle renditions (T62); a chosen one shows a fixed line where AVPlay's text would go. */
+  DemoBackend.prototype.subtitleTracks = function () {
+    return [{ index: 0, language: 'cs', name: 'Čeština' }, { index: 1, language: 'cs', name: 'Čeština pro neslyšící' }];
+  };
+
+  DemoBackend.prototype.currentSubtitle = function () {
+    return this.subtitle === undefined ? -1 : this.subtitle;
+  };
+
+  DemoBackend.prototype.selectSubtitle = function (index) {
+    this.subtitle = index;
+    var el = document.getElementById('subtitles');
+    if (el) el.textContent = index < 0 ? '' : 'Ukázkové titulky (' + this.subtitleTracks()[index].name + ')';
+    return true;
+  };
+
+  /** `?demo&ctbar=…`: the ČT playback once the ČT guide is there (start-over of what is on, or an archive VOD). */
+  function openCtBar(app) {
+    var tries = 0;
+    var timer = setInterval(function () {
+      var onAir = app.ctState && app.ctState.onAir ? app.ctState.onAir.CH_1 : null;
+      if (!onAir && ++tries < 20) return;
+      clearInterval(timer);
+      var now = Date.now();
+      var idec = '226411010101016';
+      if (CT_BAR === 'startover') {
+        var p = onAir && onAir.current && now - onAir.current.start < 2.5 * 3600 * 1000 ? onAir.current : null;
+        var start = p ? p.start : now - 70 * 60 * 1000;
+        app.play({
+          kind: 'startover', channelId: 'CH_1', title: p ? p.title : 'Ukázkový pořad', start: start,
+          resumeKey: 'ct:' + (p ? p.idec : idec), lengthSeconds: p ? (p.end - p.start) / 1000 : 3600
+        });
+        return;
+      }
+      var request = { kind: 'archive', idec: idec, title: 'Testovací pořad 17', episodeTitle: 'Testovací pořad 16', channelName: 'ČT art',
+        resumeKey: 'ct:' + idec, lengthSeconds: DEMO_VOD_MS / 1000 };
+      if (CT_BAR === 'vod') {
+        // with a broadcast two days ago (the decision rules: VOD), as from the guide
+        var aired = CT.Days.atMinute(CT.Days.addDays(CT.Days.today(now), -2), 20 * 60);
+        request = Object.assign(request, { kind: 'programme', channelId: 'CH_2', start: aired,
+          end: aired + DEMO_VOD_MS, isPlayableNow: true });
+      }
+      app.play(request);
+    }, 250);
+  }
+
   /** `?demo&timeline`: opens the sample timeline on the Anténa channel named Nova once the channels are there. */
   function afterStart(app) {
+    if (CT_BAR) openCtBar(app);
     if (!/[?&]timeline\b/.test(root.location.search)) return;
     var tries = 0;
     var timer = setInterval(function () {

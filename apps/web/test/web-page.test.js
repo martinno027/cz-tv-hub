@@ -29,12 +29,18 @@ test('player hint on the web: keyboard words; the audio part only with several a
   assert.equal(H('other', 3), 'Mezerník pauza · ◀ ▶ posun o 10 s · ▲ zvuk · M ztlumení · F celá obrazovka · Esc zpět');
   assert.equal(H('timeline', 1), 'Mezerník pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · M ztlumení · F celá obrazovka · Esc zpět');
   assert.match(H('timeline', 2), / · A nebo podržet Enter zvuk · M ztlumení · F celá obrazovka · Esc zpět$/);
+  // T62: the long-Enter list also offers subtitles (the timeline and the ČT bar)
+  assert.match(H('timeline', 1, 2), / · A nebo podržet Enter titulky · M/);
+  assert.match(H('timeline', 3, 1), / · A nebo podržet Enter zvuk a titulky · M/);
+  assert.equal(H('other', 1, 2), H('other', 1), 'the plain bar has no list');
   for (const kind of ['live', 'other', 'timeline']) assert.ok(!/\bOK\b|AUDIO|Zpět konec/.test(H(kind, 2)), kind);
   // through the player: tracks only once a stream is there
   const player = (target, n) => ({ target, backend: { audioTracks: () => new Array(n).fill({}) } });
   assert.match(CT.WebPage.playerHint('live', player(null, 2)), /0–9 číslo kanálu · M/);
   assert.match(CT.WebPage.playerHint('live', player({}, 2)), /A zvuk/);
   assert.match(CT.WebPage.playerHint('live', { target: {}, backend: { audioTracks: () => { throw new Error('x'); } } }), /· M ztlumení · F/);
+  const withSubs = { target: {}, backend: { audioTracks: () => [{}], subtitleTracks: () => [{}] } };
+  assert.match(CT.WebPage.playerHint('timeline', withSubs), /Enter titulky/);
 });
 
 test('mute button in the player bar (T34): the state\'s icon, what a click does as its label', () => {

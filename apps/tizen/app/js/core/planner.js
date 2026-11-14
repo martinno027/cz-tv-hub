@@ -19,7 +19,7 @@
  *            startPositionMs, dvb: DvbClient | null, recordingId: finished Anténa recording | null,
  *            timeline: the parsed window (kind 'timeline') | null,
  *            alwaysSeek: seek to startPositionMs even when it is 0 (a growing playlist starts at its live edge),
- *            psp: bool}
+ *            psp: bool, channelId: the ČT channel of a timeshift target (its guide names the bar's programmes)}
  */
 (function (root) {
   'use strict';
@@ -190,12 +190,12 @@
         var point = start + resumeSeconds * 1000;
         var bufferStart = now - CT.Decisions.TIMESHIFT_WINDOW_MS;
         return target(s.timeshift, 'timeshift', title, {
-          seekToWallClock: point,
+          seekToWallClock: point, channelId: channel.id,
           fallbackOffsetMs: Math.max(0, Math.floor((point - bufferStart) / 1000)) * 1000
         });
       }
       return target(s.timeshift, 'timeshift', title, {
-        seekToWallClock: start - CT.Decisions.START_MARGIN_MS,
+        seekToWallClock: start - CT.Decisions.START_MARGIN_MS, channelId: channel.id,
         fallbackOffsetMs: CT.Decisions.startoverOffsetSeconds(start, now) * 1000
       });
     });

@@ -273,6 +273,42 @@ test('audio tracks: hls.js renditions (LANGUAGE) and the browser\'s own audioTra
   assert.deepEqual(list.map((t) => t.enabled), [false, true]);
 });
 
+test('subtitles (T62): hls.js renditions by NAME, off = no track and no display; native text tracks; the list items', () => {
+  const Hls = fakeHls();
+  const { b } = backend(fakeVideo({}), Hls);
+  b.open({ url: 'https://cdn.example/ct.m3u8', kind: 'vod' }, 0);
+  const h = Hls.instances[0];
+  assert.deepEqual(b.subtitleTracks(), [], 'none before the manifest lists any');
+  h.subtitleTracks = [{ lang: 'cs', name: 'Skryté titulky' }, { lang: 'en', name: '' }];
+  h.subtitleTrack = -1;
+  h.subtitleDisplay = true;
+  const subs = b.subtitleTracks();
+  assert.deepEqual(subs, [{ index: 0, language: 'cs', name: 'Skryté titulky' }, { index: 1, language: 'en', name: '' }]);
+  assert.equal(b.currentSubtitle(), -1);
+  assert.equal(b.selectSubtitle(1), true);
+  assert.deepEqual([h.subtitleTrack, h.subtitleDisplay], [1, true]);
+  assert.equal(b.currentSubtitle(), 1);
+  assert.equal(b.selectSubtitle(-1), true);
+  assert.deepEqual([h.subtitleTrack, h.subtitleDisplay], [-1, false]);
+  assert.equal(b.currentSubtitle(), -1);
+  assert.equal(b.selectSubtitle(2), false, 'not there');
+  const c = CT.Mute.choice([{ index: 0, language: 'cs' }], 0, false, subs, -1);
+  assert.deepEqual(c.items.map((i) => i.label), ['Titulky: Vypnuto', 'Titulky: Skryté titulky', 'Titulky: Angličtina', 'Vypnout zvuk']);
+
+  const text = [{ kind: 'metadata', mode: 'hidden' }, { kind: 'subtitles', language: 'cs', label: 'Čeština', mode: 'disabled' },
+    { kind: 'captions', language: 'cs', label: 'Pro neslyšící', mode: 'showing' }];
+  const v = fakeVideo({ canPlay: [HLS_TYPE], audioTracks: [] });
+  v.textTracks = text;
+  const native = backend(v, fakeHls());
+  native.b.open({ url: 'https://cdn.example/ct.m3u8', kind: 'vod' }, 0);
+  assert.deepEqual(native.b.subtitleTracks().map((t) => [t.index, t.name]), [[1, 'Čeština'], [2, 'Pro neslyšící']]);
+  assert.equal(native.b.currentSubtitle(), 2);
+  assert.equal(native.b.selectSubtitle(1), true);
+  assert.deepEqual(text.map((t) => t.mode), ['hidden', 'showing', 'disabled'], 'metadata tracks untouched');
+  assert.equal(native.b.selectSubtitle(-1), true);
+  assert.equal(native.b.currentSubtitle(), -1);
+});
+
 test('hls.js: never X-Cztvhub-Client (T37) — not to the gateway\'s media, not to a CDN (no custom header, no CORS preflight)', () => {
   const Hls = fakeHls();
   const { b } = backend(fakeVideo({}), Hls);

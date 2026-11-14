@@ -1,8 +1,8 @@
 /*
  * The web's player backend (spec/web.md "Player"): an HTML5 <video> instead of Samsung's AVPlay, with the same API
  * the shared Player and TimelineController use (open, close, togglePause, pause, paused, position, duration, seekTo, preview,
- * seekBy, audioTracks, currentAudio, selectAudio, audioOutput) and the same callbacks (onReady, onError, onEnded,
- * onBuffering).
+ * seekBy, audioTracks, currentAudio, selectAudio, subtitleTracks, currentSubtitle, selectSubtitle, audioOutput) and the
+ * same callbacks (onReady, onError, onEnded, onBuffering).
  *
  * HLS natively where the browser has it together with an audio track API (Safari), else hls.js (vendor/hls.min.js).
  * hls.js adds the gateway key as `Authorization` only to the gateway's own /dvb/ URLs (never to ČT's CDN); a browser's
@@ -266,6 +266,39 @@
     var list = this.video.audioTracks;
     if (!list || index < 0 || index >= list.length) return false;
     for (var i = 0; i < list.length; i++) list[i].enabled = i === index;
+    return true;
+  };
+
+  /**
+   * Subtitles (spec/apps.md "ČT player bar (T62)"): hls.js's subtitle renditions (the manifest's NAME / LANGUAGE;
+   * hls.js draws them through the <video>'s text tracks), or the browser's own text tracks (native HLS). A rendition
+   * the manifest marks as default shows as hls.js / the browser decide; the list says which one is on.
+   */
+  WebBackend.prototype.subtitleTracks = function () {
+    if (!this.hls) return CT.SubtitleTracks.fromTextTracks(this.video.textTracks);
+    var tracks = this.hls.subtitleTracks || [];
+    var out = [];
+    for (var i = 0; i < tracks.length; i++) out.push({ index: i, language: tracks[i].lang || '', name: tracks[i].name || '' });
+    return out;
+  };
+
+  WebBackend.prototype.currentSubtitle = function () {
+    if (!this.hls) return CT.SubtitleTracks.shownTextTrack(this.video.textTracks);
+    var track = this.hls.subtitleTrack;
+    return this.hls.subtitleDisplay && typeof track === 'number' && track >= 0 ? track : -1;
+  };
+
+  /** Shows subtitle rendition `index` (-1 = off); false for one that is not there. */
+  WebBackend.prototype.selectSubtitle = function (index) {
+    if (!this.hls) return CT.SubtitleTracks.showTextTrack(this.video.textTracks, index);
+    if (index >= (this.hls.subtitleTracks || []).length) return false;
+    if (index < 0) {
+      this.hls.subtitleTrack = -1; // stops loading them too
+      this.hls.subtitleDisplay = false;
+      return true;
+    }
+    this.hls.subtitleTrack = index;
+    this.hls.subtitleDisplay = true;
     return true;
   };
 
