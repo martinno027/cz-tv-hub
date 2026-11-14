@@ -91,6 +91,7 @@ behaviour of the verified Python reference (`src/cztvhub/api.py`, `plugin.py`, `
    the programme's end, and at least every minute). Without guide data for now: the channel name as before.
    Start-over, archive and recordings: the programme title, subtitle = channel name (+ episode title if any). Live: seek within the timeshift buffer when started from it.
    Archive: normal VOD seeking. Subtitles/audio tracks from the HLS manifest via native UI if cheap.
+   ČT start-over / "Zpět v čase" and archive use the own bar of "ČT player bar (T62)" instead of the native controls.
    **Audio choice for Anténa** (continuous recording, `spec/dvb-gateway.md`): a programme or live channel with several
    broadcast audio tracks comes as a master playlist with one `#EXT-X-MEDIA TYPE=AUDIO` rendition per track (Czech
    labels such as "Čeština", "Angličtina (Dolby)", "Čeština (pro nevidomé)"). The player starts with the default
@@ -182,8 +183,8 @@ A recorded Anténa programme of the continuous recording (`b…` id = matching
 uuids are hex and can start with `b`) (airing or ended) plays in a **window of its
 channel's recording** (`spec/dvb-gateway.md` "Channel timeline": programme ± 3 h, at most 12 h), not as the bare
 programme, so the viewer can go before the EPG start (EPG times are often off) and on into the neighbouring
-programmes, as far as the recording reaches. TVHeadend DVR recordings (uuid ids), ČT and live keep the native
-player as before; "Od začátku" of a growing DVR recording seeks to 0 explicitly (players start a growing playlist
+programmes, as far as the recording reaches. TVHeadend DVR recordings (uuid ids) and live keep the native
+player as before; ČT start-over and archive use the same bar (T62, "ČT player bar" below); "Od začátku" of a growing DVR recording seeks to 0 explicitly (players start a growing playlist
 at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
 - **Open**: `GET /dvb/timeline/<id>` (JSON), then play its `playlist` (accepted only as a gateway path: starts with
   `/`, not `//`; the key goes with every request). A failed JSON or playlist fetch for `previous`/`next` keeps the
@@ -258,6 +259,44 @@ at its live edge; the gateway's `EXT-X-START:TIME-OFFSET=0` is the fallback).
   they now resume 30 s later (accepted).
 - Golden cases: `spec/fixtures/timeline_cases.json` (`map`, `edge`, `hold`, `trick`, `labels`, `edges`, `programmeAt`,
   `jump`, `resume`), tested in all three apps.
+
+## ČT player bar (T62)
+Owner 2026-11-14 (T62, after a recording of the ČT player: „rychlost 8x a 16x nefunguje"; asked whether the
+Anténa rewind should also go into the ČT player: „Ano, všude stejně"): **ČT start-over / "Zpět v čase"
+(`timeshift`) and the ČT archive (iVysílání VOD)** play with the **same own bar and keys as the Anténa timeline
+player** (above) in all three apps and the web, instead of the native controls. Unchanged (native controls / the
+Samsung OSD as before): ČT **Živě** (`main`, not seekable), Anténa live, TVHeadend DVR recordings and the Chamber
+of Deputies (live only, no rewind: hard rule). Nothing changes in which stream plays or how it is resolved (no
+recording, caching or proxying; redirect only, as before).
+- **One window per playback**, no `previous`/`next` (the edges clamp), no ad breaks:
+  - **timeshift**: the window is the buffer, **wall clock `now − 3 h` … `now`**, growing, its start sliding with
+    `now` (`ct_bar_cases.json` `window`). The playhead's wall clock comes from `#EXT-X-PROGRAM-DATE-TIME` where the
+    player has it (AVPlayer `currentDate()`, ExoPlayer `windowStartTimeMs`), else the estimate already used for
+    start-over and "Pokračovat" (buffer start = the moment of planning − 3 h; Samsung and the web always).
+  - **VOD**: wall clock = the programme's start (guide / archive `aired`) + position, window `start` …
+    `start + duration`, complete. Without a known start the labels are the **elapsed position** `H:MM:SS` (`0:12:34`)
+    and the bar's ends `0:00` and the duration (`ct_bar_cases.json` `labels`).
+- **Clamps** (`ct_bar_cases.json` `clamp`): every seek and the moving playhead stay inside **[window start + 60 s,
+  now − 10 s]** for timeshift (the oldest minute may already be gone from the CDN; 10 s = the existing live-edge
+  guard) and **[0, duration − 10 s]** for VOD. Reaching a clamp while moving stops there and plays (as a window
+  edge without a neighbour). The lower timeshift clamp slides with `now` also while the movement goes on.
+- **Bar**: as the Anténa bar with one piece (no gaps): title = the programme at the playhead from the ČT guide of
+  that channel (timeshift; ticks at its programme boundaries) or the programme itself (VOD, no ticks); second line =
+  channel (· episode); the clock label and the ends as `labels`/`edges` above (timeshift right end = "Teď").
+- **Keys**: as the Anténa player — ← / → click ±10 s, held = rewind / fast-forward at speeds 1, 2, 3, 4, 8, 16
+  (`trick`), OK / play-pause, Back, ⏪ / ⏩, ▲ / ▼ = programme start / next programme (`jump`, from the ČT guide;
+  VOD: ▲ = start of the programme, ▼ nothing). No zapping and no digits (as before in these modes); Samsung's ▲ no
+  longer switches the audio track here (AUDIO/MTS, green and long OK do).
+- **Audio and subtitles**: long OK opens the list (as the Anténa player) with the audio renditions **and the
+  subtitles** ("Titulky: Vypnuto" + the stream's subtitle renditions, by their names; no subtitles in the stream =
+  no subtitle items), the mute item as before. The Anténa timeline player gets the same subtitle items.
+- **Pokračovat** as before (`ct:<idec>`): the programme at the playhead with an `idec` is remembered, progress =
+  its wall clock − programme start (timeshift), the position (VOD). Re-resolve after an error resumes at the
+  playhead's wall clock / position as before; a movement in progress ends there.
+- **Picture while moving**: as the Anténa player (AVPlayer and `video.fastSeek` follow at most once a second,
+  Android / AVPlay / Chrome keep the last picture until the stop).
+- Golden cases: `spec/fixtures/ct_bar_cases.json` (`window`, `clamp`, `labels`) plus the Anténa `trick`, `hold`,
+  `jump`, `labels`, `edges`, `programmeAt` cases, tested in all three apps.
 
 ## Programme page (T15)
 Selecting a programme in the **TV průvodce** opens a full-screen **page of that programme** instead of the

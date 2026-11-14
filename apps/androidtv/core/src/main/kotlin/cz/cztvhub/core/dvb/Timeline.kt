@@ -281,7 +281,7 @@ class TimelineTrick {
     var direction = 0
         private set
 
-    /** 1…4 while moving, 0 stopped. */
+    /** One of [TimelineRules.TRICK_SPEEDS] while moving, 0 stopped. */
     var speed = 0
         private set
 

@@ -1,0 +1,138 @@
+{
+ "_doc": "T62 ČT player bar (spec/apps.md \"ČT player bar\"). Times are ISO UTC, W = 3 h. window: kind timeshift|vod, now, start (vod: the programme's start or null), duration (vod, s) -> start/end (ISO or null) and growing. clamp: timeshift targets are wall clocks (ISO) inside [now - 3 h + 60 s, now - 10 s]; vod targets are positions (s) inside [0, duration - 10]. labels: vod without a known start -> clock = the elapsed position H:MM:SS, edges = 0:00 and the duration H:MM (whole minutes, floored).",
+ "window": [
+  {
+   "name": "timeshift: the buffer up to now",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:00:00Z",
+   "start": "2026-11-14T14:00:00Z",
+   "end": "2026-11-14T17:00:00Z",
+   "growing": true
+  },
+  {
+   "name": "timeshift: the start slides with now",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:10:00Z",
+   "start": "2026-11-14T14:10:00Z",
+   "end": "2026-11-14T17:10:00Z",
+   "growing": true
+  },
+  {
+   "name": "vod with a known start",
+   "kind": "vod",
+   "now": "2026-11-14T17:00:00Z",
+   "programmeStart": "2026-11-10T18:55:00Z",
+   "duration": 3600,
+   "start": "2026-11-10T18:55:00Z",
+   "end": "2026-11-10T19:55:00Z",
+   "growing": false
+  },
+  {
+   "name": "vod without a start: no wall clock",
+   "kind": "vod",
+   "now": "2026-11-14T17:00:00Z",
+   "programmeStart": null,
+   "duration": 3600,
+   "start": null,
+   "end": null,
+   "growing": false
+  }
+ ],
+ "clamp": [
+  {
+   "name": "timeshift: inside stays",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:00:00Z",
+   "target": "2026-11-14T16:00:00Z",
+   "result": "2026-11-14T16:00:00Z"
+  },
+  {
+   "name": "timeshift: the oldest minute is not used",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:00:00Z",
+   "target": "2026-11-14T14:00:30Z",
+   "result": "2026-11-14T14:01:00Z"
+  },
+  {
+   "name": "timeshift: before the buffer",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:00:00Z",
+   "target": "2026-11-14T12:00:00Z",
+   "result": "2026-11-14T14:01:00Z"
+  },
+  {
+   "name": "timeshift: the lower clamp slides with now",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:05:00Z",
+   "target": "2026-11-14T14:01:00Z",
+   "result": "2026-11-14T14:06:00Z"
+  },
+  {
+   "name": "timeshift: 10 s before the live edge",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:00:00Z",
+   "target": "2026-11-14T16:59:55Z",
+   "result": "2026-11-14T16:59:50Z"
+  },
+  {
+   "name": "timeshift: past now",
+   "kind": "timeshift",
+   "now": "2026-11-14T17:00:00Z",
+   "target": "2026-11-14T17:30:00Z",
+   "result": "2026-11-14T16:59:50Z"
+  },
+  {
+   "name": "vod: inside stays",
+   "kind": "vod",
+   "duration": 3600,
+   "target": 1200,
+   "result": 1200
+  },
+  {
+   "name": "vod: before the start",
+   "kind": "vod",
+   "duration": 3600,
+   "target": -30,
+   "result": 0
+  },
+  {
+   "name": "vod: 10 s before the end",
+   "kind": "vod",
+   "duration": 3600,
+   "target": 3595,
+   "result": 3590
+  }
+ ],
+ "labels": [
+  {
+   "name": "elapsed under an hour",
+   "position": 754,
+   "duration": 3600,
+   "clock": "0:12:34",
+   "edges": [
+    "0:00",
+    "1:00"
+   ]
+  },
+  {
+   "name": "elapsed over an hour",
+   "position": 3723,
+   "duration": 5250,
+   "clock": "1:02:03",
+   "edges": [
+    "0:00",
+    "1:27"
+   ]
+  },
+  {
+   "name": "start",
+   "position": 0,
+   "duration": 1790,
+   "clock": "0:00:00",
+   "edges": [
+    "0:00",
+    "0:29"
+   ]
+  }
+ ]
+}
