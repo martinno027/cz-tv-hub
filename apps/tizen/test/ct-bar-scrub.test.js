@@ -19,7 +19,8 @@ const at = (iso) => Date.parse(iso);
 const GUIDE = [ // ČT1's guide around the buffer (14:00–17:00 UTC)
   { idec: 'A1', title: 'Ráno', episodeTitle: '', start: at('2026-11-14T13:00:00Z'), end: at('2026-11-14T15:00:00Z'), imageUrl: '' },
   { idec: 'B1', title: 'Události', episodeTitle: 'Díl 5', start: at('2026-11-14T15:00:00Z'), end: at('2026-11-14T16:30:00Z'), imageUrl: 'https://img.example/b.jpg' },
-  { idec: 'C1', title: 'Kosmo', episodeTitle: '', start: at('2026-11-14T16:30:00Z'), end: at('2026-11-14T17:30:00Z'), imageUrl: '' }
+  { idec: 'C1', title: 'Kosmo', episodeTitle: '', start: at('2026-11-14T16:30:00Z'), end: at('2026-11-14T17:30:00Z'), imageUrl: '' },
+  { idec: 'D1', title: 'Večerníček', episodeTitle: '', start: at('2026-11-14T17:30:00Z'), end: at('2026-11-14T17:40:00Z'), imageUrl: '' }
 ];
 const $ = (id) => global.document.getElementById(id);
 const near = (a, b, what, eps) => assert.ok(Math.abs(a - b) < (eps || 1e-6), (what || '') + ': ' + a + ' ≠ ' + b);
@@ -74,7 +75,7 @@ test('timeshift: the window is now − 3 h … now and slides with now; ticks an
   await withClock(NOW, async (clock) => {
     const { ctl, days } = await ctBar(clock, 'timeshift', { position: pos(at('2026-11-14T15:01:00Z')) });
     assert.deepEqual(days, ['2026-11-14'], 'the guide of the broadcast day(s) in the buffer');
-    assert.equal(ctl.tl.programmes.length, 3);
+    assert.equal(ctl.tl.programmes.length, 4);
     assert.equal($('osd-title').textContent, 'Události');
     assert.equal($('osd-subtitle').textContent, 'ČT1 · Díl 5', 'the ČT channel of the target, not the player\'s name');
     assert.equal($('tl-clock').textContent, 'Dnes 16:01:00');
@@ -300,5 +301,65 @@ test('the Anténa timeline gets the same subtitle items', async () => {
       ['Čeština', 'Angličtina', 'Titulky: Vypnuto', 'Titulky: DVB titulky', 'Vypnout zvuk']);
     assert.equal(ctl.audioList.focus, 0, 'several audio tracks: the focus on the current one, as before');
     ctl.stop();
+  });
+});
+
+test('▼ to the programme after the one airing now (in the future) lands 10 s before the live edge', async () => {
+  await withClock(NOW, async (clock) => {
+    const { ctl, backend } = await ctBar(clock, 'timeshift', { position: pos(at('2026-11-14T16:45:00Z')) });
+    click(clock, ctl, 'down');
+    assert.equal(backend.seeks.length, 1);
+    near(backend.seeks[0], pos(clock.now() - 10 * 1000), 'now − 10 s, not Večerníček\'s start', 0.2);
+  });
+});
+
+test('"Pokračovat": the 30 s before the opened programme count as it (progress 0), the previous one is left alone', async () => {
+  await withClock(NOW, async (clock) => {
+    const { ctl, store, saved, player } = await ctBar(clock, 'timeshift', { position: pos(GUIDE[1].start - 20 * 1000) });
+    ctl.saveProgress(store, player.request);
+    assert.deepEqual(saved.map((x) => [x.key, x.progress]), [['ct:B1', 0]], 'Události at 0, not Ráno near its end');
+    player.backend.pos = pos(GUIDE[1].start - 40 * 1000) * 1000; // before the margin: Ráno itself
+    ctl.saveProgress(store, player.request);
+    assert.deepEqual(saved[1].key, 'ct:A1');
+  });
+  await withClock(NOW, async (clock) => { // without the guide: the request's own key at 0
+    const { ctl, store, saved, player } = await ctBar(clock, 'timeshift', { position: pos(GUIDE[1].start - 20 * 1000), guideFails: true });
+    ctl.saveProgress(store, player.request);
+    assert.deepEqual(saved.map((x) => [x.key, x.progress]), [['ct:B1', 0]]);
+  });
+});
+
+test('a paused playhead the buffer slid past plays again from the lower clamp', async () => {
+  await withClock(NOW, async (clock) => {
+    const { ctl, backend } = await ctBar(clock, 'timeshift', { position: 70 });
+    click(clock, ctl, 'playpause');
+    assert.equal(backend.playing, false);
+    clock.advance(30 * 1000); // the clamp is now at 90 s
+    click(clock, ctl, 'playpause');
+    assert.equal(backend.seeks.length, 1);
+    near(backend.seeks[0], pos(clock.now() - W * 1000 + 60 * 1000), 'the lower clamp', 0.2);
+    assert.equal(backend.playing, true);
+  });
+  await withClock(NOW, async (clock) => { // still inside: just plays on, no seek
+    const { ctl, backend } = await ctBar(clock, 'timeshift', { position: 3600 });
+    click(clock, ctl, 'playpause');
+    clock.advance(30 * 1000);
+    click(clock, ctl, 'playpause');
+    assert.deepEqual(backend.seeks, []);
+    assert.equal(backend.playing, true);
+  });
+});
+
+test('the list is titled "Zvuk a titulky" with subtitles in the stream, else "Zvuk"', async () => {
+  await withClock(NOW, async (clock) => {
+    const { ctl } = await ctBar(clock, 'timeshift', { position: 3600, subtitles: [{ index: 4, language: 'cs', name: '' }] });
+    ctl.openAudioList();
+    assert.equal($('audio-list-title').textContent, 'Zvuk a titulky');
+    ctl.closeAudioList();
+  });
+  await withClock(NOW, async (clock) => {
+    const { ctl } = await ctBar(clock, 'timeshift', { position: 3600 });
+    ctl.openAudioList();
+    assert.equal($('audio-list-title').textContent, 'Zvuk');
   });
 });

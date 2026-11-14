@@ -190,10 +190,22 @@
       return;
     }
     var tl = this.controller ? this.controller.tl : null;
+    // in the 30 s before the opened programme's start the playhead counts as that programme (progress 0): starting
+    // it does not clear the previous programme's "Pokračovat"
+    var opened = num(request.start) && time < request.start && time >= request.start - CT.Decisions.START_MARGIN_MS;
+    if (opened) {
+      var own = tl ? tl.programmes.filter(function (p) { return p.start === request.start && p.idec; })[0] : null;
+      if (own) {
+        programme = own;
+      } else {
+        if (request.resumeKey) store.save(request.resumeKey, 0, request.lengthSeconds, request.resumeMeta);
+        return;
+      }
+    }
     if (programme && programme.idec) {
       var key = 'ct:' + programme.idec;
-      var own = request.resumeKey === key;
-      var meta = own && request.resumeMeta ? request.resumeMeta
+      var mine = request.resumeKey === key;
+      var meta = mine && request.resumeMeta ? request.resumeMeta
         : CT.ResumeRules.meta(programme.title, programme.subtitle, programme.imageUrl, 'ct', programme.start, tl ? tl.channel : null);
       store.save(key, T.progress(programme, time), (programme.end - programme.start) / 1000, meta);
       return;

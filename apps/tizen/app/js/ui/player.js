@@ -20,7 +20,9 @@
   var ZAP_BOX_MS = 3000;
   var HINT_LIVE = 'OK pauza · ▲ ▼ kanál · 0–9 číslo kanálu · AUDIO zvuk · Zpět konec';
   var HINT_OTHER = 'OK pauza · ◀ ▶ posun o 10 s · ⏪ ⏩ o minutu · ▲ AUDIO zvuk · Zpět konec';
-  var HINT_TIMELINE = 'OK pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk a titulky · Zpět konec';
+  var HINT_TIMELINE = 'OK pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk · Zpět konec';
+  // T62: with subtitles in the stream the long-OK list offers them too (spec/apps.md "ČT player bar")
+  var HINT_TIMELINE_SUBTITLES = 'OK pauza · ◀ ▶ 10 s, podržet = převíjení · ▲ ▼ začátek pořadu · AUDIO nebo podržet OK zvuk a titulky · Zpět konec';
 
   function isLive(request) {
     return !!request && (request.kind === 'live' || request.kind === 'dvbLive' || request.kind === 'pspLive');
@@ -373,7 +375,8 @@
     this.watchFor = null; // the request whose watch report is in progress (T53): re-resolving it is the same session
     var cb = {
       onReady: function () {
-        self.showHint(self.hintKind); // the platform's hint may depend on the stream (the web: its audio tracks)
+        self.applySubtitleChoice(); // subtitles start off; the viewer's choice holds across a re-resolve (T62)
+        self.showHint(self.hintKind); // the hint may depend on the stream (its audio tracks, its subtitles)
         self.hideMessage();
         self.showOsd();
         self.startBreaks();
@@ -402,10 +405,38 @@
 
   /** The key hint under the bar: 'live' | 'other' | 'timeline'; the platform may word it (CT.Platform.playerHint). */
   Player.prototype.showHint = function (kind) {
-    var own = { live: HINT_LIVE, other: HINT_OTHER, timeline: HINT_TIMELINE }[kind];
+    var own = { live: HINT_LIVE, other: HINT_OTHER, timeline: this.subtitleCount() ? HINT_TIMELINE_SUBTITLES : HINT_TIMELINE }[kind];
     var hook = CT.Platform.playerHint;
     this.hintKind = kind;
     $('osd-hint').textContent = (hook ? hook(kind, this) : null) || own;
+  };
+
+  /** Subtitle renditions of what plays now (0 before the stream is there). */
+  Player.prototype.subtitleCount = function () {
+    try {
+      return this.target && this.backend.subtitleTracks ? this.backend.subtitleTracks().length : 0;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  /** The viewer picked subtitles in the long-OK list: `track` = {index, language, name}, null = off. */
+  Player.prototype.chooseSubtitle = function (track) {
+    this.subtitleChoice = track;
+  };
+
+  /**
+   * A stream became ready: every backend starts with subtitles off; the choice of this playback (kept across a
+   * re-resolve or the background, forgotten when another programme or channel opens) is put back, the same
+   * rendition by name and language, else by its index.
+   */
+  Player.prototype.applySubtitleChoice = function () {
+    var want = this.subtitleChoice;
+    if (!want || !this.backend.subtitleTracks) return;
+    var tracks = this.backend.subtitleTracks();
+    var same = tracks.filter(function (t) { return t.name === want.name && t.language === want.language; })[0] ||
+      tracks.filter(function (t) { return t.index === want.index; })[0];
+    if (same) this.backend.selectSubtitle(same.index);
   };
 
   Player.prototype.isOpen = function () {
@@ -414,6 +445,7 @@
 
   Player.prototype.open = function (request) {
     this.request = request;
+    this.subtitleChoice = null;
     this.lastReResolveAt = 0;
     this.timelineAt = null;
     // a new opening gets its own timeline controller: key-ups are trusted per opening (spec/apps.md T55), also when
@@ -454,6 +486,7 @@
     var item = this.zapList[index];
     this.reportStop(); // the channel changes: the old session ends now, the new one starts once it plays
     this.request = this.app.liveRequest(item);
+    this.subtitleChoice = null;
     this.lastReResolveAt = 0;
     this.updateTitle();
     this.showZapBox(index);
@@ -563,6 +596,8 @@
         else if (target.kind === 'timeshift') start = target.fallbackOffsetMs;
         else start = 0;
       }
+      // the ČT bar: the start is clamped too (T62: a programme that began almost 3 h ago starts at buffer start + 60 s)
+      if (self.tl && self.tl.source.kind === 'ct') start = Math.round(self.tl.inRange(start / 1000) * 1000);
       try {
         self.backend.open(target, start);
       } catch (e) {

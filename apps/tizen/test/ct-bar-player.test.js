@@ -215,3 +215,57 @@ test('AVPlay subtitles: TEXT tracks listed, start off, chosen = setSelectTrack +
     player.close();
   });
 });
+
+test('the start position is clamped: start-over of a programme that began almost 3 h ago starts at buffer start + 60 s', async () => {
+  await withClock(NOW, async () => {
+    const { player, app, av } = samsungPlayer();
+    app.planner.plan = (r) => Promise.resolve(Object.assign(targetFor(r), { fallbackOffsetMs: 5 * 1000 }));
+    player.open({ kind: 'startover', channelId: 'CH_1', title: 'Události', start: NOW - W * 1000 + 35 * 1000 });
+    await flush();
+    assert.deepEqual(av.seeks, [60 * 1000]);
+    player.close();
+  });
+});
+
+test('Samsung hint: subtitles named only when the stream has some', async () => {
+  await withClock(NOW, async () => {
+    const { player } = samsungPlayer();
+    player.open({ kind: 'archive', idec: '42', title: 'Kosmo' });
+    await flush();
+    assert.match($('osd-hint').textContent, /podržet OK zvuk · Zpět/);
+    player.close();
+  });
+  await withClock(NOW, async () => {
+    const { player, av } = samsungPlayer();
+    av.tracks.push({ type: 'TEXT', index: 3, extra_info: '{"track_lang":"cs"}' });
+    player.open({ kind: 'archive', idec: '42', title: 'Kosmo' });
+    await flush();
+    assert.match($('osd-hint').textContent, /podržet OK zvuk a titulky · Zpět/);
+    player.close();
+  });
+});
+
+test('subtitles start off; the chosen ones come back after a re-resolve, not for the next programme', async () => {
+  await withClock(NOW, async () => {
+    const { player, av } = samsungPlayer();
+    av.tracks.push({ type: 'TEXT', index: 3, extra_info: '{"track_lang":"cs"}' });
+    av.duration = 3600 * 1000;
+    player.open({ kind: 'archive', idec: '42', title: 'Kosmo' });
+    await flush();
+    player.tl.openAudioList();
+    player.tl.onAudioListKey('down'); // "Titulky: Čeština" (one audio track: the focus starts on "Vypnuto")
+    player.tl.onAudioListKey('enter');
+    assert.equal(player.backend.currentSubtitle(), 3);
+    av.calls.length = 0;
+    player.onError('expired');
+    await flush();
+    assert.deepEqual(av.calls, [['silent', true], ['select', 'TEXT', 3], ['silent', false]], 'off at the start, then the choice');
+    assert.equal(player.backend.currentSubtitle(), 3);
+    player.close();
+    av.calls.length = 0;
+    player.open({ kind: 'archive', idec: '43', title: 'Jiný' });
+    await flush();
+    assert.deepEqual(av.calls, [['silent', true]], 'another programme: off');
+    player.close();
+  });
+});

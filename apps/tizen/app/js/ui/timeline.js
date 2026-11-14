@@ -551,6 +551,12 @@
       this.reopen(this.position());
       return;
     }
+    // the ČT buffer slid past a paused playhead: playing again starts at the lower clamp (T62)
+    var r = this.range();
+    if (r && this.backend().paused() && this.shownPosition() < r.lo) {
+      this.seekTo(r.lo, this.targetTime(r.lo), true);
+      return;
+    }
     this.backend().togglePause();
     this.render();
   };
@@ -682,6 +688,7 @@
     var shown = b.currentSubtitle ? b.currentSubtitle() : -1;
     var choice = CT.Mute.choice(tracks, current, this.player.mute.muted, subtitles, shown);
     this.audioList = { tracks: tracks, subtitles: subtitles, items: choice.items, note: choice.note, focus: choice.focus };
+    $('audio-list-title').textContent = subtitles.length ? 'Zvuk a titulky' : 'Zvuk';
     this.renderAudioList();
     $('audio-list').classList.add('visible');
   };
@@ -722,8 +729,11 @@
         if (item.kind === 'mute') {
           this.player.toggleMute();
         } else if (item.kind === 'subtitle') {
-          var index = item.position < 0 ? -1 : list.subtitles[item.position].index;
-          if (this.backend().selectSubtitle(index)) $('osd-state').textContent = item.label;
+          var track = item.position < 0 ? null : list.subtitles[item.position];
+          if (this.backend().selectSubtitle(track ? track.index : -1)) {
+            $('osd-state').textContent = item.label;
+            if (this.player.chooseSubtitle) this.player.chooseSubtitle(track); // holds across a re-resolve
+          }
         } else if (this.backend().selectAudio(list.tracks[item.position].index)) {
           $('osd-state').textContent = CT.AudioTracks.osd(list.tracks, item.position);
         }

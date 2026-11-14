@@ -80,6 +80,10 @@
     v.addEventListener('playing', function () { if (self.opened) cb.onBuffering(false); });
     v.addEventListener('waiting', function () { if (self.opened) cb.onBuffering(true); });
     v.addEventListener('ended', function () { if (self.opened) cb.onEnded(); });
+    // native HLS (Safari) adds the stream's text tracks as it reads them and may show a default one: off (T62)
+    if (v.textTracks && v.textTracks.addEventListener) {
+      v.textTracks.addEventListener('addtrack', function () { if (!self.hls && !self.subtitleChosen) self.subtitlesOff(); });
+    }
     v.addEventListener('error', function () {
       // the error of clearing the source in close() is not an error; hls.js reports its own
       if (self.opened && !self.hls && v.getAttribute('src')) cb.onError('video error');
@@ -121,6 +125,7 @@
     var start = function () {
       if (session !== self.session || started) return;
       started = true;
+      self.subtitlesOff(); // subtitles start off (T62); the Player puts the viewer's choice back in onReady
       self.started = true;
       self.playVideo();
       cb.onReady();
@@ -131,6 +136,12 @@
       var Hls = this.Hls;
       var hls = this.hls = new Hls(this.hlsConfig(startSeconds));
       hls.on(Hls.Events.MANIFEST_PARSED, start);
+      // hls.js selects a DEFAULT/AUTOSELECT rendition by itself when the list arrives: off again unless chosen
+      if (Hls.Events.SUBTITLE_TRACKS_UPDATED) {
+        hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, function () {
+          if (session === self.session && !self.subtitleChosen) self.subtitlesOff();
+        });
+      }
       hls.on(Hls.Events.ERROR, function (event, data) {
         if (session !== self.session || !data || !data.fatal) return;
         cb.onError(String(data.type) + ': ' + String(data.details));
@@ -164,6 +175,7 @@
   WebBackend.prototype.close = function () {
     var v = this.video;
     this.session++;
+    this.subtitleChosen = false;
     this.opened = false;
     this.started = false;
     if (this.hls) {
@@ -288,10 +300,24 @@
     return this.hls.subtitleDisplay && typeof track === 'number' && track >= 0 ? track : -1;
   };
 
+  /** No subtitles shown (the start of every stream, T62): hls.js's own default selection or the browser's. */
+  WebBackend.prototype.subtitlesOff = function () {
+    if (!this.hls) {
+      CT.SubtitleTracks.showTextTrack(this.video.textTracks, -1);
+      return;
+    }
+    this.hls.subtitleTrack = -1;
+    this.hls.subtitleDisplay = false;
+  };
+
   /** Shows subtitle rendition `index` (-1 = off); false for one that is not there. */
   WebBackend.prototype.selectSubtitle = function (index) {
-    if (!this.hls) return CT.SubtitleTracks.showTextTrack(this.video.textTracks, index);
+    if (!this.hls) {
+      this.subtitleChosen = index >= 0;
+      return CT.SubtitleTracks.showTextTrack(this.video.textTracks, index);
+    }
     if (index >= (this.hls.subtitleTracks || []).length) return false;
+    this.subtitleChosen = index >= 0;
     if (index < 0) {
       this.hls.subtitleTrack = -1; // stops loading them too
       this.hls.subtitleDisplay = false;
