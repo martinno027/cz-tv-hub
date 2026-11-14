@@ -152,6 +152,34 @@ class CtBarTest {
         assertEquals("the start is no edge moving forward", TimelineEdge.SEEK, forward.clampEdge(0, 1e9, 1e10))
     }
 
+    @Test fun theBufferEndsAtTheStreamsEndNotTheClock() {
+        // tvOS T62: ČT's stream ended 184–207 s behind the real clock. Golden `now` = that end.
+        val streamEnd = now.minusSeconds(200)
+        val windowStart = streamEnd.minus(Duration.ofHours(3))
+        assertEquals(streamEnd.toEpochMilli(), CtBarRules.streamEndMs(windowStart.toEpochMilli(), 3 * 3_600_000L))
+        assertNull("no date-time: the real clock stands in", CtBarRules.streamEndMs(null, 3 * 3_600_000L))
+        assertNull(CtBarRules.streamEndMs(windowStart.toEpochMilli(), null))
+        val clock = BarClock(now, streamEnd = streamEnd)
+        assertEquals(streamEnd, clock.liveEnd)
+        assertEquals(now, BarClock(now).liveEnd)
+        val window = CtBarWindow.timeshift(now.minusSeconds(600), "Pořad")
+        assertEquals("upper = end − 10 s", streamEnd.minusSeconds(10), window.toTime(window.upper(clock)))
+        assertEquals("lower = end − 3 h + 60 s", streamEnd.minus(Duration.ofHours(3)).plusSeconds(60), window.toTime(window.lower(clock)))
+        assertEquals("a seek to the real now − 10 s lies past the end", streamEnd.minusSeconds(10),
+            window.toTime(window.clamp(window.toPosition(now.minusSeconds(10)), clock)))
+        assertEquals(TimelineEdge.CLAMP, window.edge(window.toPosition(now.minusSeconds(10)), clock))
+        val frame = window.frame(window.toPosition(streamEnd.minusSeconds(60)), clock, "ČT1")
+        assertEquals(streamEnd.toEpochMilli(), frame.endMs)
+        assertEquals(streamEnd.minus(Duration.ofHours(3)).toEpochMilli(), frame.startMs)
+        assertEquals("Teď", frame.endLabel)
+        // The clamps differ from the clock-based ones.
+        assertNotEquals(window.upper(BarClock(now)), window.upper(clock), 0.001)
+        val forward = TimelineTrick()
+        forward.media(forward = true, atMs = 0, from = window.toPosition(streamEnd.minusSeconds(40)))
+        assertEquals("fast-forward stops at the stream's end − 10 s", TimelineEdge.CLAMP, window.movingEdge(forward, 1_000, clock))
+        assertEquals(TimelineEdge.SEEK, window.movingEdge(forward, 1_000, BarClock(now)))
+    }
+
     @Test fun barSecondsStayOnTheWallClockWhileThePlayersWindowSlides() {
         // The player's window starts at 14:00 at first, at 14:10 ten minutes later; the same frame has the same time.
         val frameMs = Instant.parse("2026-11-14T16:00:00Z").toEpochMilli()

@@ -660,9 +660,14 @@ class PlayerActivity : ComponentActivity() {
         if (timeline.isEmpty) return
         val window = timeline.getWindow(exo.currentMediaItemIndex, Timeline.Window())
         if (window.isPlaceholder || window.durationMs == C.TIME_UNSET) return
-        // The ČT bar keeps every seek inside the buffer's clamps (T62): a minute after its start, 10 s before now.
+        // The ČT bar keeps every seek inside the buffer's clamps (T62): a minute after its start, 10 s before its end
+        // (the stream's end, which lags the real clock; the real clock without date-time).
         val buffer = ctBar?.kind == CtBarKind.TIMESHIFT
-        val target = if (buffer) CtBarRules.clampTimeshift(Instant.ofEpochMilli(wallClock), Instant.now()).toEpochMilli() else wallClock
+        val target = if (buffer) {
+            CtBarRules.clampTimeshift(Instant.ofEpochMilli(wallClock), streamEnd(exo) ?: Instant.now()).toEpochMilli()
+        } else {
+            wallClock
+        }
         val position = if (window.windowStartTimeMs != C.TIME_UNSET) {
             target - window.windowStartTimeMs
         } else {
@@ -896,8 +901,22 @@ class PlayerActivity : ComponentActivity() {
 
     /** Now and the window's length the player knows (a growing Anténa window, the ČT VOD), for the bar's rules. */
     private fun barClock(): BarClock {
-        val known = player?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }?.let { it / 1000.0 }
-        return BarClock(Instant.now(), known)
+        val exo = player
+        val known = exo?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }?.let { it / 1000.0 }
+        val streamEnd = if (exo != null && ctBar?.kind == CtBarKind.TIMESHIFT) streamEnd(exo) else null
+        return BarClock(Instant.now(), known, streamEnd)
+    }
+
+    /**
+     * The ČT buffer's end on the wall clock (T62: it lags the real clock by minutes): program date-time + window
+     * duration; null without date-time (the estimate puts the end at the real clock).
+     */
+    private fun streamEnd(exo: ExoPlayer): Instant? {
+        val window = liveWindow(exo) ?: return null
+        return CtBarRules.streamEndMs(
+            window.windowStartTimeMs.takeIf { it != C.TIME_UNSET },
+            window.durationMs.takeIf { it != C.TIME_UNSET },
+        )?.let(Instant::ofEpochMilli)
     }
 
     /** The Anténa window's length the bar and the edges use: a growing window also what the player already knows. */

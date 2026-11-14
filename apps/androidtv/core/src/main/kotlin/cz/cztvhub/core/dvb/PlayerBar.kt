@@ -3,8 +3,15 @@ package cz.cztvhub.core.dvb
 import cz.cztvhub.core.PlayerTitle
 import java.time.Instant
 
-/** What the bar's rules need of the moment: [now], and the window's length the player knows ([knownDuration], s). */
-data class BarClock(val now: Instant, val knownDuration: Double? = null)
+/**
+ * What the bar's rules need of the moment: [now] (the real clock: day labels), the window's length the player knows
+ * ([knownDuration], s) and, for the ČT buffer, the wall clock of the stream's end ([streamEnd], T62: ČT's stream
+ * ends minutes behind the real clock); null = unknown, the real clock stands in.
+ */
+data class BarClock(val now: Instant, val knownDuration: Double? = null, val streamEnd: Instant? = null) {
+    /** The ČT buffer's `now`: the end of the stream where known, else the real clock (spec "ČT player bar"). */
+    val liveEnd: Instant get() = streamEnd ?: now
+}
 
 /**
  * What the own player bar shows at one moment (spec/apps.md "Anténa timeline player", "ČT player bar (T62)"):
