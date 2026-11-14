@@ -75,6 +75,9 @@ object TimelineRules {
     /** A growing window's right end reads "Teď" while its last piece ends this close to now. */
     val NOW_TOLERANCE: Duration = Duration.ofSeconds(30)
 
+    /** A growing window is clamped this far before its live edge (the playlist's target is 3 s). */
+    const val LIVE_GUARD_SECONDS = 6.0
+
     /** Continuous-recording ids (`b<channel>-<start>-<end>`, as the gateway's RECORDING_ID_RE); DVR uuids are not. */
     private val TIMELINE_ID = Regex("^b[A-Za-z0-9_]{1,40}-\\d{9,11}-\\d{9,11}$")
 
@@ -407,6 +410,21 @@ class TimelineTrick {
             direction < 0 && p <= 0 -> if (hasPrevious) TimelineEdge.PREVIOUS else TimelineEdge.CLAMP
             direction > 0 && complete && p >= duration -> if (hasNext) TimelineEdge.NEXT else TimelineEdge.CLAMP
             direction > 0 && !complete && p >= liveEnd -> TimelineEdge.CLAMP
+            else -> TimelineEdge.SEEK
+        }
+    }
+
+    /**
+     * What the moving playhead meets at [atMs] in a window without neighbours whose seekable range is
+     * [lower] … [upper] (the ČT bar's clamps, T62): [TimelineEdge.CLAMP] = stop there and play, else
+     * [TimelineEdge.SEEK]. Only the side it moves towards counts.
+     */
+    fun clampEdge(atMs: Long, lower: Double, upper: Double): TimelineEdge {
+        if (!moving || frozen) return TimelineEdge.SEEK
+        val p = position(atMs)
+        return when {
+            direction < 0 && p <= lower -> TimelineEdge.CLAMP
+            direction > 0 && p >= upper -> TimelineEdge.CLAMP
             else -> TimelineEdge.SEEK
         }
     }

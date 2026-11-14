@@ -56,6 +56,7 @@ class PlannerTest {
         assertTrue(target.url.contains("contentType=timeshift"))
         assertEquals(Instant.parse("2026-10-17T17:29:30Z"), target.seekToWallClock)
         assertEquals(8970_000L, target.fallbackOffsetMs)
+        assertEquals("CH_1", target.channelId)
     }
 
     @Test fun archivedProgrammeUsesVod() {
@@ -71,6 +72,8 @@ class PlannerTest {
         assertEquals(PlayKind.TIMESHIFT, target.kind)
         assertEquals(0L, target.fallbackOffsetMs)
         assertTrue(t.requests.last().first.contains("channel/CH_24"))
+        // The ČT bar reads the guide of the channel whose buffer plays (T62), not the request's.
+        assertEquals("CH_24", target.channelId)
     }
 
     @Test fun recentArchivedProgrammeUsesBufferWithoutAskingVod() {

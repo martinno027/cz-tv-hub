@@ -13,27 +13,13 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import cz.cztvhub.core.PlayerTitle
-import cz.cztvhub.core.dvb.DvbTimeline
-import cz.cztvhub.core.dvb.TimelineRules
-import java.time.Instant
-
-/** What the timeline player shows at one moment; [position] is the playhead (moving, or the seek on its way). */
-data class TimelineFrame(
-    val timeline: DvbTimeline,
-    /** The window's length in playlist seconds (a growing window: what the player already knows). */
-    val duration: Double,
-    val position: Double,
-    val channelName: String,
-    val now: Instant,
-    /** Rewind / fast-forward sign next to the playhead's clock (`◀◀`, `▶▶ 2`, T55); null = none. */
-    val badge: String? = null,
-)
+import cz.cztvhub.core.dvb.BarFrame
 
 /**
- * The timeline player's own bar (spec/apps.md "Anténa timeline player"): the programme at the playhead over
- * "channel · episode", the wall clock above the playhead, the window as a bar in wall-clock time (recorded pieces
- * filled, gaps empty, programme ticks, the programme at the playhead highlighted, the played part) and its ends.
+ * The own player bar (spec/apps.md "Anténa timeline player", "ČT player bar (T62)"): the programme at the playhead
+ * over "channel · episode", the wall clock above the playhead, the window as a bar in wall-clock time (recorded
+ * pieces filled, gaps empty, programme ticks, the programme at the playhead highlighted, the played part) and its
+ * ends. What it shows is computed in core ([BarFrame]).
  */
 class TimelineOverlay(context: Context) : LinearLayout(context) {
     private val title = text(34f, bold = true)
@@ -75,43 +61,28 @@ class TimelineOverlay(context: Context) : LinearLayout(context) {
         noticeUntil = android.os.SystemClock.elapsedRealtime() + NOTICE_MS
     }
 
-    fun render(frame: TimelineFrame) {
+    /** [badge] = the rewind / fast-forward sign next to the playhead's clock (`◀◀`, `▶▶ 2`, T55); null = none. */
+    fun render(frame: BarFrame, badge: String?) {
         if (noticeLine.visibility == VISIBLE && android.os.SystemClock.elapsedRealtime() >= noticeUntil) {
             noticeLine.visibility = GONE
         }
-        val timeline = frame.timeline
-        val growing = !timeline.complete
-        val pieces = timeline.pieces
-        val windowStart = pieces.first().time
-        val windowEnd = TimelineRules.toTime(pieces, frame.duration, growing)
-        val playhead = TimelineRules.toTime(pieces, frame.position.coerceIn(0.0, frame.duration), growing)
-        val index = TimelineRules.programmeAt(timeline.programmes, playhead)
-        val programme = index?.let { timeline.programmes[it] }
-        val info = PlayerTitle.programme(programme?.title.orEmpty(), frame.channelName, programme?.subtitle.orEmpty())
-        title.show(info.title)
-        subtitle.show(info.subtitle)
-        subtitle.visibility = if (info.subtitle.isBlank()) GONE else VISIBLE
-        val clock = TimelineRules.label(playhead, frame.now)
-        playheadLabel.show(frame.badge?.let { "$clock   $it" } ?: clock)
-        startLabel.show(TimelineRules.edgeLabel(windowStart, playhead, frame.now))
-        endLabel.show(TimelineRules.endLabel(windowEnd, timeline.complete, playhead, frame.now))
-
-        val startMs = windowStart.toEpochMilli()
-        val lastPiece = pieces.last()
+        title.show(frame.title)
+        subtitle.show(frame.subtitle)
+        subtitle.visibility = if (frame.subtitle.isBlank()) GONE else VISIBLE
+        playheadLabel.show(badge?.let { "${frame.clock}   $it" } ?: frame.clock)
+        startLabel.show(frame.startLabel)
+        endLabel.show(frame.endLabel)
         bar.model = TimelineBarView.Model(
-            startMs = startMs,
-            endMs = windowEnd.toEpochMilli(),
-            pieces = pieces.map { piece ->
-                val end = if (growing && piece === lastPiece) windowEnd else piece.endTime
-                piece.time.toEpochMilli() to end.toEpochMilli()
-            },
-            ticks = timeline.programmes.map { it.start.toEpochMilli() },
-            highlight = programme?.let { it.start.toEpochMilli() to it.end.toEpochMilli() },
-            playheadMs = playhead.toEpochMilli(),
+            startMs = frame.startMs,
+            endMs = frame.endMs,
+            pieces = frame.pieces,
+            ticks = frame.ticks,
+            highlight = frame.highlight,
+            playheadMs = frame.playheadMs,
         )
         // The wall clock sits above the playhead, kept inside the row.
         playheadLabel.post {
-            val x = bar.xOf(playhead.toEpochMilli())
+            val x = bar.xOf(frame.playheadMs)
             val max = (labelRow.width - playheadLabel.width).toFloat().coerceAtLeast(0f)
             playheadLabel.translationX = (x - playheadLabel.width / 2f).coerceIn(0f, max)
         }

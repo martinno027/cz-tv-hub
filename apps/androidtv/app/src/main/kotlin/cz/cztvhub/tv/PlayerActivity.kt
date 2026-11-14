@@ -41,6 +41,9 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.ui.PlayerView
 import cz.cztvhub.core.ChannelNumbers
 import cz.cztvhub.core.Channels
+import cz.cztvhub.core.CtBarKind
+import cz.cztvhub.core.CtBarRules
+import cz.cztvhub.core.CtBarWindow
 import cz.cztvhub.core.CtException
 import cz.cztvhub.core.InfoTitle
 import cz.cztvhub.core.PlayerTitle
@@ -53,8 +56,12 @@ import cz.cztvhub.core.PspStreams
 import cz.cztvhub.core.ResumeCard
 import cz.cztvhub.core.ResumeRules
 import cz.cztvhub.core.ResumeSpot
+import cz.cztvhub.core.TrackMenu
 import cz.cztvhub.core.dvb.AdBreak
 import cz.cztvhub.core.dvb.AdBreaks
+import cz.cztvhub.core.dvb.BarClock
+import cz.cztvhub.core.dvb.BarWindow
+import cz.cztvhub.core.dvb.DvbBarWindow
 import cz.cztvhub.core.dvb.DvbParser
 import cz.cztvhub.core.dvb.DvbTimeline
 import cz.cztvhub.core.dvb.TimelineEdge
@@ -128,9 +135,12 @@ class PlayerActivity : ComponentActivity() {
     private var cardKey: String? = null
     private var progressJob: Job? = null
 
-    /** Pending start-over seek, applied once the live window is known. */
+    /**
+     * Pending start-over seek, applied once the live window is known; [pendingFallbackMs] = the buffer offset without
+     * program date-time, null = estimate it from the window's length (a seek of the ČT bar, T62).
+     */
     private var pendingWallClockMs: Long? = null
-    private var pendingFallbackMs: Long = 0
+    private var pendingFallbackMs: Long? = 0
     private var lastReResolveAt = 0L
 
     /** Zapping (live only): the visible channels in "Kanály" order (spec/apps.md "Channel numbers and zapping"). */
@@ -202,6 +212,21 @@ class PlayerActivity : ComponentActivity() {
     private val isTimeline: Boolean
         get() = (request as? PlayRequest.DvbRecorded)?.recordingId?.let(TimelineRules::isTimelineId) == true
 
+    /**
+     * ČT start-over / "Zpět v čase" and archive (T62, spec/apps.md "ČT player bar"): the same own bar and keys as the
+     * Anténa timeline, over one window (the buffer sliding with now, or the VOD); set in [play] from the planned kind.
+     */
+    private var ctBar: CtBarWindow? = null
+    private var ctGuideJob: Job? = null
+
+    /** The own bar instead of Media3's controller: the Anténa timeline, ČT start-over and archive (never live). */
+    private val ownBar: Boolean
+        get() = isTimeline || CtBarWindow.usesBar(request)
+
+    /** The window the bar and its keys work on; null before [play] (and in the native player). */
+    private val barWindow: BarWindow?
+        get() = timeline?.let(::DvbBarWindow) ?: ctBar
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         request = PlayRequests.from(intent) ?: return finish()
@@ -219,7 +244,7 @@ class PlayerActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         playerView = PlayerView(this).apply {
-            useController = !isTimeline
+            useController = !ownBar
             setShowSubtitleButton(true)
             setShowNextButton(false)
             setShowPreviousButton(false)
@@ -229,7 +254,7 @@ class PlayerActivity : ComponentActivity() {
                 infoBox.visibility = visibility
             })
         }
-        muteButton = if (isTimeline) null else addMuteButton()
+        muteButton = if (ownBar) null else addMuteButton()
         // Muted: a crossed speaker top right, also with the controller hidden.
         muteIndicator = ImageView(this).apply {
             setImageResource(R.drawable.ic_volume_off)
@@ -303,7 +328,7 @@ class PlayerActivity : ComponentActivity() {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM or Gravity.END,
-        ).apply { setMargins(0, 0, dp(48), dp(if (isTimeline) TIMELINE_SKIP_MARGIN_DP else 120)) }
+        ).apply { setMargins(0, 0, dp(48), dp(if (ownBar) TIMELINE_SKIP_MARGIN_DP else 120)) }
         // Zapping: "<number>  <channel>" and the programme on air, top left; the number buffer top right.
         zapOverlay = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -437,6 +462,8 @@ class PlayerActivity : ComponentActivity() {
         updateSkipAd(null)
         timelineRefreshJob?.cancel()
         timelineRefreshJob = null
+        ctGuideJob?.cancel()
+        ctGuideJob = null
         barJob?.cancel()
         barJob = null
         releaseJob?.cancel()
@@ -491,6 +518,12 @@ class PlayerActivity : ComponentActivity() {
         val exo = player ?: return
         target = planned
         timeline = planned.timeline
+        // ČT start-over / archive: the bar's window, decided by what the planner chose (a re-resolve keeps the guide).
+        val previousBar = ctBar
+        ctBar = if (planned.timeline != null) null else CtBarWindow.of(request, planned.kind, Instant.now())?.let { bar ->
+            previousBar?.takeIf { it.kind == bar.kind }?.let { bar.copy(programmes = it.programmes) } ?: bar
+        }
+        startCtGuide(planned.channelId?.takeIf { ctBar?.kind == CtBarKind.TIMESHIFT })
         // A new window (or a re-resolved one) starts where it was mapped: no old target to show.
         shownSeek.clear()
         val playing = request
@@ -541,7 +574,7 @@ class PlayerActivity : ComponentActivity() {
         }
         exo.prepare()
         hideMessage()
-        if (planned.timeline != null) showBar()
+        if (barWindow != null) showBar()
     }
 
     private val listener = object : Player.Listener {
@@ -560,7 +593,7 @@ class PlayerActivity : ComponentActivity() {
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // A paused timeline keeps its bar on screen.
-            if (timeline != null) showBar()
+            if (barWindow != null) showBar()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -618,13 +651,19 @@ class PlayerActivity : ComponentActivity() {
         if (timeline.isEmpty) return
         val window = timeline.getWindow(exo.currentMediaItemIndex, Timeline.Window())
         if (window.isPlaceholder || window.durationMs == C.TIME_UNSET) return
+        // The ČT bar keeps every seek inside the buffer's clamps (T62): a minute after its start, 10 s before now.
+        val buffer = ctBar?.kind == CtBarKind.TIMESHIFT
+        val target = if (buffer) CtBarRules.clampTimeshift(Instant.ofEpochMilli(wallClock), Instant.now()).toEpochMilli() else wallClock
         val position = if (window.windowStartTimeMs != C.TIME_UNSET) {
-            wallClock - window.windowStartTimeMs
+            target - window.windowStartTimeMs
         } else {
             pendingFallbackMs
+                ?: CtBarRules.playerPositionMs(target, null, window.durationMs, System.currentTimeMillis())
+                ?: 0
         }
         pendingWallClockMs = null
-        exo.seekTo(position.coerceIn(0, maxOf(0, window.durationMs - LIVE_EDGE_GUARD_MS)))
+        val lowest = if (buffer) minOf(CtBarRules.OLDEST_SKIPPED.toMillis(), window.durationMs) else 0
+        exo.seekTo(position.coerceIn(lowest, maxOf(lowest, window.durationMs - LIVE_EDGE_GUARD_MS)))
         exo.playWhenReady = true
     }
 
@@ -632,6 +671,15 @@ class PlayerActivity : ComponentActivity() {
         val exo = player ?: return resumeOnStart
         pendingWallClockMs?.let { return Resume.WallClock(it) }
         if (timeline != null) return playheadTime()?.let { Resume.WallClock(it.toEpochMilli()) } ?: resumeOnStart
+        // The ČT bar while rewinding / fast-forwarding: on at the moving playhead (the movement ends there).
+        val bar = ctBar
+        if (bar != null && trick.moving) {
+            val at = trick.position(SystemClock.uptimeMillis())
+            return when (bar.kind) {
+                CtBarKind.VOD -> Resume.Position(Math.round(bar.clamp(at, barClock()) * 1000))
+                CtBarKind.TIMESHIFT -> Resume.WallClock(bar.toTime(at).toEpochMilli())
+            }
+        }
         return when (target?.kind) {
             PlayKind.VOD -> Resume.Position(exo.currentPosition)
             PlayKind.TIMESHIFT -> {
@@ -647,7 +695,7 @@ class PlayerActivity : ComponentActivity() {
 
     /** "Pokračovat": remember the position every [SAVE_INTERVAL_MS] while playing (and in [onStop]). */
     private fun startProgressSaving() {
-        if (spot == null && !isTimeline) return
+        if (spot == null && !ownBar) return
         progressJob?.cancel()
         progressJob = lifecycleScope.launch {
             while (isActive) {
@@ -659,9 +707,21 @@ class PlayerActivity : ComponentActivity() {
 
     private fun saveProgress() {
         if (isTimeline) return saveTimelineProgress()
-        val remembered = spot ?: return
+        val remembered = rememberedSpot() ?: return
         val seconds = progressSeconds(remembered) ?: return
         tvApp.resume.save(remembered.key, seconds, remembered.lengthSeconds, card?.takeIf { remembered.key == cardKey })
+    }
+
+    /**
+     * Where "Pokračovat" goes: in the ČT buffer with a known guide the programme at the playhead with an idec (T62:
+     * also one the viewer moved into; null in a gap), else the programme opened.
+     */
+    private fun rememberedSpot(): ResumeSpot? {
+        val bar = ctBar
+        if (bar == null || bar.kind != CtBarKind.TIMESHIFT || bar.programmes.isEmpty()) return spot
+        val exo = player ?: return null
+        val wallClock = timeshiftWallClockMs(exo) ?: return null
+        return bar.resumeSpot(bar.toPosition(Instant.ofEpochMilli(wallClock)))
     }
 
     /**
@@ -678,19 +738,31 @@ class PlayerActivity : ComponentActivity() {
             PlayKind.VOD -> exo.currentPosition / 1000.0
             PlayKind.TIMESHIFT -> {
                 val start = remembered.start ?: return null
-                val timeline = exo.currentTimeline
-                if (timeline.isEmpty) return null
-                val window = timeline.getWindow(exo.currentMediaItemIndex, Timeline.Window())
-                if (window.isPlaceholder) return null
-                val wallClockMs = when {
-                    window.windowStartTimeMs != C.TIME_UNSET -> window.windowStartTimeMs + exo.currentPosition
-                    // No program date-time: estimate the window start as now − window length.
-                    window.durationMs != C.TIME_UNSET -> System.currentTimeMillis() - window.durationMs + exo.currentPosition
-                    else -> return null
-                }
+                val wallClockMs = timeshiftWallClockMs(exo) ?: return null
                 (wallClockMs - start.toEpochMilli()) / 1000.0
             }
         }
+    }
+
+    /** The live window the player knows, null before it knows one (empty or placeholder). */
+    private fun liveWindow(exo: ExoPlayer): Timeline.Window? {
+        val timeline = exo.currentTimeline
+        if (timeline.isEmpty) return null
+        return timeline.getWindow(exo.currentMediaItemIndex, Timeline.Window()).takeUnless { it.isPlaceholder }
+    }
+
+    /**
+     * Wall clock of the frame shown in the buffer: program date-time + position, else the estimate now − window
+     * length + position; null when unknown.
+     */
+    private fun timeshiftWallClockMs(exo: ExoPlayer): Long? {
+        val window = liveWindow(exo) ?: return null
+        return CtBarRules.playerWallClockMs(
+            window.windowStartTimeMs.takeIf { it != C.TIME_UNSET },
+            window.durationMs.takeIf { it != C.TIME_UNSET },
+            exo.currentPosition,
+            System.currentTimeMillis(),
+        )
     }
 
     /**
@@ -802,11 +874,42 @@ class PlayerActivity : ComponentActivity() {
 
     // -- Anténa timeline (spec/apps.md "Anténa timeline player") ------------------------------------------
 
-    /** The window's length the bar and the edges use: a growing window also what the player already knows. */
-    private fun windowDuration(t: DvbTimeline): Double {
-        if (t.complete) return t.duration
-        val known = player?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }?.let { it / 1000.0 } ?: 0.0
-        return maxOf(t.duration, known)
+    /** Now and the window's length the player knows (a growing Anténa window, the ČT VOD), for the bar's rules. */
+    private fun barClock(): BarClock {
+        val known = player?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }?.let { it / 1000.0 }
+        return BarClock(Instant.now(), known)
+    }
+
+    /** The Anténa window's length the bar and the edges use: a growing window also what the player already knows. */
+    private fun windowDuration(t: DvbTimeline): Double = DvbBarWindow(t).duration(barClock())
+
+    /**
+     * The guide of the channel whose ČT buffer plays (T62): the bar's ticks, title at the playhead, ▲/▼ and
+     * "Pokračovat"; read from the schedule cache now and every [CT_GUIDE_REFRESH_MS]. Failures keep what was known.
+     */
+    private fun startCtGuide(channelId: String?) {
+        ctGuideJob?.cancel()
+        ctGuideJob = null
+        if (channelId == null) return
+        ctGuideJob = lifecycleScope.launch {
+            while (isActive) {
+                val now = Instant.now()
+                val guide = withContext(Dispatchers.IO) {
+                    val days = CtBarRules.guideDays(now).map { day ->
+                        runCatching { tvApp.schedules.day(day)[channelId].orEmpty() }
+                            .onFailure { Log.i(TAG, "no guide for the bar: ${it.message}") }
+                            .getOrNull()
+                    }
+                    if (days.all { it == null }) null else days.flatMap { it.orEmpty() }
+                }
+                val bar = ctBar
+                if (guide != null && bar != null && bar.kind == CtBarKind.TIMESHIFT) {
+                    // Programmes ahead are kept too: ▼ on the one airing goes to the live edge (clamped).
+                    ctBar = bar.copy(programmes = CtBarRules.guideProgrammes(guide, now.minus(CtBarRules.WINDOW), now.plus(CtBarRules.WINDOW)))
+                }
+                delay(CT_GUIDE_REFRESH_MS)
+            }
+        }
     }
 
     /** Wall clock of the shown frame; null before playback or on an error page. */
@@ -840,7 +943,7 @@ class PlayerActivity : ComponentActivity() {
 
     /** Shows the bar for [BAR_MS]; it stays while paused, while a seek is chosen and across a window switch. */
     private fun showBar() {
-        if (timeline == null) return
+        if (barWindow == null) return
         barHideAt = SystemClock.elapsedRealtime() + BAR_MS
         timelineBar.visibility = View.VISIBLE
         renderBar()
@@ -861,18 +964,27 @@ class PlayerActivity : ComponentActivity() {
     private val barVisible: Boolean get() = timelineBar.visibility == View.VISIBLE
 
     private fun renderBar() {
-        val t = timeline ?: return
+        val window = barWindow ?: return
         val exo = player ?: return
-        timelineBar.render(
-            TimelineFrame(t, windowDuration(t), shownPosition(exo), barChannelName(), Instant.now(), trick.badge),
-        )
+        timelineBar.render(window.frame(shownPosition(exo), barClock(), barChannelName()), trick.badge)
     }
 
     /** The playhead the bar shows: the moving one, else a chosen seek until the player is there. */
     private fun shownPosition(exo: ExoPlayer): Double {
         val now = SystemClock.uptimeMillis()
         if (trick.moving) return trick.position(now)
-        return shownSeek.position(exo.currentPosition / 1000.0, now, switching)
+        return shownSeek.position(playerBarPosition(exo), now, switching)
+    }
+
+    /**
+     * The player's frame in bar seconds: the position (Anténa window, ČT VOD), or for the ČT buffer its wall clock
+     * from the bar's origin (the player's positions slide with the buffer); a pending seek counts as done.
+     */
+    private fun playerBarPosition(exo: ExoPlayer): Double {
+        val bar = ctBar
+        if (bar == null || bar.kind == CtBarKind.VOD) return exo.currentPosition / 1000.0
+        val wallClock = pendingWallClockMs ?: timeshiftWallClockMs(exo) ?: return bar.upper(barClock())
+        return bar.toPosition(Instant.ofEpochMilli(wallClock))
     }
 
     private fun barChannelName(): String {
@@ -958,7 +1070,7 @@ class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> null
             else -> return false
         }
-        if (timeline == null) return true
+        if (barWindow == null) return true
         val media = code == KeyEvent.KEYCODE_MEDIA_REWIND || code == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
         // With the bar hidden ▲/▼ only show it; ⏪/⏩ and a held ←/→ show it and act at once, a ←/→ click only shows it.
         val barShown = barVisible
@@ -968,7 +1080,7 @@ class PlayerActivity : ComponentActivity() {
             return true
         }
         if (forward == null) {
-            if (first) jump(up = code == KeyEvent.KEYCODE_DPAD_UP, from = player?.currentPosition?.div(1000.0))
+            if (first) jump(up = code == KeyEvent.KEYCODE_DPAD_UP, from = player?.let(::playerBarPosition))
             showBar()
             return true
         }
@@ -1019,13 +1131,13 @@ class PlayerActivity : ComponentActivity() {
             TrickAction.None, TrickAction.Change -> Unit
             is TrickAction.Step -> player?.let { seekTimeline(shownPosition(it) + action.seconds) }
             TrickAction.Start -> {
-                val t = timeline
                 val exo = player
-                if (t == null || exo == null) {
+                if (barWindow == null || exo == null) {
                     trick.reset()
                     return
                 }
-                trickOrigin = t.id to TimelineRules.toTime(t.pieces, trick.origin, growing = !t.complete)
+                // Back may need to re-open the Anténa window it began in; the ČT window is always the same one.
+                trickOrigin = timeline?.let { t -> t.id to TimelineRules.toTime(t.pieces, trick.origin, growing = !t.complete) }
                 shownSeek.clear()
                 // The picture stays until the stop (one exact seek then); ExoPlayer has no cheap preview seek here.
                 exo.playWhenReady = false
@@ -1059,8 +1171,8 @@ class PlayerActivity : ComponentActivity() {
         exo.playWhenReady = true
         // A neighbouring window is opening: it plays from where it opens (the movement just ends).
         if (switching) return
-        val t = timeline ?: return
-        if (how == TrickStop.RETURN && origin != null && origin.first != t.id) {
+        val t = timeline
+        if (t != null && how == TrickStop.RETURN && origin != null && origin.first != t.id) {
             shownSeek.clear()
             openWindow(origin.first, origin.second)
             return
@@ -1077,27 +1189,32 @@ class PlayerActivity : ComponentActivity() {
 
     /** Each frame while moving: the window's start / end continue in its neighbour, else it stops there and plays. */
     private fun trickEdge() {
-        val t = timeline ?: return
-        val duration = windowDuration(t)
-        val liveEnd = maxOf(0.0, duration - TIMELINE_LIVE_GUARD_S)
+        val window = barWindow ?: return
+        val clock = barClock()
         val now = SystemClock.uptimeMillis()
-        when (trick.edge(now, duration, t.complete, t.previous != null, t.next != null, liveEnd)) {
+        when (window.movingEdge(trick, now, clock)) {
             TimelineEdge.SEEK -> Unit
+            // No neighbour, a growing window's live edge, or a ČT clamp (which slides with now): stop and play.
             TimelineEdge.CLAMP -> {
-                val at = trick.stop(now).coerceIn(0.0, if (t.complete) duration else liveEnd)
+                val at = window.clamp(trick.stop(now), clock)
                 stopped()
                 player?.let {
                     seekPlayer(it, at, now)
                     it.playWhenReady = true
                 }
             }
-            TimelineEdge.PREVIOUS -> t.previous?.let {
-                trick.freeze(0.0)
-                openWindow(it, TimelineRules.toTime(t.pieces, 0.0))
+            TimelineEdge.PREVIOUS -> timeline?.let { t ->
+                t.previous?.let {
+                    trick.freeze(0.0)
+                    openWindow(it, TimelineRules.toTime(t.pieces, 0.0))
+                }
             }
-            TimelineEdge.NEXT -> t.next?.let {
-                trick.freeze(duration)
-                openWindow(it, TimelineRules.toTime(t.pieces, duration))
+            TimelineEdge.NEXT -> timeline?.let { t ->
+                val duration = windowDuration(t)
+                t.next?.let {
+                    trick.freeze(duration)
+                    openWindow(it, TimelineRules.toTime(t.pieces, duration))
+                }
             }
         }
     }
@@ -1107,9 +1224,9 @@ class PlayerActivity : ComponentActivity() {
      * the window by the edge rule; nothing there = nothing happens (false).
      */
     private fun jump(up: Boolean, from: Double?): Boolean {
-        val t = timeline ?: return false
+        val window = barWindow ?: return false
         if (from == null || switching || player?.playbackState == Player.STATE_IDLE) return false
-        val target = TimelineRules.jumpTarget(t, from, up) ?: return false
+        val target = window.jumpTarget(from, up, barClock()) ?: return false
         seekTimeline(target)
         return true
     }
@@ -1119,30 +1236,54 @@ class PlayerActivity : ComponentActivity() {
      * clock. The bar shows the target until the player is there.
      */
     private fun seekTimeline(target: Double) {
-        val t = timeline ?: return
+        val window = barWindow ?: return
         val exo = player ?: return
-        val duration = windowDuration(t)
+        val clock = barClock()
         val now = SystemClock.uptimeMillis()
-        when (TimelineRules.edge(target, duration, t.complete, t.previous != null, t.next != null)) {
+        when (window.edge(target, clock)) {
             TimelineEdge.SEEK -> seekPlayer(exo, target, now)
-            TimelineEdge.CLAMP -> {
-                val end = if (t.complete) duration else maxOf(0.0, duration - TIMELINE_LIVE_GUARD_S)
-                seekPlayer(exo, target.coerceIn(0.0, end), now)
+            TimelineEdge.CLAMP -> seekPlayer(exo, window.clamp(target, clock), now)
+            TimelineEdge.PREVIOUS -> timeline?.let { t ->
+                t.previous?.let {
+                    shownSeek.seek(target, now)
+                    openWindow(it, TimelineRules.targetTime(t.pieces, target))
+                }
             }
-            TimelineEdge.PREVIOUS -> t.previous?.let {
-                shownSeek.seek(target, now)
-                openWindow(it, TimelineRules.targetTime(t.pieces, target))
-            }
-            TimelineEdge.NEXT -> t.next?.let {
-                shownSeek.seek(target, now)
-                openWindow(it, TimelineRules.targetTime(t.pieces, target))
+            TimelineEdge.NEXT -> timeline?.let { t ->
+                t.next?.let {
+                    shownSeek.seek(target, now)
+                    openWindow(it, TimelineRules.targetTime(t.pieces, target))
+                }
             }
         }
     }
 
+    /** Seeks the player to bar seconds; in the ČT buffer through its wall clock (the window slides). */
     private fun seekPlayer(exo: ExoPlayer, seconds: Double, now: Long) {
         shownSeek.seek(seconds, now)
-        exo.seekTo(Math.round(seconds * 1000))
+        val bar = ctBar
+        if (bar == null || bar.kind == CtBarKind.VOD) {
+            exo.seekTo(Math.round(seconds * 1000))
+            return
+        }
+        val wallClock = bar.toTime(seconds).toEpochMilli()
+        val window = liveWindow(exo)
+        val position = window?.let {
+            CtBarRules.playerPositionMs(
+                wallClock,
+                it.windowStartTimeMs.takeIf { start -> start != C.TIME_UNSET },
+                it.durationMs.takeIf { d -> d != C.TIME_UNSET },
+                System.currentTimeMillis(),
+            )
+        }
+        if (window == null || position == null) {
+            // The window is not known yet: the seek waits for it (estimated from its length without date-time).
+            pendingWallClockMs = wallClock
+            pendingFallbackMs = null
+            applyPendingSeek()
+            return
+        }
+        exo.seekTo(position.coerceIn(0, maxOf(0, window.durationMs - LIVE_EDGE_GUARD_MS)))
     }
 
     /** Playback reached the end of a complete window: on into the next one, if any (else it stays). */
@@ -1265,37 +1406,72 @@ class PlayerActivity : ComponentActivity() {
         return breaks
     }
 
-    /** Long OK: the audio renditions of the stream (Czech stays the default until the viewer picks another). */
+    /**
+     * Long OK: the audio renditions of the stream (Czech stays the default until the viewer picks another) and, when
+     * the stream has any, the subtitles ("Titulky: Vypnuto" + each by name; T62, also in the Anténa timeline), with
+     * the mute item.
+     */
     private fun showAudioChoice() {
         val exo = player ?: return
-        val labels = mutableListOf<String>()
-        val overrides = mutableListOf<TrackSelectionOverride>()
-        var selected = -1
+        val audio = mutableListOf<String>()
+        val audioOverrides = mutableListOf<TrackSelectionOverride>()
+        var audioSelected: Int? = null
+        val subtitles = mutableListOf<String>()
+        val subtitleOverrides = mutableListOf<TrackSelectionOverride>()
+        var subtitleSelected: Int? = null
         for (group in exo.currentTracks.groups) {
-            if (group.type != C.TRACK_TYPE_AUDIO) continue
             for (i in 0 until group.length) {
                 if (!group.isTrackSupported(i)) continue
-                if (group.isTrackSelected(i)) selected = labels.size
-                labels += audioLabel(group.getTrackFormat(i), labels.size + 1)
-                overrides += TrackSelectionOverride(group.mediaTrackGroup, i)
+                when (group.type) {
+                    C.TRACK_TYPE_AUDIO -> {
+                        if (group.isTrackSelected(i)) audioSelected = audio.size
+                        audio += trackLabel(group.getTrackFormat(i), audio.size + 1)
+                        audioOverrides += TrackSelectionOverride(group.mediaTrackGroup, i)
+                    }
+                    C.TRACK_TYPE_TEXT -> {
+                        if (group.isTrackSelected(i)) subtitleSelected = subtitles.size
+                        subtitles += trackLabel(group.getTrackFormat(i), subtitles.size + 1)
+                        subtitleOverrides += TrackSelectionOverride(group.mediaTrackGroup, i)
+                    }
+                }
             }
         }
-        // The timeline player has no controller: its mute button lives here (T34), also with a single track.
+        val items = TrackMenu.items(audio, audioSelected, subtitles, subtitleSelected)
+        // The own-bar players have no controller: their mute button lives here (T34), also with a single track.
         val builder = AlertDialog.Builder(this)
-            .setTitle(R.string.audio_title)
+            .setTitle(if (subtitles.isEmpty()) R.string.audio_title else R.string.audio_subtitles_title)
             .setNeutralButton(muteLabel()) { _, _ -> toggleMute() }
-        if (labels.size < 2) {
+        if (items.isEmpty()) {
             builder.setMessage(R.string.audio_single).show()
             return
         }
-        builder
-            .setSingleChoiceItems(labels.toTypedArray(), selected) { dialog, which ->
-                exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
-                    .setOverrideForType(overrides[which])
-                    .build()
+        val pick = { item: TrackMenu.Item ->
+            val params = exo.trackSelectionParameters.buildUpon()
+            exo.trackSelectionParameters = when (item.kind) {
+                TrackMenu.Kind.AUDIO -> params.setOverrideForType(audioOverrides[item.index])
+                TrackMenu.Kind.SUBTITLES_OFF -> params.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setPreferredTextLanguage(null)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                // The language too: a re-resolved stream has new track groups, where the override no longer applies.
+                TrackMenu.Kind.SUBTITLE -> subtitleOverrides[item.index].let { override ->
+                    params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .setPreferredTextLanguage(override.mediaTrackGroup.getFormat(override.trackIndices[0]).language)
+                        .setOverrideForType(override)
+                }
+            }.build()
+        }
+        if (subtitles.isEmpty()) {
+            // Audio only: the radio list as before.
+            builder.setSingleChoiceItems(items.map { it.label }.toTypedArray(), items.indexOfFirst { it.selected }) { dialog, which ->
+                pick(items[which])
                 dialog.dismiss()
-            }
-            .show()
+            }.show()
+            return
+        }
+        // Audio and subtitles: one list, what plays now marked in each part.
+        builder.setItems(items.map { (if (it.selected) "✓ " else "    ") + it.label }.toTypedArray()) { _, which ->
+            pick(items[which])
+        }.show()
     }
 
     /**
@@ -1339,7 +1515,8 @@ class PlayerActivity : ComponentActivity() {
         muteIndicator.visibility = if (muted) View.VISIBLE else View.GONE
     }
 
-    private fun audioLabel(format: Format, number: Int): String {
+    /** A track's name: its label, else its language in Czech, else "Stopa n". */
+    private fun trackLabel(format: Format, number: Int): String {
         format.label?.takeIf { it.isNotBlank() }?.let { return it }
         val language = format.language?.takeIf { it.isNotBlank() && it != C.LANGUAGE_UNDETERMINED }
             ?.let { Locale.forLanguageTag(it).getDisplayLanguage(CZECH) }
@@ -1373,7 +1550,7 @@ class PlayerActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) toggleMute()
             return true
         }
-        if (isTimeline && handleTimelineKey(event)) return true
+        if (ownBar && handleTimelineKey(event)) return true
         if (handleZapKey(event)) return true
         if (event.keyCode == KeyEvent.KEYCODE_BACK && playerView.isControllerFullyVisible) {
             if (event.action == KeyEvent.ACTION_UP) playerView.hideController()
@@ -1541,9 +1718,7 @@ class PlayerActivity : ComponentActivity() {
         const val BAR_TICK_MS = 250L
         const val TIMELINE_SKIP_MARGIN_DP = 300
         const val MUTE_INDICATOR_DP = 56
-
-        /** A growing window is clamped this far before its live edge (the playlist's target is 3 s). */
-        const val TIMELINE_LIVE_GUARD_S = 6.0
+        const val CT_GUIDE_REFRESH_MS = 60_000L
         val CZECH: Locale = Locale.forLanguageTag("cs")
     }
 }
