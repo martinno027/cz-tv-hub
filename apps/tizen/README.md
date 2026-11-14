@@ -4,6 +4,11 @@ Aplikace pro **televize Samsung s Tizenem 4.0 a novějším (modely 2018+)**: of
 televize a volitelně vlastní anténa přes bránu cz-tv-hub. Chování odpovídá [`spec/apps.md`](../../spec/apps.md)
 a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro Apple TV a Android TV.
 
+- **Domů** (první záložka, aplikace na ní vždy začíná): dnešní datum, svátek (ve státní svátek jeho název) a
+  nejvýš dva řádky kalendáře (zítřejší státní svátek, změna času, školní prázdniny, úplněk/nov); s bránou upozornění,
+  když neodpovídá nebo když kvůli plnému disku nenahrává. Pod tím řady **Pokračovat** (jako v Archivu, podržené OK
+  nabídne „Odebrat z řady“), **Teď běží** (prvních 10 kanálů jako v Živě, na konci „Další kanály“ otevře Živě) a
+  **Sněmovna** (jen přenosy, které právě běží). Číslice přepnou kanál jako v Živě.
 - **Živě**: šest kanálů ČT s právě vysílaným pořadem, časem a průběhem; pod nimi skupina **Anténa**, je-li nastavená.
 - **TV průvodce**: mřížka kanálů a času (7 dní zpět, 2 dny dopředu), otevře se na „teď“, nahoře detail pořadu.
   OK na pořadu otevře **stránku pořadu** přes celou obrazovku: obrázek, název, díl, kanál · čas · délka · žánr ·
@@ -23,7 +28,7 @@ a [`spec/dvb-gateway.md`](../../spec/dvb-gateway.md), stejně jako aplikace pro 
   vrací po krocích. S údaji z TMDB je dole logo a věta o TMDB.
 - **Poslanecká sněmovna**: pět veřejných přímých přenosů Poslanecké sněmovny PČR (schůze, tiskové konference,
   výbory a semináře), jen živě: nic se nenahrává, žádné „Od začátku“ ani „Pokračovat“. Karta v Živě ukazuje
-  červené **● ŽIVĚ**, ztlumené „Nevysílá se“ nebo „Zjišťuji…“; zjišťuje se jen při otevřeném Živě nebo průvodci,
+  červené **● ŽIVĚ**, ztlumené „Nevysílá se“ nebo „Zjišťuji…“; zjišťuje se jen při otevřeném Domů, Živě nebo průvodci,
   každý přenos nejvýš jednou za minutu. Vypíná se v Nastavení → Kanály.
 - **Pokračovat**: televize si pamatuje, kde jste pořad přestali sledovat (jen v sobě, nikam to neposílá), a při dalším
   výběru nabídne „Pokračovat od 23:10“. Dosledované pořady zapomene.
@@ -97,6 +102,10 @@ vzorků `spec/fixtures/dvb/dvb_archive_*.json`, a dokud nejsou, z vymyšlených 
 je použije vždy, `?demo&archive=ctdown` předvede nedostupné iVysílání): kategorie mají 3 stránky, seriály 3 řady a „Nahráno z antény“, jejíž první díl otevře ukázkovou
 lištu antény. `?demo&watch` = brána má zapnutý log sledování (T53): hlášení `POST /dvb/watch` (start, každou
 minutu beat, stop) ukázka jen zapíše do konzole a do `CT.Demo.watchReports`, nic neodchází z počítače.
+„Pokračovat“ (Domů i Archiv) má ukázka v paměti se třemi rozkoukanými pořady, nikdy ve skutečném úložišti
+prohlížeče (`?demo&resume=none` = žádné). `?demo&status=down` = brána na `/dvb/status` neodpovídá („Brána antény
+není dostupná.“), `?demo&status=badkey` = brána odmítne klíč (401), `?demo&status=paused` = brána hlásí
+pozastavené nahrávání.
 Ukázka si pamatuje stav v `localStorage` prohlížeče; čistý start = `localStorage.clear()`.
 
 ## Instalace do televize (bez obchodu Samsung)

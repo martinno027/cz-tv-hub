@@ -45,6 +45,13 @@
    */
   var ADAPTERS = [
     { match: '#ar-menu .button', focus: function (app, el) { CT.ArchiveCards.Menu.focus = indexIn(el); } },
+    // Domů's cards (T58) before '.ar-card': its "Pokračovat" cards are Archiv cards too
+    { match: '#screen-home .home-item', focus: function (app, el) {
+      if (!app.screens.home.focusElement(el)) return false;
+      app.zone = 'content';
+    }, long: function (app) {
+      app.screens.home.offerRemove(); // only a "Pokračovat" card has the menu
+    } },
     { match: '#pg-buttons .button', focus: function (app, el) { app.programme.focus = indexIn(el); } },
     { match: '#sh-buttons .button', focus: function (app, el) {
       var page = app.screens.archive.page;
