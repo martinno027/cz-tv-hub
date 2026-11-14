@@ -18,6 +18,10 @@ object Palette {
     val nowLine = Color(0xFFFF5252)
     /** The "● ŽIVĚ" badge of a Poslanecká sněmovna stream that is on. */
     val liveBadge = Color(0xFFD32F2F)
+    /** ČHMÚ warning levels on Domů (T59). */
+    val warningYellow = Color(0xFFFFD54F)
+    val warningOrange = Color(0xFFFFA040)
+    val warningRed = Color(0xFFFF5252)
 }
 
 @Composable

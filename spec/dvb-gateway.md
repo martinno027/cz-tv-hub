@@ -874,6 +874,54 @@ The gateway builds it, because it alone may call TMDb and it knows the recording
     entries`. When `[tmdb] key` later leaves the config, a key from `/admin` takes over and the store stays.
 - legal-guard 2026-10-25: approve with changes (all in this section); approved by the owner the same day.
 
+## Weather (T59, approved by the user 2026-11-14; `src/cztvhub/dvb/weather.py`, `warnings.py`)
+Weather, air quality, pollen, sunrise/sunset and ČHMÚ warnings for Domů. Only the gateway talks to Open-Meteo and
+ČHMÚ (CLAUDE.md hard rules "Weather on Domů"); terms checked 2026-11-14 (`docs/legal-notes.md`).
+- `GET /dvb/weather[?lat=<deg>&lon=<deg>]` (app key; worker key `403`). `lat`/`lon` are optional numbers (the TV's
+  location, already rounded on the device). The gateway parses them as floats, refuses NaN/inf and anything outside
+  **lat 48.0–51.5, lon 11.5–19.5** (`400 "Poloha mimo Česko"`), and **rounds to 0.1°** (half away from zero) before
+  anything else; nothing else from the query is used. Without them it uses the **household place** from `/admin`
+  (below); with neither: `404 {"error": "Počasí není zapnuté"}`.
+- **Upstream** (fixed hosts, no redirects, ≤ 512 KB each, 10 s, User-Agent `cz-tv-hub (household gateway;
+  https://github.com/martinno027/cz-tv-hub)`): `api.open-meteo.com/v1/forecast` with `latitude`, `longitude`,
+  `timezone=Europe/Prague`, `forecast_days=7`, `current=temperature_2m,weather_code,wind_speed_10m`,
+  `daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset`; and
+  `air-quality-api.open-meteo.com/v1/air-quality` with `latitude`, `longitude`, `timezone=Europe/Prague`,
+  `current=european_aqi,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,ragweed_pollen`. Air quality failing
+  alone leaves `air` null; the forecast failing gives 200 `{"place", "error": "Počasí teď není k dispozici"}`
+  (`dvb_weather_error.json`), or a cached answer up to 3 h old without `error`. Query numbers must be plain decimals
+  (`50.08`, `-1.5`; not `1e1` or `5_0.1`).
+- **Cache and limit**: answers per rounded place in memory for **30 min** (at most 50 places); a new place costs one
+  forecast + one air request, **at most 20 new places per hour** (a place already asked within the hour is not new; a
+  failed fetch still counts, its coordinates went out) and one request at a time; over the limit a place
+  without a cached answer gets 200 with `error` "Počasí teď není k dispozici". Never on disk; coordinates never in a
+  log line, the sign-in log, the watch log or any other answer.
+- **ČHMÚ warnings** (`warnings.py`): while weather is in use (a household place is set, or `/dvb/weather` answered in
+  the last hour; otherwise nothing is fetched) every 15 min the gateway lists `https://opendata.chmi.cz/meteorology/
+  weather/alerts/cap/` (~100 KB), takes the newest `alert_cap_50_*.xml` by the listing's date (file names repeat month
+  by month), downloads it only when it changed, refuses it when its `<sent>` is older than the last good file, and
+  parses it (CAP 1.2, stdlib XML without DTD/entities, ≤ 4 MB). Kept: `info` blocks in `cs` whose `awareness_level`
+  parameter is yellow/orange/red **and** that have at least one `responseType`, none of them `None` (all-clear blocks
+  are dropped, and the "Výhled jevů" outlook, which has no `responseType`), and whose `expires` is in the future **or missing** (fire risk and ozone smog warnings have none:
+  valid while the newest file lists them; `"to": null`), with their ORP codes (`geocode` `CISORP`). A place is matched locally to the **nearest
+  ORP definition point** (table of ORP code, name, lat, lon from RÚIAN open data, embedded in `orp.py`); nothing is
+  sent to ČHMÚ. Failures keep the last good file for up to 6 h.
+- **Answer** (`spec/fixtures/dvb/dvb_weather_ok.json`):
+  `{"place": {"lat": 50.1, "lon": 14.4, "source": "device" | "household"},
+  "now": {"temperature": 8.4, "code": 2, "text": "Polojasno", "icon": "partly", "wind": 12.0},
+  "sun": {"rise": "07:13", "set": "16:19"},
+  "days": [{"date": "YYYY-MM-DD", "code": 61, "text": "Slabý déšť", "icon": "rain", "max": 9.1, "min": 2.3,
+  "rainChance": 60}] (7 days, today first),
+  "air": null | {"aqi": 45, "aqiText": "zhoršené" | null, "pollen": [{"name": "bříza", "level": "střední"}]},
+  "warnings": [{"level": "yellow" | "orange" | "red", "event": "Silný vítr", "from": "…Z", "to": "…Z" | null}] (in the
+  file's order),
+  "attribution": "Počasí: Open-Meteo.com (CC BY 4.0), CAMS · Výstrahy: ČHMÚ (CC BY 4.0)", "error"?}`.
+  Texts and icons from the WMO code, `aqiText` (only from 40 = "zhoršené"), pollen levels (only species above "žádná")
+  and warning levels follow `spec/fixtures/weather_cases.json`; the apps show them as they come (no logic of their own).
+- **`/admin` household place** (tab "Domů"): latitude and longitude typed by the admin (from a map), rounded to 0.1°
+  when saved, `<state dir>/home-place.json` (0600, atomic); "Smazat" removes it. Admin login, header and same origin;
+  logged `admin: home place set` / `… removed` (never the coordinates).
+
 ## Web (T27, draft for the owner's review; `spec/web.md`)
 - **Static files** `GET /web/` and `GET /web/<path>`: the web app (`spec/web.md`) from `[dvb] web_dir` (default
   `/opt/cztvhub/web`, copied by `install.sh`); only when the gateway is on. No key needed for the files themselves

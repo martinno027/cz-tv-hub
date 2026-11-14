@@ -253,6 +253,39 @@ private fun ServerSettings(viewModel: MainViewModel) {
             Text(stringResource(R.string.settings_thumbnails_hint), style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
         }
 
+        // "Počasí podle polohy této televize" (T59): only with a gateway; turning it on the first time asks the question.
+        if (configured != null) {
+            val weatherOn by viewModel.weatherByLocation.collectAsState()
+            val weatherAsked by viewModel.weatherAsked.collectAsState()
+            var asking by remember { mutableStateOf(false) }
+            // Domů asks for the weather again when it is shown next.
+            val allow = rememberWeatherAllow(viewModel) {}
+            Button(
+                onClick = {
+                    when {
+                        weatherOn -> viewModel.setWeatherByLocation(false)
+                        weatherAsked -> allow()
+                        else -> asking = true
+                    }
+                },
+                modifier = Modifier.padding(top = 8.dp),
+            ) { Text((if (weatherOn) "☑  " else "☐  ") + stringResource(R.string.settings_weather_location)) }
+            Text(stringResource(R.string.settings_weather_location_hint), style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
+            if (asking) {
+                WeatherConsentDialog(
+                    onAllow = {
+                        asking = false
+                        allow()
+                    },
+                    onDecline = {
+                        asking = false
+                        viewModel.setWeatherByLocation(false)
+                    },
+                    onDismiss = { asking = false },
+                )
+            }
+        }
+
         Text(stringResource(R.string.settings_about), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
         Text(stringResource(R.string.disclaimer), style = MaterialTheme.typography.bodySmall, color = Palette.textDim)
     }

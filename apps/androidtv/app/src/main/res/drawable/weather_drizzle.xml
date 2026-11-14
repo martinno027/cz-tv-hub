@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Domů weather icon "drizzle" (T59, the gateway's icon key). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group android:pivotX="12" android:pivotY="0" android:scaleX="0.8" android:scaleY="0.8">
+        <path android:fillColor="#FFE8EAED" android:pathData="M6.5,19 L17.5,19 A4.5,4.5 0 0,0 18,10.03 A6,6 0 0,0 6.34,9.04 A5,5 0 0,0 6.5,19 Z" />
+    </group>
+    <path android:strokeColor="#FF64B5F6" android:strokeWidth="1.6" android:strokeLineCap="round" android:pathData="M8,17.5 L7.6,19 M12,18.5 L11.6,20 M16,17.5 L15.6,19" />
+</vector>

@@ -107,6 +107,7 @@ struct ServerSettingsSection: View {
     @State private var statusText: String?
     @State private var isChecking = false
     @State private var browser = GatewayBrowser()
+    @State private var asksWeatherConsent = false
 
     var body: some View {
         ScrollView {
@@ -157,6 +158,27 @@ struct ServerSettingsSection: View {
                         }
                     }
                     .padding(.top, 10)
+                }
+                // Domů's weather (spec/apps.md "Location for weather", T59): on only after "Povolit"; switching it on
+                // shows the same question (Menu closes it and leaves it off), off is at once.
+                if model.savedGateway != nil {
+                    Toggle(isOn: Binding(get: { model.weather.consent.usesLocation },
+                                         set: { on in if on { asksWeatherConsent = true } else { model.weather.switchOff() } })) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(WeatherRules.settingTitle)
+                            Text(WeatherRules.settingNote)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 10)
+                    .accessibilityIdentifier("settings.weatherLocation")
+                    .fullScreenCover(isPresented: $asksWeatherConsent) {
+                        WeatherConsentView { answer in
+                            asksWeatherConsent = false
+                            model.weather.answer(answer)
+                        }
+                    }
                 }
 
                 Text("Nalezeno v místní síti")

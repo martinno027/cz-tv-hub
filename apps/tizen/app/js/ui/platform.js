@@ -47,6 +47,18 @@
      * releases AVPlay in the background and resolves afresh when it comes back; the web: yes, nothing re-resolves.
      */
     backgroundPlayback: false,
+    /**
+     * function () → the geolocation for Domů's weather (spec/apps.md "Location for weather"), or null = none. Samsung:
+     * the W3C one (the `location` privilege in config.xml); many TVs have no location source and answer an error.
+     */
+    /**
+     * [{text, url}] made links inside a source's attribution line where it appears (the web: Open-Meteo's licence asks
+     * for a link next to its data); null = plain text (the TV has no browser to open them).
+     */
+    attributionLinks: null,
+    geolocation: function () {
+      return root.navigator && root.navigator.geolocation ? root.navigator.geolocation : null;
+    },
     /** Appended to the version line in Nastavení. */
     versionSuffix: ''
   };

@@ -27,8 +27,8 @@
   function SettingsScreen(app) {
     this.app = app;
     // 0 address, 1 key, 2 save, 3 clear, 4 "Náhledy anténních pořadů" (only when the gateway offers them),
-    // 5 "Zobrazit"/"Skrýt" to the right of the key (T25)
-    this.items = ['set-address', 'set-key', 'set-save', 'set-clear', 'set-thumbs', 'set-key-reveal'].map($);
+    // 5 "Zobrazit"/"Skrýt" to the right of the key (T25), 6 "Počasí podle polohy této televize" (T59)
+    this.items = ['set-address', 'set-key', 'set-save', 'set-clear', 'set-thumbs', 'set-key-reveal', 'set-weather'].map($);
     this.focus = 0;
     this.section = 'channels'; // the choice item focused, or the section open: 'channels' | 'profile' | 'server'
     this.zone = 'choice'; // 'choice' | 'channels' | 'profile' | 'form' (the Server fields and buttons)
@@ -64,6 +64,7 @@
     $('set-signin-note').textContent = CT.ClientHeader.NOTE; // under the gateway status, also without a profile (T37)
     this.renderChannels();
     this.renderThumbs();
+    this.renderWeather();
     this.renderProfile();
   };
 
@@ -77,6 +78,43 @@
       this.focus = 2;
       this.applyFocus();
     }
+  };
+
+  /**
+   * "Počasí podle polohy této televize" (spec/apps.md "Location for weather"): shown with a gateway (the weather is
+   * its) on a device with a location source (Samsung's geolocation; the web only on HTTPS).
+   */
+  SettingsScreen.prototype.weatherShown = function () {
+    return !!this.app.dvbConfig && !!this.app.geolocation();
+  };
+
+  SettingsScreen.prototype.renderWeather = function () {
+    var toggle = $('set-weather');
+    var visible = this.weatherShown();
+    toggle.classList.toggle('hidden', !visible);
+    toggle.textContent = (CT.WeatherLocationSwitch.on() ? '☑ ' : '☐ ') + CT.Weather.SETTING_TITLE;
+    var note = $('set-weather-note');
+    note.textContent = CT.Weather.SETTING_NOTE;
+    note.classList.toggle('hidden', !visible);
+    if (!visible && this.focus === 6) {
+      this.focus = 2;
+      this.applyFocus();
+    }
+  };
+
+  /** Off: at once. On: first the same question as on Domů (the OS is asked only after Povolit). */
+  SettingsScreen.prototype.toggleWeather = function () {
+    var self = this;
+    if (CT.WeatherLocationSwitch.on()) {
+      this.app.setWeatherLocation(false);
+      this.renderWeather();
+      return;
+    }
+    this.app.askWeatherLocation(function () {
+      self.renderWeather();
+      self.applyFocus();
+    });
+    this.applyFocus();
   };
 
   SettingsScreen.prototype.toggleThumbs = function () {
@@ -136,6 +174,10 @@
 
   /** Called by the app before its own Return handling; true = handled (a section was closed). */
   SettingsScreen.prototype.onBack = function () {
+    if (CT.ArchiveCards.Menu.isOpen()) {
+      CT.ArchiveCards.Menu.close(); // the location question: no answer
+      return true;
+    }
     if (this.zone === 'choice') return false;
     this.closeSection();
     return true;
@@ -270,6 +312,7 @@
   };
 
   SettingsScreen.prototype.showStatus = function () {
+    this.renderWeather(); // a gateway set up or removed
     var box = $('set-status');
     var config = this.app.dvbConfig;
     if (!config) {
@@ -356,6 +399,10 @@
 
   /** Returns false when the key leaves the screen upwards (to the tabs). */
   SettingsScreen.prototype.onKey = function (key) {
+    if (CT.ArchiveCards.Menu.isOpen()) { // the location question (switching the weather location on)
+      CT.ArchiveCards.Menu.onKey(key);
+      return true;
+    }
     if (this.editing()) {
       // While typing, only keys that end editing are handled here; the rest go to the input.
       if (key === 'done' || key === 'cancel' || key === 'enter' || key === 'back' || key === 'up' || key === 'down') {
@@ -379,16 +426,20 @@
     if (this.zone === 'profile') return this.onProfileKey(key);
     switch (key) {
       case 'up':
-        if (this.focus === 4) this.focus = 2;
+        if (this.focus === 6) this.focus = this.app.dvbThumbs === true ? 4 : 2;
+        else if (this.focus === 4) this.focus = 2;
         else if (this.focus === 5) this.focus = this.firstField();
         else if (this.focus > this.firstField()) this.focus = this.focus === 3 ? 1 : this.focus - 1;
         break;
       case 'down':
         if (this.focus === 5) {
           this.focus = 2;
-        } else if (this.focus >= 2) {
+        } else if (this.focus === 2 || this.focus === 3) {
           if (this.app.dvbThumbs === true) this.focus = 4;
-        } else {
+          else if (this.weatherShown()) this.focus = 6;
+        } else if (this.focus === 4) {
+          if (this.weatherShown()) this.focus = 6;
+        } else if (this.focus < 2) {
           this.focus += 1;
         }
         break;
@@ -408,6 +459,7 @@
         if (this.focus === 2) this.save();
         else if (this.focus === 3) this.clear();
         else if (this.focus === 5) this.revealKey($('set-key').type === 'password');
+        else if (this.focus === 6) this.toggleWeather();
         else this.toggleThumbs();
         break;
       default:

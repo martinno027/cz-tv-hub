@@ -299,11 +299,32 @@ Soubor obsahuje **klíč brány** (ten, který se zadává v Nastavení → Serv
 hledání reklam, klíč TMDb ani heslo TVHeadendu v něm nejsou. Pošlete ho jen tomu, komu chcete dát přístup.
 Stažení se zapíše do záznamu služby (`journalctl -u cztvhub | grep "connection manual"`), bez klíče.
 
-## 5. Vzdálený přístup: jen vaše domácnost přes Tailscale
+### Počasí na obrazovce Domů (místo domácnosti)
+
+Počasí, kvalitu ovzduší, pyl, východ a západ slunce a výstrahy ČHMÚ zjišťuje jen Raspberry; televize ani web se
+na Open-Meteo ani ČHMÚ neptají.
+
+1. Na mapě (např. mapy.com nebo Google Maps) najděte místo domácnosti a zkopírujte jeho souřadnice, např.
+   `50.08, 14.44` (pravým tlačítkem na místo v mapě).
+2. Na `/admin` v záložce **Domů** je vepište do polí **Zeměpisná šířka** (např. `50,08`) a **délka** (např. `14,44`)
+   a stiskněte **Uložit**. Raspberry je zaokrouhlí na desetinu stupně (asi 10 km) a uloží jen u sebe
+   (`/var/lib/cztvhub/home-place.json`, čitelné jen pro službu). Poznáte to podle věty „Místo domácnosti: 50,1 N,
+   14,4 E." nahoře v záložce.
+3. **Smazat** místo odstraní. Uložení i smazání se zapíše do záznamu služby
+   (`journalctl -u cztvhub | grep "home place"`), souřadnice nikdy.
+
+Místo platí pro televize a web, které bráně neposílají vlastní polohu. Televize a web se mohou zeptat na povolení
+k poloze: když ho dostanou, pošlou bráně svou polohu zaokrouhlenou na desetinu stupně a počasí je pro ni; když ne,
+platí místo domácnosti. Bez místa domácnosti a bez polohy zařízení se počasí neukazuje. Brána přijme jen polohu
+v Česku a okolí, Open-Meteo pošle jen zaokrouhlené souřadnice (nejvýš 20 různých míst za hodinu) a ČHMÚ žádnou
+polohu – výstrahy přiřadí k místu samo podle nejbližší obce s rozšířenou působností. Výsledky drží 30 minut jen
+v paměti. Zdroje: „Počasí: Open-Meteo.com (CC BY 4.0), CAMS · Výstrahy: ČHMÚ (CC BY 4.0)“.
+
+## 5. Vzdálený přístup přes Tailscale
 
 - Port 8098 **nikdy nepřesměrovávejte na routeru** a nepoužívejte Tailscale Funnel ani sdílení zařízení
-  s jinými účty. Jiná domácnost (např. příbuzní na chalupě) potřebuje vlastní tuner.
-- V Tailscale (Access controls) povolte přístup k Raspberry jen členům domácnosti, např. (8443 je HTTPS pro web
+  s jinými účty.
+- V Tailscale (Access controls) povolte přístup k Raspberry těm, komu ho dáte, např. (8443 je HTTPS pro web
   nainstalovaný jako aplikace, kapitola 6a):
 
 ```json

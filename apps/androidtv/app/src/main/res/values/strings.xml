@@ -9,6 +9,12 @@
     <string name="home_psp">Sněmovna</string>
     <string name="home_gateway_unavailable">Brána antény není dostupná.</string>
     <string name="home_gateway_key_rejected">Brána antény odmítla klíč. Zkontrolujte ho v Nastavení → Server.</string>
+    <string name="home_weather_week">Počasí na týden</string>
+    <string name="weather_consent">Počasí na Domů podle polohy této televize: poloha se zaokrouhlí asi na 10 km, pošle se jen vaší bráně a ta podle ní zjistí počasí u Open-Meteo. Nikde se neukládá.</string>
+    <string name="weather_allow">Povolit</string>
+    <string name="weather_decline">Nepoužívat</string>
+    <string name="settings_weather_location">Počasí podle polohy této televize</string>
+    <string name="settings_weather_location_hint">Vypnuto: počasí na Domů pro místo nastavené na bráně. Televize bez síťové polohy se ptá vždy bez ní.</string>
     <string name="home_recording_paused">Nahrávání je pozastavené: na disku nahrávek dochází místo.</string>
     <string name="tab_guide">TV průvodce</string>
     <string name="tab_archive">Archiv</string>

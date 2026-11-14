@@ -1,0 +1,335 @@
+{
+ "_doc": "Weather (spec/dvb-gateway.md 'Weather', T59). The gateway applies these; the apps show its texts. wmo: WMO weather code -> Czech text and icon key (an unknown code -> text null, icon 'cloud'). round: coordinates -> 0.1 deg (half away from zero) or null when outside lat 48.0-51.5 / lon 11.5-19.5 or not a finite number. aqi: European AQI -> aqiText (shown from 40). pollen: grains/m3 per species -> level; 'žádná' is not listed. Synthetic values.",
+ "wmo": [
+  {
+   "code": 0,
+   "text": "Jasno",
+   "icon": "sun"
+  },
+  {
+   "code": 1,
+   "text": "Skoro jasno",
+   "icon": "sun"
+  },
+  {
+   "code": 2,
+   "text": "Polojasno",
+   "icon": "partly"
+  },
+  {
+   "code": 3,
+   "text": "Zataženo",
+   "icon": "cloud"
+  },
+  {
+   "code": 45,
+   "text": "Mlha",
+   "icon": "fog"
+  },
+  {
+   "code": 48,
+   "text": "Mlha s námrazou",
+   "icon": "fog"
+  },
+  {
+   "code": 51,
+   "text": "Slabé mrholení",
+   "icon": "drizzle"
+  },
+  {
+   "code": 53,
+   "text": "Mrholení",
+   "icon": "drizzle"
+  },
+  {
+   "code": 55,
+   "text": "Silné mrholení",
+   "icon": "drizzle"
+  },
+  {
+   "code": 56,
+   "text": "Mrznoucí mrholení",
+   "icon": "drizzle"
+  },
+  {
+   "code": 57,
+   "text": "Silné mrznoucí mrholení",
+   "icon": "drizzle"
+  },
+  {
+   "code": 61,
+   "text": "Slabý déšť",
+   "icon": "rain"
+  },
+  {
+   "code": 63,
+   "text": "Déšť",
+   "icon": "rain"
+  },
+  {
+   "code": 65,
+   "text": "Silný déšť",
+   "icon": "rain"
+  },
+  {
+   "code": 66,
+   "text": "Mrznoucí déšť",
+   "icon": "rain"
+  },
+  {
+   "code": 67,
+   "text": "Silný mrznoucí déšť",
+   "icon": "rain"
+  },
+  {
+   "code": 71,
+   "text": "Slabé sněžení",
+   "icon": "snow"
+  },
+  {
+   "code": 73,
+   "text": "Sněžení",
+   "icon": "snow"
+  },
+  {
+   "code": 75,
+   "text": "Silné sněžení",
+   "icon": "snow"
+  },
+  {
+   "code": 77,
+   "text": "Sněhová zrna",
+   "icon": "snow"
+  },
+  {
+   "code": 80,
+   "text": "Slabé přeháňky",
+   "icon": "rain"
+  },
+  {
+   "code": 81,
+   "text": "Přeháňky",
+   "icon": "rain"
+  },
+  {
+   "code": 82,
+   "text": "Silné přeháňky",
+   "icon": "rain"
+  },
+  {
+   "code": 85,
+   "text": "Sněhové přeháňky",
+   "icon": "snow"
+  },
+  {
+   "code": 86,
+   "text": "Silné sněhové přeháňky",
+   "icon": "snow"
+  },
+  {
+   "code": 95,
+   "text": "Bouřka",
+   "icon": "storm"
+  },
+  {
+   "code": 96,
+   "text": "Bouřka s kroupami",
+   "icon": "storm"
+  },
+  {
+   "code": 99,
+   "text": "Silná bouřka s kroupami",
+   "icon": "storm"
+  },
+  {
+   "code": 42,
+   "text": null,
+   "icon": "cloud"
+  }
+ ],
+ "round": [
+  {
+   "lat": 50.0755,
+   "lon": 14.4378,
+   "out": [
+    50.1,
+    14.4
+   ]
+  },
+  {
+   "lat": 49.95,
+   "lon": 15.25,
+   "out": [
+    50.0,
+    15.3
+   ]
+  },
+  {
+   "lat": 50.04,
+   "lon": 14.44,
+   "out": [
+    50.0,
+    14.4
+   ]
+  },
+  {
+   "lat": 48.0,
+   "lon": 11.5,
+   "out": [
+    48.0,
+    11.5
+   ]
+  },
+  {
+   "lat": 51.5,
+   "lon": 19.5,
+   "out": [
+    51.5,
+    19.5
+   ]
+  },
+  {
+   "lat": 47.99,
+   "lon": 14.4,
+   "out": null
+  },
+  {
+   "lat": 50.1,
+   "lon": 19.51,
+   "out": null
+  },
+  {
+   "lat": "NaN",
+   "lon": 14.4,
+   "out": null
+  },
+  {
+   "lat": "inf",
+   "lon": 14.4,
+   "out": null
+  },
+  {
+   "lat": "abc",
+   "lon": 14.4,
+   "out": null
+  }
+ ],
+ "aqi": [
+  {
+   "value": 0,
+   "text": null
+  },
+  {
+   "value": 39,
+   "text": null
+  },
+  {
+   "value": 40,
+   "text": "zhoršené"
+  },
+  {
+   "value": 60,
+   "text": "špatné"
+  },
+  {
+   "value": 80,
+   "text": "velmi špatné"
+  },
+  {
+   "value": 100,
+   "text": "mimořádně špatné"
+  },
+  {
+   "value": 250,
+   "text": "mimořádně špatné"
+  },
+  {
+   "value": null,
+   "text": null
+  }
+ ],
+ "pollenNames": {
+  "alder": "olše",
+  "birch": "bříza",
+  "grass": "tráva",
+  "mugwort": "pelyněk",
+  "ragweed": "ambrozie"
+ },
+ "pollenLevels": {
+  "_doc": "upper bounds (exclusive) of žádná / nízká / střední; at or above the last: vysoká",
+  "alder": [
+   1,
+   10,
+   100
+  ],
+  "birch": [
+   1,
+   10,
+   100
+  ],
+  "grass": [
+   1,
+   5,
+   30
+  ],
+  "mugwort": [
+   1,
+   5,
+   30
+  ],
+  "ragweed": [
+   1,
+   5,
+   30
+  ]
+ },
+ "pollen": [
+  {
+   "species": "birch",
+   "value": 0.0,
+   "level": null
+  },
+  {
+   "species": "birch",
+   "value": 0.9,
+   "level": null
+  },
+  {
+   "species": "birch",
+   "value": 1,
+   "level": "nízká"
+  },
+  {
+   "species": "birch",
+   "value": 10,
+   "level": "střední"
+  },
+  {
+   "species": "birch",
+   "value": 100,
+   "level": "vysoká"
+  },
+  {
+   "species": "grass",
+   "value": 4.9,
+   "level": "nízká"
+  },
+  {
+   "species": "grass",
+   "value": 5,
+   "level": "střední"
+  },
+  {
+   "species": "grass",
+   "value": 30,
+   "level": "vysoká"
+  }
+ ],
+ "warningLevels": {
+  "yellow": "žlutá",
+  "orange": "oranžová",
+  "red": "červená"
+ },
+ "temperature": [{"value": 8.4, "now": "8 °C", "card": "8°"}, {"value": 2.5, "now": "3 °C", "card": "3°"}, {"value": -2.5, "now": "-3 °C", "card": "-3°"}, {"value": -0.4, "now": "0 °C", "card": "0°"}, {"value": -0.5, "now": "-1 °C", "card": "-1°"}, {"value": 0.49, "now": "0 °C", "card": "0°"}, {"value": -12.6, "now": "-13 °C", "card": "-13°"}, {"value": 21.5, "now": "22 °C", "card": "22°"}],
+ "weekday": {"names": ["po", "út", "st", "čt", "pá", "so", "ne"], "cases": [{"date": "2026-11-14", "today": "2026-11-14", "label": "Dnes"}, {"date": "2026-11-17", "today": "2026-11-14", "label": "út 17. 11."}, {"date": "2026-11-15", "today": "2026-11-14", "label": "ne 15. 11."}, {"date": "2027-01-04", "today": "2026-12-31", "label": "po 4. 1."}]}
+}

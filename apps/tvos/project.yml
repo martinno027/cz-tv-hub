@@ -42,6 +42,9 @@ targets:
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Aplikace hledá ve vaší domácí síti bránu Anténa (DVB-T2).
+        # Domů's weather (spec/apps.md "Location for weather", T59); asked only after the app's own question.
+        NSLocationWhenInUseUsageDescription: Počasí na Domů podle polohy této televize. Poloha se zaokrouhlí asi na 10 km, pošle se jen vaší bráně a ta podle ní zjistí počasí u Open-Meteo. Nikde se neukládá.
+        NSLocationDefaultAccuracyReduced: true
         NSBonjourServices: [_cztvhub._tcp]
         # The gateway speaks plain HTTP on the home LAN / the household's tailnet only.
         NSAppTransportSecurity:
