@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Synthetic CAP 1.2 file in the shape of ČHMÚ's alert_cap_50_*.xml (no real ČHMÚ data). -->
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>2.49.0.0.203.0.CZ.000000000000.SYNTHETIC_000001</identifier>
+  <sender>test@example.invalid</sender>
+  <sent>2026-11-14T10:00:00+01:00</sent>
+  <status>Actual</status>
+  <msgType>Update</msgType>
+  <scope>Public</scope>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Silný vítr</event>
+    <responseType>Prepare</responseType>
+    <responseType>Monitor</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <onset>2026-11-14T13:00:00+01:00</onset>
+    <expires>2026-11-14T18:00:00+01:00</expires>
+    <parameter><valueName>awareness_level</valueName><value>2; yellow; Moderate</value></parameter>
+    <parameter><valueName>awareness_type</valueName><value>1; Wind</value></parameter>
+    <area>
+      <areaDesc>Hlavní město Praha</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>1100</value></geocode>
+      <geocode><valueName>EMMA_ID</valueName><value>CZ01100</value></geocode>
+    </area>
+    <area>
+      <areaDesc>Středočeský kraj</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>2105</value></geocode>
+      <geocode><valueName>EMMA_ID</valueName><value>CZ02105</value></geocode>
+    </area>
+  </info>
+  <info>
+    <language>en-GB</language>
+    <category>Met</category>
+    <event>Strong wind</event>
+    <responseType>Prepare</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <onset>2026-11-14T13:00:00+01:00</onset>
+    <expires>2026-11-14T18:00:00+01:00</expires>
+    <parameter><valueName>awareness_level</valueName><value>2; yellow; Moderate</value></parameter>
+    <area>
+      <areaDesc>Prague</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>1100</value></geocode>
+    </area>
+  </info>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Riziko požárů</event>
+    <responseType>Execute</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Severe</severity>
+    <certainty>Likely</certainty>
+    <onset>2026-11-13T23:00:00+01:00</onset>
+    <parameter><valueName>awareness_level</valueName><value>3; orange; Severe</value></parameter>
+    <parameter><valueName>awareness_type</valueName><value>8; forest-fire</value></parameter>
+    <area>
+      <areaDesc>Hlavní město Praha</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>1100</value></geocode>
+    </area>
+  </info>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Silné bouřky</event>
+    <responseType>Shelter</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <onset>2026-11-14T05:00:00+01:00</onset>
+    <expires>2026-11-14T09:00:00+01:00</expires>
+    <parameter><valueName>awareness_level</valueName><value>2; yellow; Moderate</value></parameter>
+    <area>
+      <areaDesc>Hlavní město Praha</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>1100</value></geocode>
+    </area>
+  </info>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Extrémní zátěž teplem</event>
+    <responseType>Execute</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Extreme</severity>
+    <certainty>Likely</certainty>
+    <onset>2026-11-14T10:00:00+01:00</onset>
+    <expires>2026-11-15T00:00:00+01:00</expires>
+    <parameter><valueName>awareness_level</valueName><value>4; red; Extreme</value></parameter>
+    <area>
+      <areaDesc>Jihomoravský kraj</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>6203</value></geocode>
+    </area>
+  </info>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Výhled jevů</event>
+    <urgency>Future</urgency>
+    <severity>Unknown</severity>
+    <certainty>Unknown</certainty>
+    <onset>2026-11-15T00:00:00+01:00</onset>
+    <parameter><valueName>awareness_level</valueName><value>2; yellow; Moderate</value></parameter>
+    <area>
+      <areaDesc>Hlavní město Praha</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>1100</value></geocode>
+    </area>
+  </info>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Výhled jevů (bez reakce)</event>
+    <responseType>None</responseType>
+    <urgency>Future</urgency>
+    <severity>Unknown</severity>
+    <certainty>Unknown</certainty>
+    <onset>2026-11-15T00:00:00+01:00</onset>
+    <parameter><valueName>awareness_level</valueName><value>2; yellow; Moderate</value></parameter>
+    <area>
+      <areaDesc>Hlavní město Praha</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>1100</value></geocode>
+    </area>
+  </info>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Žádná výstraha před silným větrem</event>
+    <responseType>None</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Minor</severity>
+    <certainty>Unlikely</certainty>
+    <onset>2026-11-14T10:00:00+01:00</onset>
+    <area>
+      <areaDesc>Jihomoravský kraj</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>6203</value></geocode>
+    </area>
+  </info>
+</alert>

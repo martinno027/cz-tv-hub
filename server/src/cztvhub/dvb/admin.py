@@ -22,7 +22,9 @@ logged (``admin: tmdb: …``). The store is never downloadable. The tab "Aktuali
 off, deleted (n entries)``), the sessions in progress with a ticking duration and the history with filters and
 "Smazat záznamy" (logged); never downloadable. The tab "Návod" offers
 the connection manual (``manual.py``, T49): a TXT with this gateway's addresses and the app key, only as the answer
-to an admin POST (logged ``admin: connection manual downloaded``, never with the key).
+to an admin POST (logged ``admin: connection manual downloaded``, never with the key). The tab "Domů" sets the
+household place for weather (``weather.HomePlace``, T59): latitude and longitude rounded to 0.1° when saved, logged
+``admin: home place set`` / ``… removed`` without the coordinates.
 
 Login: HTTP Basic, user ``admin``, ``[admin] password``. State-changing requests must carry the
 ``X-Cztvhub-Admin`` header (a cross-site page cannot send it without a CORS preflight, which this
@@ -46,6 +48,7 @@ from . import epg
 from . import manual
 from . import space
 from . import tmdbkeys, tmdbstore
+from . import weather as wx
 from .update import Updater
 from .gateway import DvbGateway, Response, error, json_response
 from .profiles import ProfileError, parse_body
@@ -61,6 +64,8 @@ UPDATE_PATH = "/admin/api/update"
 SIGNIN_PATH = "/admin/api/signin"
 WATCH_PATH = "/admin/api/watch"
 MANUAL_PATH = "/admin/api/manual"
+HOME_PATH = "/admin/api/home"
+HOME_BOUNDS = "Zeměpisná šířka musí být 48 až 51,5 a délka 11,5 až 19,5 (Česko a okolí)"
 TMDB_KEY_MAX = 600  # a store key: ["kind", year, "cleaned title"]
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_BULK = 500
@@ -333,9 +338,15 @@ class AdminSite:
                 if not self._same_origin(headers):
                     return error(403, "Požadavek z cizí stránky")
                 return self._manual()
+            if method == "GET" and path == HOME_PATH:
+                return self._home_overview()
+            if method == "POST" and path == HOME_PATH:
+                if not self._same_origin(headers):
+                    return error(403, "Požadavek z cizí stránky")
+                return self._home(body)
             if path.startswith("/admin/api/channels") or path.startswith("/admin/api/profiles") \
                     or path in ("/admin/api/defaults", TMDB_PATH, UPDATE_PATH, SIGNIN_PATH, WATCH_PATH,
-                                 MANUAL_PATH):
+                                 MANUAL_PATH, HOME_PATH):
                 return error(405, "Nepodporovaná metoda")
             return error(404, "Nenalezeno")
         except TvhNotFound:
@@ -563,6 +574,33 @@ class AdminSite:
         return Response(200, text.encode("utf-8"), "text/plain; charset=utf-8",
                         {"Content-Disposition": f'attachment; filename="{manual.FILENAME}"',
                          "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+    # -- tab "Domů" (weather.py) -----------------------------------------------------------
+    def _home_overview(self) -> Response:
+        place = self.gateway.home_place.get()
+        return json_response(200, {"place": {"lat": place[0], "lon": place[1]} if place else None})
+
+    def _home(self, body: bytes) -> Response:
+        """``POST /admin/api/home`` {"lat": 50.08, "lon": 14.44} (Uložit, rounded to 0.1°) | {"remove": true}.
+        Logged without the coordinates."""
+        try:
+            payload = parse_body(body, 1024)
+        except ProfileError as exc:
+            return json_response(exc.status, exc.payload(), exc.headers)
+        home = self.gateway.home_place
+        try:
+            if payload.get("remove") is True:
+                had = home.remove()
+                self.gateway.log("admin: home place removed" if had else "admin: home place remove (none set)")
+                return self._home_overview()
+            place = home.set(payload.get("lat"), payload.get("lon"))
+        except OSError as exc:
+            self.gateway.log(f"admin: home place not saved: {type(exc).__name__}")
+            return error(503, "Místo domácnosti se nepodařilo uložit")
+        if place is None:
+            return error(400, HOME_BOUNDS)
+        self.gateway.log("admin: home place set")
+        return self._home_overview()
 
     # -- tab "Přihlášení" (signinlog.py) ---------------------------------------------------
     def _signin_overview(self, query: Mapping[str, str]) -> Response:
@@ -897,6 +935,7 @@ td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowra
   <button role="tab" id="tab-watch" aria-selected="false">Sledování</button>
   <button role="tab" id="tab-defaults" aria-selected="false">Výchozí kanály</button>
   <button role="tab" id="tab-tmdb" aria-selected="false">TMDb</button>
+  <button role="tab" id="tab-home" aria-selected="false">Domů</button>
   <button role="tab" id="tab-update" aria-selected="false">Aktualizace</button>
   <button role="tab" id="tab-manual" aria-selected="false">Návod</button>
 </div>
@@ -1019,6 +1058,23 @@ automaticky po nastaveném počtu dní (nejvýše 14) nebo dříve při nedostat
   nedá stáhnout ani exportovat. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or
   otherwise approved by TMDB.</p>
 </section>
+<section id="home" hidden>
+  <p class="sub" id="home-state"></p>
+  <form class="setting" id="home-form">
+    <label for="home-lat">Zeměpisná šířka</label>
+    <input id="home-lat" inputmode="decimal" autocomplete="off" style="width: 8em" placeholder="50,08">
+    <label for="home-lon">délka</label>
+    <input id="home-lon" inputmode="decimal" autocomplete="off" style="width: 8em" placeholder="14,44">
+    <button type="submit">Uložit</button>
+    <button type="button" id="home-remove">Smazat</button>
+  </form>
+  <p class="help">Místo domácnosti pro počasí na obrazovce Domů: souřadnice z mapy (např. v mapě klepnout pravým
+  tlačítkem a zkopírovat), uloží se zaokrouhlené na desetinu stupně (asi 10 km). Platí pro televize a web, které
+  bráně neposílají vlastní polohu; bez místa a bez polohy zařízení se počasí neukazuje. Raspberry posílá Open-Meteo
+  jen zaokrouhlené souřadnice a ČHMÚ žádnou polohu (výstrahy se k místu přiřadí tady). Místo zůstává jen na tomto
+  Raspberry a do záznamu služby se nezapisuje. Počasí: Open-Meteo.com (CC BY 4.0), CAMS · Výstrahy: ČHMÚ
+  (CC BY 4.0).</p>
+</section>
 <section id="update" hidden>
   <p class="sub" id="update-version"></p>
   <p id="update-state"></p>
@@ -1091,7 +1147,7 @@ function api(method, path, body) {
   });
 }
 
-var TABS = ["channels", "storage", "profiles", "signin", "watch", "defaults", "tmdb", "update", "manual"];
+var TABS = ["channels", "storage", "profiles", "signin", "watch", "defaults", "tmdb", "home", "update", "manual"];
 function showTab(name) {
   TABS.forEach(function (t) {
     document.getElementById("tab-" + t).setAttribute("aria-selected", String(t === name));
@@ -1104,6 +1160,7 @@ function showTab(name) {
   if (name === "defaults" && !dfltDirty) loadDefaults();  // unsaved edits survive a look at another tab
   if (name === "tmdb") loadTmdb(tmdbPage);
   if (name === "update") loadUpdate();
+  if (name === "home") loadHome();
 }
 TABS.forEach(function (t) {
   document.getElementById("tab-" + t).addEventListener("click", function () { showTab(t); });
@@ -1134,6 +1191,35 @@ document.getElementById("manual-download").addEventListener("click", function ()
     })
     .catch(function (e) { say("Návod se nepodařilo stáhnout: " + e.message, true); })
     .then(function () { button.disabled = false; });
+});
+
+// tab "Domů" (weather.py): the household place, rounded to 0.1° by the gateway when saved
+function decimal(text) { return text.trim().replace(",", "."); }
+function renderHome(data) {
+  var p = data.place;
+  document.getElementById("home-state").textContent = p
+    ? "Místo domácnosti: " + String(p.lat).replace(".", ",") + " N, " + String(p.lon).replace(".", ",") + " E."
+    : "Místo domácnosti není nastavené.";
+  document.getElementById("home-lat").value = p ? String(p.lat).replace(".", ",") : "";
+  document.getElementById("home-lon").value = p ? String(p.lon).replace(".", ",") : "";
+  document.getElementById("home-remove").disabled = !p;
+}
+function loadHome() {
+  return api("GET", "/admin/api/home").then(renderHome,
+    function (e) { say("Místo domácnosti se nepodařilo načíst: " + e.message, true); });
+}
+document.getElementById("home-form").addEventListener("submit", function (ev) {
+  ev.preventDefault();
+  var lat = Number(decimal(document.getElementById("home-lat").value));
+  var lon = Number(decimal(document.getElementById("home-lon").value));
+  api("POST", "/admin/api/home", {lat: lat, lon: lon}).then(function (data) {
+    renderHome(data); say("Místo domácnosti uloženo.");
+  }, function (e) { say("Místo se nepodařilo uložit: " + e.message, true); });
+});
+document.getElementById("home-remove").addEventListener("click", function () {
+  api("POST", "/admin/api/home", {remove: true}).then(function (data) {
+    renderHome(data); say("Místo domácnosti smazáno.");
+  }, function (e) { say("Místo se nepodařilo smazat: " + e.message, true); });
 });
 
 var updatePolling = null, updateConfirm = false;

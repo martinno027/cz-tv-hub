@@ -1,0 +1,111 @@
+{
+ "status": 200,
+ "body": {
+  "place": {
+   "lat": 50.1,
+   "lon": 14.4,
+   "source": "device"
+  },
+  "now": {
+   "temperature": 8.4,
+   "code": 2,
+   "text": "Polojasno",
+   "icon": "partly",
+   "wind": 12.0
+  },
+  "sun": {
+   "rise": "07:13",
+   "set": "16:19"
+  },
+  "days": [
+   {
+    "date": "2026-11-14",
+    "code": 2,
+    "text": "Polojasno",
+    "icon": "partly",
+    "max": 9.1,
+    "min": 2.3,
+    "rainChance": 10
+   },
+   {
+    "date": "2026-11-15",
+    "code": 61,
+    "text": "Slabý déšť",
+    "icon": "rain",
+    "max": 8.0,
+    "min": 3.5,
+    "rainChance": 60
+   },
+   {
+    "date": "2026-11-16",
+    "code": 3,
+    "text": "Zataženo",
+    "icon": "cloud",
+    "max": 7.2,
+    "min": 4.0,
+    "rainChance": 30
+   },
+   {
+    "date": "2026-11-17",
+    "code": 0,
+    "text": "Jasno",
+    "icon": "sun",
+    "max": 6.5,
+    "min": -1.0,
+    "rainChance": 0
+   },
+   {
+    "date": "2026-11-18",
+    "code": 45,
+    "text": "Mlha",
+    "icon": "fog",
+    "max": 5.0,
+    "min": -2.4,
+    "rainChance": 5
+   },
+   {
+    "date": "2026-11-19",
+    "code": 71,
+    "text": "Slabé sněžení",
+    "icon": "snow",
+    "max": 1.8,
+    "min": -3.1,
+    "rainChance": 70
+   },
+   {
+    "date": "2026-11-20",
+    "code": 95,
+    "text": "Bouřka",
+    "icon": "storm",
+    "max": 12.4,
+    "min": 6.0,
+    "rainChance": 80
+   }
+  ],
+  "air": {
+   "aqi": 45,
+   "aqiText": "zhoršené",
+   "pollen": [
+    {
+     "name": "olše",
+     "level": "nízká"
+    }
+   ]
+  },
+  "warnings": [
+   {
+    "level": "yellow",
+    "event": "Silný vítr",
+    "from": "2026-11-14T12:00:00Z",
+    "to": "2026-11-14T17:00:00Z"
+   },
+   {
+    "level": "orange",
+    "event": "Riziko požárů",
+    "from": "2026-11-13T22:00:00Z",
+    "to": null
+   }
+  ],
+  "attribution": "Počasí: Open-Meteo.com (CC BY 4.0), CAMS · Výstrahy: ČHMÚ (CC BY 4.0)"
+ }
+}

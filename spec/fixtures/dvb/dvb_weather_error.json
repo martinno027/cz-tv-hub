@@ -1,0 +1,11 @@
+{
+ "status": 200,
+ "body": {
+  "place": {
+   "lat": 50.1,
+   "lon": 14.4,
+   "source": "household"
+  },
+  "error": "Počasí teď není k dispozici"
+ }
+}

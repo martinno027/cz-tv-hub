@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Synthetic CAP 1.2 file in the shape of ČHMÚ's alert_cap_50_*.xml with no warning (no real ČHMÚ data). -->
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>2.49.0.0.203.0.CZ.000000000000.SYNTHETIC_000002</identifier>
+  <sender>test@example.invalid</sender>
+  <sent>2026-11-14T11:00:00+01:00</sent>
+  <status>Actual</status>
+  <msgType>Update</msgType>
+  <scope>Public</scope>
+  <info>
+    <language>cs</language>
+    <category>Met</category>
+    <event>Žádná výstraha před silným větrem</event>
+    <responseType>None</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Minor</severity>
+    <certainty>Unlikely</certainty>
+    <onset>2026-11-14T11:00:00+01:00</onset>
+    <area>
+      <areaDesc>Hlavní město Praha</areaDesc>
+      <geocode><valueName>CISORP</valueName><value>1100</value></geocode>
+    </area>
+  </info>
+</alert>
