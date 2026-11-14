@@ -351,7 +351,8 @@ the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Na
   - Golden: `archive_cases.json` "menu" (items, initial selection, what OK and Back do), in all three apps.
 - **Show page**: the programme page of T15 extended for shows: image, title, facts (source · year · kind · countries
   · episode count), TMDb rating, description, creators; for a film the buttons as T15 (`Přehrát` / `Pokračovat od …`
-  / `Zpět`); for a series season chips and the episode list (`1/26 Od začátku · 53 min · ČT1 9. 1.`), each episode
+  / `Zpět`); for a series season chips and the episode list (`1/26 Od začátku · 53 min · ČT1 9. 1.`; an episode ČT names only by
+  its date gets its topics as the name from the gateway, T56), each episode
   `Přehrát` or `Pokračovat od …` (resume keys as today: `ct:<idec>`, `dvb:<recording id>`); not playable → dimmed with
   ČT's text when played. The extra group "Nahráno z antény" lists our recorded episodes of the show.
   **Year and month (T32)**: when the ČT group has `periods`, a row of **year chips** ("2026", "2025", …, newest

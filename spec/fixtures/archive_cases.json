@@ -1,5 +1,5 @@
 {
- "_doc": "Archive (spec/dvb-gateway.md 'Archive', spec/apps.md 'Archiv'). categories: ČT category slugs for one of our recorded shows, from its stored TMDb match (kind + genre ids) or, without one, its DVB genre and title. normalise: the key that makes an iVysílání show and our recordings one card. merge: card source and order. continueRow: which resume entries the row shows, in order (max 20). subgenres (T23): whether one of our recordings, already in the category, is also listed in a ČT sub-genre: by the sub-genre title (normalised as 'normalise') → any of the TMDb genre ids, or the TMDb kind for 'Filmy'/'Seriály'; any other title, or no TMDb match: not listed. menu (T23): the Archiv menu as a state machine: items of the main menu and of a category's sub-menu, the initial selection, and what OK / Back do (state after each step; 'grid' = what the grid shows, 'leave' = Back leaves the tab, 'focus' = where the focus goes). periods (T32): the year/month chips of a ČT episode list with more than 100 episodes: monthName (1-12 → Czech nominative, lower case), chips (the gateway's periods → the labels in order and which is selected), selectYear (a year alone → its newest month, from the months the gateway lists for that year).",
+ "_doc": "Archive (spec/dvb-gateway.md 'Archive', spec/apps.md 'Archiv'). categories: ČT category slugs for one of our recorded shows, from its stored TMDb match (kind + genre ids) or, without one, its DVB genre and title. normalise: the key that makes an iVysílání show and our recordings one card. merge: card source and order. continueRow: which resume entries the row shows, in order (max 20). subgenres (T23): whether one of our recordings, already in the category, is also listed in a ČT sub-genre: by the sub-genre title (normalised as 'normalise') → any of the TMDb genre ids, or the TMDb kind for 'Filmy'/'Seriály'; any other title, or no TMDb match: not listed. menu (T23): the Archiv menu as a state machine: items of the main menu and of a category's sub-menu, the initial selection, and what OK / Back do (state after each step; 'grid' = what the grid shows, 'leave' = Back leaves the tab, 'focus' = where the focus goes). periods (T32): the year/month chips of a ČT episode list with more than 100 episodes: monthName (1-12 → Czech nominative, lower case), chips (the gateway's periods → the labels in order and which is selected), selectYear (a year alone → its newest month, from the months the gateway lists for that year). episodeTitles (T56): the name of an iVysílání episode in the archive. ČT names many news and magazine episodes only by their date ('29. října', '16. června 2024', '8. března 13:05'); then the name is the episode's description (its topics, ' — ' between them), cut to at most 80 characters after a whole topic, else after a whole word, with '…'; a date title without a description stays. Any other title stays as ČT sends it. Synthetic texts.",
  "categories": [
   {
    "name": "movie comedy",
@@ -1278,5 +1278,22 @@
     "month": null
    }
   ]
- }
+ },
+ "episodeTitles": [
+  {"title": "29. října", "description": "Volba prezidenta", "name": "Volba prezidenta"},
+  {"title": "2. listopadu", "description": "Most přes řeku — Nové hřiště — Výstava hub", "name": "Most přes řeku — Nové hřiště — Výstava hub"},
+  {"title": "16. června 2024", "description": "Rozhovor o rozpočtu", "name": "Rozhovor o rozpočtu"},
+  {"title": "9. června 2024", "description": "Téma týdne", "name": "Téma týdne"},
+  {"title": "8. března 13:05", "description": "Debata o školství", "name": "Debata o školství"},
+  {"title": "1. ledna", "description": "Úvodní zprávy — Nová pravidla pro stavby — Opravy silnic v kraji — Počasí na víkend — Sport", "name": "Úvodní zprávy — Nová pravidla pro stavby — Opravy silnic v kraji…"},
+  {"title": "12. května", "description": "Dlouhý popis bez oddělovačů, který pokračuje dál a dál přes osmdesát znaků, aby se musel zkrátit za slovem.", "name": "Dlouhý popis bez oddělovačů, který pokračuje dál a dál přes osmdesát znaků, aby…"},
+  {"title": "3. prosince", "description": "", "name": "3. prosince"},
+  {"title": "3. prosince", "description": null, "name": "3. prosince"},
+  {"title": "Virus II", "description": "Odkud se vzal virus a kdo ho zkoumá.", "name": "Virus II"},
+  {"title": "10/10 Směnárník", "description": "Případ z roku 1998.", "name": "10/10 Směnárník"},
+  {"title": "Listopad", "description": "Měsíc v přírodě", "name": "Listopad"},
+  {"title": "29. října 2024 – speciál", "description": "Mimořádné vysílání", "name": "29. října 2024 – speciál"},
+  {"title": "31. února", "description": "Neexistující datum, ale tvar data", "name": "Neexistující datum, ale tvar data"},
+  {"title": "4. dubna", "description": "Rozhovor s ministryní o rozpočtu na příští rok, o školství a zdravotnictví, dopravě a bydlení pro mladé rodiny", "name": "Rozhovor s ministryní o rozpočtu na příští rok, o školství a zdravotnictví…"}
+ ]
 }
