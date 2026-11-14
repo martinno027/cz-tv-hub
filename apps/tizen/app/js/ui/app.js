@@ -81,6 +81,7 @@
     dvbThumbs: false, // the gateway has thumbnails on (from /dvb/status)
     dvbStatus: null, // the last /dvb/status check for Domů's notice: {failed, badKey, recordingPaused}; null before one
     images: null, // guide images (CT and gateway thumbnails), memory only
+    weather: null, // Domů's weather (CT.WeatherSource), memory only
 
     start: function () {
       var self = this;
@@ -119,6 +120,7 @@
       this.household = this.makeHousehold();
       if (!this.profile.signedIn()) this.showPrefs(this.household.effective(), true);
       this.watch = this.makeWatch();
+      this.weather = this.makeWeather();
       this.player = new CT.Player(this);
       this.programme = new CT.ProgrammePage(this);
       this.numberEntry = new CT.NumberEntry(function (n) { self.playNumber(n); });
@@ -232,6 +234,64 @@
     },
 
     /**
+     * Domů's weather (spec/apps.md "Domů", T59): from this gateway only, asked when Domů is shown and the last answer
+     * is older than 30 min; with the TV's location only while "Počasí podle polohy této televize" is on.
+     */
+    makeWeather: function () {
+      var self = this;
+      var source = new CT.WeatherSource({
+        client: function () { return self.dvbRepo ? self.dvbRepo.client : null; },
+        locate: function () { return self.locate(); }
+      });
+      source.onChange = function () {
+        if (self.tab === 'home') self.screens.home.render();
+      };
+      return source;
+    },
+
+    /** The platform's geolocation for the weather (the demo's stand-in), or null. */
+    geolocation: function () {
+      return CT.Demo.enabled ? CT.Demo.geolocation() : CT.Platform.geolocation();
+    },
+
+    /** Raw [lat, lon] for one weather request, or null: the switch is not on, no location, refused, an error. */
+    locate: function () {
+      var geo = this.geolocation();
+      if (!geo || !CT.WeatherLocationSwitch.on()) return Promise.resolve(null);
+      return CT.locate(geo);
+    },
+
+    /** Domů asks once before the first OS prompt: a gateway (the weather is its), a location source, not yet decided. */
+    weatherConsentDue: function () {
+      return !!this.dvbConfig && !!this.geolocation() && CT.WeatherLocationSwitch.state() === 'ask';
+    },
+
+    /**
+     * The one-time question before the OS is asked (Domů's first show, or switching it on in Nastavení → Server):
+     * Povolit / Nepoužívat set the switch; Return is no answer (the switch stays as it was, asked again at the next
+     * start). `after(chosen)` when it closes.
+     */
+    askWeatherLocation: function (after) {
+      var self = this;
+      var W = CT.Weather;
+      var Menu = CT.ArchiveCards.Menu;
+      Menu.open(W.CONSENT_TEXT, [
+        { label: W.CONSENT_ALLOW, action: function () { self.setWeatherLocation(true); } },
+        { label: W.CONSENT_DENY, action: function () { self.setWeatherLocation(false); } }
+      ], 'wide');
+      Menu.onClose = function (chosen) {
+        if (after) after(chosen);
+      };
+    },
+
+    /** The location switch changed (Domů's question, Nastavení → Server): asked again with or without it. */
+    setWeatherLocation: function (on) {
+      CT.WeatherLocationSwitch.set(on);
+      this.weather.reset();
+      if (this.tab === 'home') this.weather.refresh();
+    },
+
+    /**
      * "Kanály" household default: whether this TV's list is its own (else it follows the gateway's default). A TV
      * from before T11 decides once from its own prefs (signed in: the ones ProfileSync keeps aside).
      */
@@ -342,6 +402,7 @@
       this.dvbThumbs = false;
       this.dvbStatus = null;
       this.watch.setEnabled(false); // until this gateway's status says otherwise
+      this.weather.reset(); // another gateway's weather (or none)
       if (CT.Platform.onGatewayConfig) CT.Platform.onGatewayConfig(config);
       this.images.clear('gw');
       this.screens.archive.reset();

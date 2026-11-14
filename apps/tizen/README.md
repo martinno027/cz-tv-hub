@@ -106,6 +106,13 @@ minutu beat, stop) ukázka jen zapíše do konzole a do `CT.Demo.watchReports`, 
 prohlížeče (`?demo&resume=none` = žádné). `?demo&status=down` = brána na `/dvb/status` neodpovídá („Brána antény
 není dostupná.“), `?demo&status=badkey` = brána odmítne klíč (401), `?demo&status=paused` = brána hlásí
 pozastavené nahrávání.
+Počasí na Domů (T59) je z `spec/fixtures/dvb/dvb_weather_ok.json` posunuté na dnešek (jedna výstraha končí za 3 h,
+druhá nemá konec); `?demo&weather=off` = brána počasí nemá (404), `?demo&weather=error` = počasí teď není
+k dispozici (v obou případech jen datum). Poloha televize je v ukázce náhradní (Praha), nikdy skutečná poloha
+prohlížeče; `?demo&location=none` = televize polohu nemá (žádný dotaz ani přepínač), `?demo&location=denied` =
+odmítnutá poloha. Odpověď na dotaz „Počasí na Domů podle polohy…“ si ukázka drží jen v paměti (po obnovení
+stránky se zeptá znovu; skutečná webová aplikace na stejné adrese tak dál dostane svůj dotaz); co aplikace bráně
+poslala, je v `CT.Demo.weatherRequests`.
 Ukázka si pamatuje stav v `localStorage` prohlížeče; čistý start = `localStorage.clear()`.
 
 ## Instalace do televize (bez obchodu Samsung)

@@ -31,6 +31,12 @@
  * seeded with two ČT programmes and the sample Anténa recording; `?demo&resume=none` starts with none.
  * `?demo&status=down` = /dvb/status fails ("Brána antény není dostupná."), `?demo&status=badkey` = it answers 401
  * (the key notice), `?demo&status=paused` = it says recordingPaused (the disk notice).
+ * Weather on Domů (T59): /dvb/weather answers spec/fixtures/dvb/dvb_weather_ok.json moved to today (a warning ending
+ * in 3 h, one without an end); `?demo&weather=off` = 404 "Počasí není zapnuté", `?demo&weather=error` = 200 with
+ * `error` (both: the date only). The TV's location is a stand-in (Prague, never the browser's real one);
+ * `?demo&location=none` = no location source (no question, no switch), `?demo&location=denied` = refused. The
+ * answer to the question is kept in memory only (asked again after a reload; never the real app's stored answer,
+ * the web demo shares its origin); the requests the app sent are in CT.Demo.weatherRequests.
  */
 (function (root) {
   'use strict';
@@ -208,8 +214,45 @@
   // `?demo&status=down`: /dvb/status fails, `=badkey` answers 401; `=paused`: it says recordingPaused (Domů, T58)
   var STATUS = (/[?&]status=(down|paused|badkey)\b/.exec(root.location.search) || [])[1] || '';
 
+  // `?demo&weather=off|error` (T59); `?demo&location=none|denied`
+  var WEATHER = (/[?&]weather=(off|error)\b/.exec(root.location.search) || [])[1] || 'ok';
+  var LOCATION = (/[?&]location=(none|denied)\b/.exec(root.location.search) || [])[1] || '';
+  var weatherRequests = [];
+
+  /** GET /dvb/weather from the fixture: the days from today, the first warning ending in 3 h. */
+  function weather(url) {
+    weatherRequests.push(url.replace(/^https?:\/\/[^/]+/, ''));
+    return load('dvb/dvb_weather_' + WEATHER + '.json').then(function (r) {
+      var body = JSON.parse(r.body);
+      if (body.place) body.place.source = /[?&]lat=/.test(url) ? 'device' : 'household';
+      var today = CT.Days.today(Date.now());
+      (body.days || []).forEach(function (d, i) { d.date = CT.Days.addDays(today, i); });
+      var end = (Math.ceil(Date.now() / 3600000) + 3) * 3600000;
+      (body.warnings || []).forEach(function (w) {
+        if (!w.to) return;
+        w.from = new Date(end - 5 * 3600000).toISOString();
+        w.to = new Date(end).toISOString();
+      });
+      return answer(r.status, body);
+    });
+  }
+
+  /** The TV's location in the demo: a fixed stand-in, never the browser's (and none where the platform has none). */
+  function geolocation() {
+    if (LOCATION === 'none' || !CT.Platform.geolocation()) return null;
+    return {
+      getCurrentPosition: function (ok, fail) {
+        setTimeout(function () {
+          if (LOCATION === 'denied') fail({ code: 1, message: 'denied (demo)' });
+          else ok({ coords: { latitude: 50.0755, longitude: 14.4378 } });
+        }, 300);
+      }
+    };
+  }
+
   function transport(request) {
     var url = request.url;
+    if (/\/dvb\/weather(\?|$)/.test(url)) return weather(url);
     if (/\/dvb\/watch$/.test(url) && request.method === 'POST') {
       var report = { at: new Date().toISOString(), url: url, headers: request.headers, body: JSON.parse(request.body) };
       watchReports.push(report);
@@ -786,6 +829,9 @@
     defaults: defaults,
     /** `?demo&watch`: every POST /dvb/watch the app sent ({at, url, headers, body}), nothing leaves the PC. */
     watchReports: watchReports,
+    /** Every GET /dvb/weather the app sent (path and query: whether and which rounded location went along). */
+    weatherRequests: weatherRequests,
+    geolocation: geolocation,
     /** Playback URL of a Chamber stream in the demo: local and absent (nothing plays, nothing leaves the PC). */
     pspPlayUrl: function (stream) {
       return 'demo-psp-' + stream.id + '.m3u8';

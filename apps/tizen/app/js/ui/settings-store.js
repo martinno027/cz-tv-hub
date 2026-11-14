@@ -11,6 +11,7 @@
   var THUMBS_KEY = 'cztvhub.thumbs'; // only this TV's switch; the images themselves are never stored
   var PROFILE_KEY = 'cztvhub.profile'; // "Profil": name, session token, settings documents; never the password
   var HOUSEHOLD_KEY = 'cztvhub.household'; // "Kanály" household default: own flag, own list, cached default
+  var WEATHER_LOCATION_KEY = 'cztvhub.weatherLocation'; // only the choice; the location itself is never stored
 
   function read() {
     try {
@@ -77,6 +78,46 @@
         root.localStorage.setItem(THUMBS_KEY, on ? 'on' : 'off');
       } catch (e) {
         // See SettingsStore.save().
+      }
+    }
+  };
+
+  // the demo's answer in memory only: the web demo shares its origin with the real web app, whose own question must
+  // not be answered by trying the demo
+  var demoWeatherLocation = 'ask';
+
+  function demo() {
+    return !!(CT.Demo && CT.Demo.enabled);
+  }
+
+  /**
+   * "Počasí podle polohy této televize" (spec/apps.md "Location for weather", T59): 'ask' before the one-time question
+   * on Domů, then 'on' (Povolit, or the switch in Nastavení → Server) or 'off' (Nepoužívat). Per TV, not in a profile.
+   */
+  CT.WeatherLocationSwitch = {
+    state: function () {
+      if (demo()) return demoWeatherLocation;
+      try {
+        var v = root.localStorage.getItem(WEATHER_LOCATION_KEY);
+        return v === 'on' || v === 'off' ? v : 'ask';
+      } catch (e) {
+        return 'ask';
+      }
+    },
+
+    on: function () {
+      return CT.WeatherLocationSwitch.state() === 'on';
+    },
+
+    set: function (on) {
+      if (demo()) {
+        demoWeatherLocation = on ? 'on' : 'off';
+        return;
+      }
+      try {
+        root.localStorage.setItem(WEATHER_LOCATION_KEY, on ? 'on' : 'off');
+      } catch (e) {
+        // See SettingsStore.save(): asked again after the next start.
       }
     }
   };

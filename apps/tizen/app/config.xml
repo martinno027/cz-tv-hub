@@ -19,4 +19,7 @@
     <!-- Mute (spec/apps.md "Mute (T34)"): AVPlay has no mute, the player mutes the TV while it is open
          (tizen.tvaudiocontrol.setMute) and gives the TV its own mute back when it closes. -->
     <tizen:privilege name="http://tizen.org/privilege/tv.audio"/>
+    <!-- Domů's weather (spec/apps.md "Location for weather", T59): navigator.geolocation, rounded to 0.1° on the TV
+         and sent only to the household gateway; many TVs have no location source and answer an error. -->
+    <tizen:privilege name="http://tizen.org/privilege/location"/>
 </widget>
