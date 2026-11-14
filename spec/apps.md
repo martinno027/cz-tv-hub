@@ -274,7 +274,11 @@ recording, caching or proxying; redirect only, as before).
     player has it (AVPlayer `currentDate()`, ExoPlayer `windowStartTimeMs`), else the platform's estimate already
     used for start-over and "Pokračovat" (Android: `now − window duration + position`; Samsung and the web always:
     buffer start = the moment of planning − 3 h). The bar's coordinates are wall clock, so the movement and the
-    clamps do not drift while the buffer slides.
+    clamps do not drift while the buffer slides. **`now` of the timeshift window is the end of the stream** (the
+    wall clock of the seekable range's end: measured on tvOS in T62, ČT's stream ended 184–207 s behind the real
+    clock in three readings, so a clamp at the real `now − 10 s` lay beyond what can play and a fast-forward seek
+    there never finished); the real clock only where the player knows no end. The `window`/`clamp` golden cases
+    use that `now`.
   - **VOD**: wall clock = the programme's start (guide / archive `aired`) + position, window `start` …
     `start + duration`, complete. Without a known start the labels are the **elapsed position** `H:MM:SS` (`0:12:34`)
     and the bar's ends `0:00` and the duration (`ct_bar_cases.json` `labels`).
@@ -285,7 +289,7 @@ recording, caching or proxying; redirect only, as before).
   **start position** is clamped too (start-over of a programme that began almost 3 h ago starts at buffer start +
   60 s), and a playhead that fell below the lower clamp during a pause seeks to it when playback resumes. A
   ▼ target in the future (the programme airing now) clamps to the live edge. The end of a VOD behaves as before
-  on each platform (Samsung and tvOS close the player, Android stays at the end).
+  on each platform (Samsung closes the player; tvOS and Android stay at the end, checked on tvOS in T62).
 - **Bar**: as the Anténa bar with one piece (no gaps): title = the programme at the playhead from the ČT guide of
   that channel (timeshift; ticks at its programme boundaries) or the programme itself (VOD, no ticks); second line =
   channel (· episode); the clock label and the ends as `labels`/`edges` above (timeshift right end = "Teď").
