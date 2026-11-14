@@ -244,6 +244,15 @@ Can go wrong: `xcodegen generate` recreates `Televize.xcodeproj` and drops the s
 again before running on a device. `Televize.xcodeproj` is generated and not in git: after a pull that adds Swift files, Xcode
 reports "Cannot find type … in scope" until `xcodegen generate` runs again. In the simulator install `Televize.app`, not the UI-test runner.
 
+Opt-in UI test of Domů (T58), against a running fake gateway with a finished recording:
+`TEST_RUNNER_HOME_GATEWAY=127.0.0.1:<P2> TEST_RUNNER_HOME_KEY=<dev key> TEST_RUNNER_HOME_RECORDING=<recording id>
+xcodebuild test -scheme Televize -destination 'platform=tvOS Simulator,name=…' -only-testing:TelevizeUITests/HomeUITests`
+(skipped without the three variables; the recording id is a finished one, not `b…`, e.g. from `GET /dvb/epg` →
+`events[].recording.id` with `state: completed`). Can go wrong: it needs an Anténa channel among the first ten of
+Teď běží (true with `dvb-fake` and the default order); it seeds six "Pokračovat" entries into the app's data (use your
+own simulator); the app itself still loads ČT's schedule and checks the Chamber's CDN as usual, the test only never
+selects a ČT or Chamber card; one run takes about 70 s.
+
 </details>
 
 <details>
@@ -276,7 +285,10 @@ Tests include the Chromium 56 syntax guard. UI check in a browser: serve the rep
 `apps/tizen/app/index.html?demo` (`&channels=60` for a big guide; `&psp=13` = invented Chamber streams 1 and 3
 on air, `&psp=0` none; the demo never contacts the Chamber's CDN; `&timeline` opens the Anténa timeline player bar
 over `spec/fixtures/dvb/dvb_timeline.json`, `&timeline=growing` as a growing window; the demo player is a
-clock-driven fake). `build.py` packages `dist/Televize.wgt` with the
+clock-driven fake; Domů (T58): `&resume=none` = nothing to resume, `&status=down|badkey|paused` = the gateway notice
+for an unreachable gateway, a refused key, paused recording). The demo keeps "Pokračovat" in memory only (three
+seeded entries, also in Archiv's demo row), never in the browser's storage, because the web demo shares its origin
+with the household's real web app. `build.py` packages `dist/Televize.wgt` with the
 Tizen Studio CLI; `--gateway`/`--key-file` preset the gateway in that build only.
 
 Can go wrong: the preset key ends up in the built package — never share or commit `dist/`.

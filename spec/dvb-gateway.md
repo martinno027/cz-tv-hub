@@ -75,7 +75,8 @@ HLS playlists and media segments, so players must send the header on all request
 Players that cannot set headers (Samsung AVPlay) send the same key as cookie `cztvhub_key=<key>`
 (`setStreamingProperty("COOKIE", …)`); the gateway accepts either.
 - `GET /dvb/status` → `{"enabled": true, "retentionDays": 3, "tuners": [{"name": "...", "inUse": false}],
-  "disk": {"freeBytes": 0, "totalBytes": 0}, "tvheadendReachable": true}`
+  "disk": {"freeBytes": 0, "totalBytes": 0}, "tvheadendReachable": true, "recordingPaused": false}`
+  (`recordingPaused`, T58: continuous recording stopped because the recordings disk is full; Domů shows it)
   (always 200; `tuners` is `[]` and `tvheadendReachable` false when TVHeadend does not answer; `disk` = the
   filesystem of `hls_dir`)
 - `GET /dvb/channels` → `{"channels": [{"id": "<tvh channel uuid>", "number": 1, "name": "ČT1 HD", "icon": "/dvb/icon/<id>" | null}]}`
