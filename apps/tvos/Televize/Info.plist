@@ -49,6 +49,10 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Aplikace hledá ve vaší domácí síti bránu Anténa (DVB-T2).</string>
+	<key>NSLocationDefaultAccuracyReduced</key>
+	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Počasí na Domů podle polohy této televize. Poloha se zaokrouhlí asi na 10 km, pošle se jen vaší bráně a ta podle ní zjistí počasí u Open-Meteo. Nikde se neukládá.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
