@@ -1,0 +1,481 @@
+{
+ "_doc": "Domů header (spec/apps.md 'Domů', T58), all offline. cases: a Prague calendar date → fullDate, nameLine (name day, or the state holiday line; null when neither), lines (at most two, in order: state holiday tomorrow, clock change today..+6 days, school holidays today or starting within 6 days, new/full moon today). stateHolidays: fixed ones (MM-DD → name) plus Velký pátek / Velikonoční pondělí from easter. schoolHolidays: MŠMT nationwide holidays of the school year (spring holidays depend on the district: not shown; update the table once a year, outside it nothing is shown). moon2026/moon2027: new/full moon days by Meeus ch. 49 (mean phase + the three largest periodic terms, the sin M term times the eccentricity factor E = 1 − 0.002516·T − 0.0000074·T²; TT taken as UT), Prague date; 2026 matches published tables; 2027 has phases near Prague midnight (21 Feb 0:25, 21 Apr 0:20) to catch implementations that differ.",
+ "weekdays": [
+  "pondělí",
+  "úterý",
+  "středa",
+  "čtvrtek",
+  "pátek",
+  "sobota",
+  "neděle"
+ ],
+ "monthsGenitive": [
+  "ledna",
+  "února",
+  "března",
+  "dubna",
+  "května",
+  "června",
+  "července",
+  "srpna",
+  "září",
+  "října",
+  "listopadu",
+  "prosince"
+ ],
+ "stateHolidays": {
+  "01-01": "Den obnovy samostatného českého státu",
+  "05-01": "Svátek práce",
+  "05-08": "Den vítězství",
+  "07-05": "Den slovanských věrozvěstů Cyrila a Metoděje",
+  "07-06": "Den upálení mistra Jana Husa",
+  "09-28": "Den české státnosti",
+  "10-28": "Den vzniku samostatného československého státu",
+  "11-17": "Den boje za svobodu a demokracii a Mezinárodní den studentstva",
+  "12-24": "Štědrý den",
+  "12-25": "1. svátek vánoční",
+  "12-26": "2. svátek vánoční"
+ },
+ "easterHolidays": {
+  "-2": "Velký pátek",
+  "1": "Velikonoční pondělí"
+ },
+ "schoolHolidays": [
+  {
+   "name": "Podzimní prázdniny",
+   "from": "2026-10-29",
+   "to": "2026-10-30"
+  },
+  {
+   "name": "Vánoční prázdniny",
+   "from": "2026-12-23",
+   "to": "2027-01-03"
+  },
+  {
+   "name": "Pololetní prázdniny",
+   "from": "2027-01-29",
+   "to": "2027-01-29"
+  },
+  {
+   "name": "Velikonoční prázdniny",
+   "from": "2027-03-25",
+   "to": "2027-03-25"
+  },
+  {
+   "name": "Hlavní prázdniny",
+   "from": "2027-07-01",
+   "to": "2027-08-31"
+  }
+ ],
+ "easter": {
+  "2025": "2025-04-20",
+  "2026": "2026-04-05",
+  "2027": "2027-03-28",
+  "2028": "2028-04-16",
+  "2029": "2029-04-01",
+  "2030": "2030-04-21",
+  "2031": "2031-04-13",
+  "2032": "2032-03-28",
+  "2033": "2033-04-17",
+  "2034": "2034-04-09",
+  "2035": "2035-03-25"
+ },
+ "clockChange": {
+  "2025": [
+   "2025-03-30",
+   "2025-10-26"
+  ],
+  "2026": [
+   "2026-03-29",
+   "2026-10-25"
+  ],
+  "2027": [
+   "2027-03-28",
+   "2027-10-31"
+  ],
+  "2028": [
+   "2028-03-26",
+   "2028-10-29"
+  ],
+  "2029": [
+   "2029-03-25",
+   "2029-10-28"
+  ],
+  "2030": [
+   "2030-03-31",
+   "2030-10-27"
+  ]
+ },
+ "moon2026": [
+  {
+   "date": "2026-01-03",
+   "phase": "full"
+  },
+  {
+   "date": "2026-01-18",
+   "phase": "new"
+  },
+  {
+   "date": "2026-02-01",
+   "phase": "full"
+  },
+  {
+   "date": "2026-02-17",
+   "phase": "new"
+  },
+  {
+   "date": "2026-03-03",
+   "phase": "full"
+  },
+  {
+   "date": "2026-03-19",
+   "phase": "new"
+  },
+  {
+   "date": "2026-04-02",
+   "phase": "full"
+  },
+  {
+   "date": "2026-04-17",
+   "phase": "new"
+  },
+  {
+   "date": "2026-05-01",
+   "phase": "full"
+  },
+  {
+   "date": "2026-05-16",
+   "phase": "new"
+  },
+  {
+   "date": "2026-05-31",
+   "phase": "full"
+  },
+  {
+   "date": "2026-06-15",
+   "phase": "new"
+  },
+  {
+   "date": "2026-06-30",
+   "phase": "full"
+  },
+  {
+   "date": "2026-07-14",
+   "phase": "new"
+  },
+  {
+   "date": "2026-07-29",
+   "phase": "full"
+  },
+  {
+   "date": "2026-08-12",
+   "phase": "new"
+  },
+  {
+   "date": "2026-08-28",
+   "phase": "full"
+  },
+  {
+   "date": "2026-09-11",
+   "phase": "new"
+  },
+  {
+   "date": "2026-09-26",
+   "phase": "full"
+  },
+  {
+   "date": "2026-10-10",
+   "phase": "new"
+  },
+  {
+   "date": "2026-10-26",
+   "phase": "full"
+  },
+  {
+   "date": "2026-11-09",
+   "phase": "new"
+  },
+  {
+   "date": "2026-11-24",
+   "phase": "full"
+  },
+  {
+   "date": "2026-12-09",
+   "phase": "new"
+  },
+  {
+   "date": "2026-12-24",
+   "phase": "full"
+  }
+ ],
+ "cases": [
+  {
+   "date": "2026-11-04",
+   "fullDate": "středa 4. listopadu",
+   "nameLine": "Svátek má Karel",
+   "lines": []
+  },
+  {
+   "date": "2026-01-01",
+   "fullDate": "čtvrtek 1. ledna",
+   "nameLine": "Dnes je státní svátek: Den obnovy samostatného českého státu",
+   "lines": []
+  },
+  {
+   "date": "2026-01-06",
+   "fullDate": "úterý 6. ledna",
+   "nameLine": "Svátek mají Kašpar, Melichar a Baltazar",
+   "lines": []
+  },
+  {
+   "date": "2026-02-28",
+   "fullDate": "sobota 28. února",
+   "nameLine": "Svátek má Lumír",
+   "lines": []
+  },
+  {
+   "date": "2028-02-29",
+   "fullDate": "úterý 29. února",
+   "nameLine": "Svátek má Horymír",
+   "lines": []
+  },
+  {
+   "date": "2026-04-02",
+   "fullDate": "čtvrtek 2. dubna",
+   "nameLine": "Svátek má Erika",
+   "lines": [
+    "Zítra je státní svátek: Velký pátek",
+    "Dnes je úplněk"
+   ]
+  },
+  {
+   "date": "2026-04-03",
+   "fullDate": "pátek 3. dubna",
+   "nameLine": "Dnes je státní svátek: Velký pátek",
+   "lines": []
+  },
+  {
+   "date": "2026-04-05",
+   "fullDate": "neděle 5. dubna",
+   "nameLine": "Svátek má Miroslava",
+   "lines": [
+    "Zítra je státní svátek: Velikonoční pondělí"
+   ]
+  },
+  {
+   "date": "2026-04-06",
+   "fullDate": "pondělí 6. dubna",
+   "nameLine": "Dnes je státní svátek: Velikonoční pondělí",
+   "lines": []
+  },
+  {
+   "date": "2026-03-23",
+   "fullDate": "pondělí 23. března",
+   "nameLine": "Svátek má Ivona",
+   "lines": [
+    "V neděli 29. března se mění čas: o hodinu dopředu"
+   ]
+  },
+  {
+   "date": "2026-03-28",
+   "fullDate": "sobota 28. března",
+   "nameLine": "Svátek má Soňa",
+   "lines": [
+    "Zítra se mění čas: o hodinu dopředu"
+   ]
+  },
+  {
+   "date": "2026-03-29",
+   "fullDate": "neděle 29. března",
+   "nameLine": "Svátek má Taťána",
+   "lines": [
+    "Dnes se mění čas: o hodinu dopředu"
+   ]
+  },
+  {
+   "date": "2026-10-19",
+   "fullDate": "pondělí 19. října",
+   "nameLine": "Svátek má Michala",
+   "lines": [
+    "V neděli 25. října se mění čas: o hodinu zpět"
+   ]
+  },
+  {
+   "date": "2026-10-24",
+   "fullDate": "sobota 24. října",
+   "nameLine": "Svátek má Nina",
+   "lines": [
+    "Zítra se mění čas: o hodinu zpět",
+    "Podzimní prázdniny 29.–30. října"
+   ]
+  },
+  {
+   "date": "2026-10-25",
+   "fullDate": "neděle 25. října",
+   "nameLine": "Svátek má Beáta",
+   "lines": [
+    "Dnes se mění čas: o hodinu zpět",
+    "Podzimní prázdniny 29.–30. října"
+   ]
+  },
+  {
+   "date": "2026-10-23",
+   "fullDate": "pátek 23. října",
+   "nameLine": "Svátek má Teodor",
+   "lines": [
+    "V neděli 25. října se mění čas: o hodinu zpět",
+    "Podzimní prázdniny 29.–30. října"
+   ]
+  },
+  {
+   "date": "2026-10-27",
+   "fullDate": "úterý 27. října",
+   "nameLine": "Svátek mají Šarlota a Zoe",
+   "lines": [
+    "Zítra je státní svátek: Den vzniku samostatného československého státu",
+    "Podzimní prázdniny 29.–30. října"
+   ]
+  },
+  {
+   "date": "2026-10-29",
+   "fullDate": "čtvrtek 29. října",
+   "nameLine": "Svátek má Silvie",
+   "lines": [
+    "Dnes jsou podzimní prázdniny"
+   ]
+  },
+  {
+   "date": "2026-11-16",
+   "fullDate": "pondělí 16. listopadu",
+   "nameLine": "Svátek má Otmar",
+   "lines": [
+    "Zítra je státní svátek: Den boje za svobodu a demokracii a Mezinárodní den studentstva"
+   ]
+  },
+  {
+   "date": "2026-11-17",
+   "fullDate": "úterý 17. listopadu",
+   "nameLine": "Dnes je státní svátek: Den boje za svobodu a demokracii a Mezinárodní den studentstva",
+   "lines": []
+  },
+  {
+   "date": "2026-11-24",
+   "fullDate": "úterý 24. listopadu",
+   "nameLine": "Svátek má Emílie",
+   "lines": [
+    "Dnes je úplněk"
+   ]
+  },
+  {
+   "date": "2026-12-18",
+   "fullDate": "pátek 18. prosince",
+   "nameLine": "Svátek má Miloslav",
+   "lines": [
+    "Vánoční prázdniny 23. prosince – 3. ledna"
+   ]
+  },
+  {
+   "date": "2026-12-23",
+   "fullDate": "středa 23. prosince",
+   "nameLine": "Svátek má Vlasta",
+   "lines": [
+    "Zítra je státní svátek: Štědrý den",
+    "Dnes jsou vánoční prázdniny"
+   ]
+  },
+  {
+   "date": "2026-12-24",
+   "fullDate": "čtvrtek 24. prosince",
+   "nameLine": "Dnes je státní svátek: Štědrý den",
+   "lines": [
+    "Zítra je státní svátek: 1. svátek vánoční",
+    "Dnes jsou vánoční prázdniny"
+   ]
+  },
+  {
+   "date": "2027-01-02",
+   "fullDate": "sobota 2. ledna",
+   "nameLine": "Svátek má Karina",
+   "lines": [
+    "Dnes jsou vánoční prázdniny"
+   ]
+  },
+  {
+   "date": "2027-01-25",
+   "fullDate": "pondělí 25. ledna",
+   "nameLine": "Svátek má Miloš",
+   "lines": [
+    "Pololetní prázdniny 29. ledna"
+   ]
+  },
+  {
+   "date": "2027-03-21",
+   "fullDate": "neděle 21. března",
+   "nameLine": "Svátek má Radek",
+   "lines": [
+    "Velikonoční prázdniny 25. března"
+   ]
+  },
+  {
+   "date": "2027-03-25",
+   "fullDate": "čtvrtek 25. března",
+   "nameLine": "Svátek má Marián",
+   "lines": [
+    "Zítra je státní svátek: Velký pátek",
+    "V neděli 28. března se mění čas: o hodinu dopředu"
+   ]
+  },
+  {
+   "date": "2027-06-26",
+   "fullDate": "sobota 26. června",
+   "nameLine": "Svátek má Adriana",
+   "lines": [
+    "Hlavní prázdniny 1. července – 31. srpna"
+   ]
+  },
+  {
+   "date": "2027-07-15",
+   "fullDate": "čtvrtek 15. července",
+   "nameLine": "Svátek má Jindřich",
+   "lines": [
+    "Dnes jsou hlavní prázdniny"
+   ]
+  },
+  {
+   "date": "2026-09-27",
+   "fullDate": "neděle 27. září",
+   "nameLine": "Svátek má Jonáš",
+   "lines": [
+    "Zítra je státní svátek: Den české státnosti"
+   ]
+  },
+  {
+   "date": "2026-11-09",
+   "fullDate": "pondělí 9. listopadu",
+   "nameLine": "Svátek má Bohdan",
+   "lines": [
+    "Dnes je nov"
+   ]
+  },
+  {
+   "date": "2026-06-29",
+   "fullDate": "pondělí 29. června",
+   "nameLine": "Svátek mají Petr a Pavel",
+   "lines": []
+  },
+  {
+   "date": "2026-09-01",
+   "fullDate": "úterý 1. září",
+   "nameLine": "Svátek mají Linda a Samuel",
+   "lines": []
+  },
+  {
+   "date": "2026-11-02",
+   "fullDate": "pondělí 2. listopadu",
+   "nameLine": null,
+   "lines": []
+  }
+ ],
+ "moonInstant": {"_doc": "one computed instant (UTC) to compare the implementations to the second (±1 s)", "phase": "full", "near": "2025-12-04", "k": 320.5, "utc": "2025-12-04T23:08:43Z"},
+ "moon2027": [{"date": "2027-01-07", "phase": "new"}, {"date": "2027-01-22", "phase": "full"}, {"date": "2027-02-06", "phase": "new"}, {"date": "2027-02-21", "phase": "full"}, {"date": "2027-03-08", "phase": "new"}, {"date": "2027-03-22", "phase": "full"}, {"date": "2027-04-07", "phase": "new"}, {"date": "2027-04-21", "phase": "full"}, {"date": "2027-05-06", "phase": "new"}, {"date": "2027-05-20", "phase": "full"}, {"date": "2027-06-04", "phase": "new"}, {"date": "2027-06-19", "phase": "full"}, {"date": "2027-07-04", "phase": "new"}, {"date": "2027-07-18", "phase": "full"}, {"date": "2027-08-02", "phase": "new"}, {"date": "2027-08-17", "phase": "full"}, {"date": "2027-08-31", "phase": "new"}, {"date": "2027-09-16", "phase": "full"}, {"date": "2027-09-30", "phase": "new"}, {"date": "2027-10-15", "phase": "full"}, {"date": "2027-10-29", "phase": "new"}, {"date": "2027-11-14", "phase": "full"}, {"date": "2027-11-28", "phase": "new"}, {"date": "2027-12-13", "phase": "full"}, {"date": "2027-12-27", "phase": "new"}]
+}

@@ -180,3 +180,23 @@ test('guide detail follows the resting mouse (0.2 s), leaving the grid shows the
   run();
   assert.equal(shown.length, 2);
 });
+
+test('Domů (T58): a click focuses Domů\'s card (its "Pokračovat" cards are Archiv cards too), long OK = its menu', () => {
+  const { app, sends, ok } = fakeApp();
+  const card = node(['#screen-home .home-item', '.ar-card'], null, { dataset: { index: '0' } });
+  const other = node(['#screen-home .home-item', '#screen-live .card']);
+  const offered = [];
+  app.screens.home = {
+    at: null, items: [other, card],
+    focusElement(el) { const i = this.items.indexOf(el); if (i < 0) return false; this.at = i; return true; },
+    offerRemove() { offered.push(this.at); }
+  };
+  assert.equal(F.act(app, card, false, ok), true);
+  assert.deepEqual([app.screens.home.at, app.zone, app.screens.archive.zone], [1, 'content', 'menu']);
+  assert.deepEqual(sends, ['enter']);
+  assert.equal(F.act(app, card, true, ok), true);
+  assert.deepEqual(offered, [1]);
+  assert.equal(app.screens.archive.removed, 0);
+  assert.equal(F.act(app, node(['#screen-home .home-item']), false, ok), false); // not one of its cards
+  assert.equal(sends.length, 1);
+});

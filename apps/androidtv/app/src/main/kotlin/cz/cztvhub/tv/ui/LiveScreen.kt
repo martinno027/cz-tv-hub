@@ -51,20 +51,11 @@ private data class CardItem(val title: String, val span: Timed)
  */
 @Composable
 fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
-    val onAir by viewModel.onAir.collectAsStateWithLifecycle()
-    val now by viewModel.now.collectAsStateWithLifecycle()
-    val dvb by viewModel.dvb.collectAsStateWithLifecycle()
-    val current = (onAir as? Load.Ready)?.value.orEmpty()
-    val loading = onAir is Load.Loading
-    // The broadcast day on air failed (and no earlier answer to keep): "Program se nepodařilo načíst" on the ČT
-    // cards instead of a programme (spec/apps.md, T36).
-    val failed = (onAir as? Load.Failed)?.message
+    val cards = rememberLiveCards(viewModel)
     val firstCard = remember { FocusRequester() }
-    val antenna = dvb
+    val antenna = cards.antenna
     val prefs by viewModel.channelPrefs.collectAsStateWithLifecycle()
     val channels = ChannelOrder.visible(prefs, antenna?.channels.orEmpty())
-    val psp by viewModel.psp.collectAsStateWithLifecycle()
-    val notOn = stringResource(R.string.psp_not_on)
     PspPolling(viewModel)
     ScheduleRetrying(viewModel, live = true)
     // Tailscale is not Running yet or being checked (spec/apps.md T21, T18): "Připojuji se k Tailscale…" (or the wait
@@ -94,59 +85,102 @@ fun LiveScreen(viewModel: MainViewModel, onPlay: (PlayRequest) -> Unit) {
             CardRow {
                 row.forEachIndexed { index, channel ->
                     val number = rowIndex * 3 + index + 1
-                    // The very first card takes the initial focus.
+                    // The very first card takes the focus when asked to (Domů's "Další kanály").
                     val base = Modifier.weight(1f).fillMaxHeight()
                     val modifier = if (rowIndex == 0 && index == 0) base.focusRequester(firstCard) else base
-                    val ct = channel.ct
-                    val dvbChannel = channel.dvb
-                    val stream = channel.psp
-                    if (stream != null) {
-                        val state = psp[stream.id] ?: PspState.UNKNOWN
-                        PspCard(
-                            name = stream.name,
-                            number = number,
-                            state = state,
-                            modifier = modifier,
-                            onClick = { selectPsp(viewModel, stream, onPlay) { viewModel.showNotice(notOn) } },
-                        )
-                    } else if (ct != null) {
-                        val info = current[ct.id]
-                        ChannelCard(
-                            name = ct.name,
-                            number = number,
-                            source = ChannelSource.CT,
-                            current = info?.current?.let { CardItem(it.title, it) },
-                            next = info?.next?.let { CardItem(it.title, it) },
-                            emptyText = failed ?: stringResource(if (loading) R.string.loading else R.string.no_programme_info),
-                            now = now,
-                            modifier = modifier,
-                            onClick = { onPlay(PlayRequest.Live(ct.id, ct.name)) },
-                        )
-                    } else if (dvbChannel != null) {
-                        val info = antenna?.onAir?.get(dvbChannel.id)
-                        ChannelCard(
-                            name = dvbChannel.name,
-                            number = number,
-                            source = ChannelSource.DVB,
-                            current = info?.current?.let { CardItem(it.title, it) },
-                            next = info?.next?.let { CardItem(it.title, it) },
-                            emptyText = stringResource(R.string.no_programme_info),
-                            now = now,
-                            modifier = modifier,
-                            onClick = { onPlay(PlayRequest.DvbLive(dvbChannel.id, dvbChannel.name)) },
-                        )
-                    }
+                    LiveChannelCard(channel, number, cards, viewModel, modifier, onPlay)
                 }
                 repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
-    // Focus the first card once at app start; later tab switches keep focus on the tab row.
+    // Opened from Domů's "Další kanály": the focus goes to the first card; other tab switches keep it on the tab row.
     LaunchedEffect(Unit) {
-        if (!viewModel.initialFocusDone) {
-            viewModel.initialFocusDone = true
+        if (viewModel.focusLiveFirstCard) {
+            viewModel.focusLiveFirstCard = false
             runCatching { firstCard.requestFocus() }
         }
+    }
+}
+
+/** What the channel cards of Živě and Domů's "Teď běží" read, collected once per screen. */
+internal class LiveCards(
+    val current: OnAirMap,
+    val loading: Boolean,
+    /** The broadcast day on air failed (and no earlier answer to keep): its text on the ČT cards (T36). */
+    val failed: String?,
+    val antenna: DvbState?,
+    val psp: Map<String, PspState>,
+    val now: Instant,
+)
+
+@Composable
+internal fun rememberLiveCards(viewModel: MainViewModel): LiveCards {
+    val onAir by viewModel.onAir.collectAsStateWithLifecycle()
+    val now by viewModel.now.collectAsStateWithLifecycle()
+    val dvb by viewModel.dvb.collectAsStateWithLifecycle()
+    val psp by viewModel.psp.collectAsStateWithLifecycle()
+    return LiveCards(
+        current = (onAir as? Load.Ready)?.value.orEmpty(),
+        loading = onAir is Load.Loading,
+        failed = (onAir as? Load.Failed)?.message,
+        antenna = dvb,
+        psp = psp,
+        now = now,
+    )
+}
+
+/**
+ * One channel's card as on Živě: the programme on air now (a Poslanecká sněmovna stream: whether it is on); OK plays
+ * the channel live (a stream after its pre-play check).
+ */
+@Composable
+internal fun LiveChannelCard(
+    channel: ListedChannel,
+    number: Int,
+    cards: LiveCards,
+    viewModel: MainViewModel,
+    modifier: Modifier,
+    onPlay: (PlayRequest) -> Unit,
+) {
+    val ct = channel.ct
+    val dvbChannel = channel.dvb
+    val stream = channel.psp
+    if (stream != null) {
+        val notOn = stringResource(R.string.psp_not_on)
+        PspCard(
+            name = stream.name,
+            number = number,
+            state = cards.psp[stream.id] ?: PspState.UNKNOWN,
+            modifier = modifier,
+            onClick = { selectPsp(viewModel, stream, onPlay) { viewModel.showNotice(notOn) } },
+        )
+    } else if (ct != null) {
+        val info = cards.current[ct.id]
+        ChannelCard(
+            name = ct.name,
+            number = number,
+            source = ChannelSource.CT,
+            current = info?.current?.let { CardItem(it.title, it) },
+            next = info?.next?.let { CardItem(it.title, it) },
+            emptyText = cards.failed ?: stringResource(if (cards.loading) R.string.loading else R.string.no_programme_info),
+            now = cards.now,
+            modifier = modifier,
+            onClick = { onPlay(PlayRequest.Live(ct.id, ct.name)) },
+        )
+    } else if (dvbChannel != null) {
+        val info = cards.antenna?.onAir?.get(dvbChannel.id)
+        ChannelCard(
+            name = dvbChannel.name,
+            number = number,
+            source = ChannelSource.DVB,
+            current = info?.current?.let { CardItem(it.title, it) },
+            next = info?.next?.let { CardItem(it.title, it) },
+            emptyText = stringResource(R.string.no_programme_info),
+            now = cards.now,
+            modifier = modifier,
+            onClick = { onPlay(PlayRequest.DvbLive(dvbChannel.id, dvbChannel.name)) },
+        )
     }
 }
 

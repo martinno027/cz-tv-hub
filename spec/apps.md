@@ -144,7 +144,7 @@ one cell under the now line would be too easy to miss; Android, Samsung and the 
 could be played only from Živě). There is no retry button over the grid any more (it covered the other rows): a failed
 day is fetched again when it is opened again (its chip, crossing into it, reopening the guide); a failure is not
 cached. A later refresh that fails keeps the programmes already shown. Fixtures `schedule_ct1_ct24.json`, `graphql_error.json`.
-Cache schedules in memory per day; refetch today's after ~1 h. **A failed ČT day is asked again by itself (T42)**: while Živě or the
+Cache schedules in memory per day; refetch today's after ~1 h. **A failed ČT day is asked again by itself (T42)**: while Domů, Živě or the
 guide is on screen, every 30 s after a failure for the first 5 minutes, then every 2 minutes, until it loads (only while the
 screen is visible: not behind the player, not in the background; these retries are outside the ~10 requests of one
 screen open); nothing to
@@ -287,8 +287,60 @@ sněmovna streams keep playing live at once). **Back** returns to the guide with
 - Golden cases: `spec/fixtures/programme_page_cases.json` (buttons for each state; the rating line incl. plurals),
   all three apps.
 
+## Domů (T58: home tab, owner 2026-11-04)
+A new **first tab Domů** (Domů · Živě · TV průvodce · Archiv · Nastavení) on all three apps and the web, and **the app
+starts on Domů** (every start; coming back from the player keeps the tab the viewer was on). Domů gathers what the
+household looks at first. Weather, the evening selection, news and "Výročí dne" come in T59/T60 (they need new
+sources, approved separately); their places are listed below but stay empty until then.
+- **Blocks, top to bottom**; a block with nothing to show is left out entirely (no empty frame, no heading):
+  1. **Header** (not focusable): the full Czech date of today (`úterý 4. listopadu`, Prague calendar day, lower-case
+     weekday, genitive month, no year), **the name day** (`Svátek má Karel`; on a state holiday the holiday's name
+     instead, `Dnes je státní svátek: Den vzniku samostatného československého státu`), and **calendar lines** (at most
+     two, in this order, each only when it applies): a state holiday **tomorrow** (`Zítra je státní svátek: …`), a
+     **clock change** today or within the next 6 days (`V neděli 25. října se mění čas: o hodinu zpět` / `… o hodinu
+     dopředu`, `Dnes …`/`Zítra …` when it is today/tomorrow), **school holidays** today or starting within the next
+     6 days (`Podzimní prázdniny 29.–30. října`, `Dnes jsou vánoční prázdniny`), a **full or new moon** today
+     (`Dnes je úplněk` / `Dnes je nov`). [T59: weather today next to the date.]
+  2. **Gateway notice** (only with a gateway configured), one line with the source's warning colour:
+     `Brána antény není dostupná.` when `/dvb/status` failed (the same check as everywhere, no extra polling),
+     `Brána antény odmítla klíč. Zkontrolujte ho v Nastavení → Server.` when it answered `401`, or
+     `Nahrávání je pozastavené: na disku nahrávek dochází místo.` when `/dvb/status` says `recordingPaused: true`.
+  3. **Pokračovat**: the same row as Archiv's "Pokračovat" (`continueRow`, newest first, at most 20, the same cards,
+     OK plays at once, long OK / menu "Odebrat z řady"). Exactly Archiv's row: the same entries and the same
+     handling of Anténa entries without a gateway, no rule of its own.
+  4. **Teď běží**: the first **10 visible ČT and Anténa channels** of "Kanály" (order, hidden and sources as
+     everywhere; Chamber streams are left out here, they have block 5; numbers stay those of Kanály) with the
+     programme on air now, the same card as Živě (logo, number, title, progress); OK plays that channel live, exactly
+     as on Živě. "Další kanály" at the row's end opens Živě.
+  5. **Sněmovna** (only while at least one Chamber stream is live): the live streams as on Živě (`● ŽIVĚ`); OK plays.
+  6. [T60: Dnes večer] 7. [T60: Zprávy] 8. [T59: Počasí na týden] 9. [T60: Výročí dne]
+- **Focus**: on Domů's first open the first card of the first focusable row (Pokračovat, else Teď běží); up/down
+  moves between rows (keeping the column as far as the row allows), left/right within a row; up from the first row
+  reaches the tab bar. Coming back from the player: the card that was played.
+- **Data**: nothing new is fetched for Domů. It reuses what Živě already loads (the CT schedule and Anténa EPG
+  caches, the app's existing on-air refresh, unchanged) and the resume store; the Chamber checks run while Domů is on screen as on Živě
+  ("Poslanecká sněmovna" below); `/dvb/status` as today (its `recordingPaused` is new, `spec/dvb-gateway.md`), so the
+  gateway notice follows the app's existing status cache and may come a few minutes late. While Tailscale in the app
+  is still connecting, its "Připojuji se…" state is shown instead of "Brána antény není dostupná."
+- **Number keys** on Domů work as on Živě (they start the channel live). The clock is shown top right.
+- **Calendar rules** (offline, in each app; golden cases `spec/fixtures/calendar_cases.json`, name days
+  `spec/fixtures/namedays_cz.json`, the same table embedded in each app and test-checked equal to the fixture):
+  - Name days: the usual Czech civil calendar (one entry per day, 29 February included); a day that is a state
+    holiday shows the holiday line instead.
+  - State holidays (zákon č. 245/2000 Sb.): 1. 1. Den obnovy samostatného českého státu, Velký pátek, Velikonoční
+    pondělí, 1. 5. Svátek práce, 8. 5. Den vítězství, 5. 7. Den slovanských věrozvěstů Cyrila a Metoděje, 6. 7. Den
+    upálení mistra Jana Husa, 28. 9. Den české státnosti, 28. 10. Den vzniku samostatného československého státu,
+    17. 11. Den boje za svobodu a demokracii a Mezinárodní den studentstva, 24. 12. Štědrý den, 25. 12. 1. svátek
+    vánoční, 26. 12. 2. svátek vánoční. Easter Sunday by the Gregorian computus (Meeus/Jones/Butcher).
+  - Clock change: the last Sunday of March (`o hodinu dopředu`) and of October (`o hodinu zpět`), EU rule.
+  - School holidays: the nationwide ones of the MŠMT school year (table in the fixture, updated once a year; outside
+    the table nothing is shown). Spring holidays depend on the district and are not shown.
+  - Moon: new and full moon by Meeus ch. 49 (mean phase plus the three largest periodic terms, the sin M term times
+    E = 1 − 0.002516·T − 0.0000074·T², TT taken as UT), the Prague calendar
+    day of that instant; error minutes to an hour (golden 2026 dates match published tables).
+
 ## Archiv (T13, draft for the owner's review)
-A fourth tab **Archiv** (Živě · TV průvodce · Archiv · Nastavení) on all three apps: iVysílání and our recordings in
+A tab **Archiv** (Domů · Živě · TV průvodce · Archiv · Nastavení) on all three apps: iVysílání and our recordings in
 shared categories, from the gateway's `/dvb/archive` (`spec/dvb-gateway.md` "Archive"). Without a configured gateway
 the tab is empty with "Archiv potřebuje připojení k serveru. Nastavte ho v Nastavení → Server." (owner, 2026-10-25).
 - **Layout (T23, owner 2026-10-25, "Jen menu + mřížka" as iVysílání on the TV)**: a **menu on the left** and a
@@ -657,7 +709,7 @@ Catalogue (`spec/fixtures/psp_cases.json` "streams", the same in every app; no o
   error** (no answer) keeps the last known state; a "live" state older than 180 s without a confirming check is shown as
   unknown ("Zjišťuji…"), not as live. Next check: after a normal answer (200, or the 404 "not processed now")
   60 s; after a 5xx or a network error 120 s.
-  Checked only while Živě or the guide is on screen, the five streams one after another, each at most once per
+  Checked only while Domů, Živě or the guide is on screen, the five streams one after another, each at most once per
   60 s (after an error: 120 s); nothing in the background, no segment is fetched. **Right before playback** the app
   reuses a check younger than 60 s or makes one more check of the same playlist (one GET per viewer action; the
   player fetches that playlist anyway), so an off stream gets the message instead of a player error. Golden cases:
@@ -701,7 +753,7 @@ Catalogue (`spec/fixtures/psp_cases.json` "streams", the same in every app; no o
   closes. Golden: none (no shared rule); a unit test per app for "the state carries to the next programme".
 
 ## Clock (T22)
-Živě, TV průvodce, Archiv and Nastavení (the choice and its full-screen sections) show the **current time top right**, in the
+Domů, Živě, TV průvodce, Archiv and Nastavení (the choice and its full-screen sections) show the **current time top right**, in the
 row of the tab bar (on a screen without one, at the same place): Prague time `H:MM`, 24 h, no leading zero on the
 hour (`9:05`, `14:30`, `0:07`), whatever the device's time zone. It changes **on the minute** (next update scheduled
 at the next minute boundary, not every 60 s from when the screen opened). Same size and colour as the inactive tab
@@ -718,7 +770,7 @@ and the channels of a source that is off get no number; the others close up). Re
   timeshift buffer), ▲/▼ switches to the **previous/next** channel in `visible` (▲ = number − 1, ▼ = number + 1),
   wrapping around at both ends; the dedicated **CH+/CH−** keys do the same (CH+ = next = ▼). Start-over, archive
   and recordings keep their keys as before (no zapping there).
-- **Number keys**: a remote with digits picks a channel by number, in the live player and on Živě and the guide
+- **Number keys**: a remote with digits picks a channel by number, in the live player and on Domů, Živě and the guide
   (there it starts that channel live). Digits collect in a buffer shown top right (`2_`); the buffer is used
   **at once** when no further digit could give a valid number (`buffer × 10 > count`) or it has 3 digits, else
   after **2 s** without a digit or on OK. A leading `0` is ignored. A number outside 1…count shows

@@ -442,6 +442,7 @@ class DvbGateway:
             disk = {"freeBytes": 0, "totalBytes": 0}
         return json_response(200, {"enabled": True, "retentionDays": self.archive.max_days(), "tuners": tuners,
                                    "disk": disk, "tvheadendReachable": reachable,
+                                   "recordingPaused": self.archive.recorders.paused,  # T58: Domů's notice
                                    "thumbnails": self.thumbs.enabled, "watchLog": self.watch.enabled})
 
     def channels(self) -> Response:

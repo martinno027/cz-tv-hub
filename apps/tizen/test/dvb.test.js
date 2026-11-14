@@ -145,3 +145,11 @@ test('address normalisation allows only private hosts', () => {
   assert.throws(() => CT.DvbConfig.fromSettings('example.com', KEY), (e) => e.userMessage === CT.DvbMessages.HOST_NOT_ALLOWED);
   assert.equal(CT.DvbConfig.fromSettings(' pi ', ' ' + KEY + ' ').key, KEY);
 });
+
+test('parseStatus: recordingPaused true only when the gateway says so; missing = false (T58)', () => {
+  const P = CT.DvbParser;
+  assert.equal(P.parseStatus(200, '{"enabled": true, "recordingPaused": true}').recordingPaused, true);
+  assert.equal(P.parseStatus(200, '{"enabled": true, "recordingPaused": false}').recordingPaused, false);
+  const old = response('dvb/dvb_status.json');
+  assert.equal(P.parseStatus(old.status, old.body).recordingPaused, false);
+});

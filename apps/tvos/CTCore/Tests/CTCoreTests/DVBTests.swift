@@ -92,6 +92,14 @@ final class DVBTests: XCTestCase {
         XCTAssertTrue(try DVBParser.status(status: 200, body: on).thumbnails)
     }
 
+    /// Domů's notice "Nahrávání je pozastavené…" (spec/dvb-gateway.md `/dvb/status`, T58).
+    func testStatusRecordingPaused() throws {
+        let fixture = try dvbFixture("dvb_tvos_status")
+        XCTAssertFalse(try DVBParser.status(status: fixture.status, body: fixture.body).recordingPaused, "missing = false")
+        let paused = Data(#"{"enabled": true, "retentionDays": 3, "tuners": [], "tvheadendReachable": true, "recordingPaused": true}"#.utf8)
+        XCTAssertTrue(try DVBParser.status(status: 200, body: paused).recordingPaused)
+    }
+
     func testThumbnailOnlyForRecordedEventsWhenBothAllow() {
         func event(_ state: DVBRecording.State?) -> DVBEvent {
             DVBEvent(id: "e", channel: "c", title: "t", start: Date(timeIntervalSince1970: 0),

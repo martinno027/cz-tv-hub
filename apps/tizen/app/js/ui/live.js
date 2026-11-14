@@ -65,7 +65,36 @@
 
   /** `number` = the channel's number on this TV (spec/apps.md "Channel numbers and zapping"). */
   LiveScreen.prototype.card = function (item, number, name, info, now, ctFailed) {
-    var card = this.cardHead(item, number, '');
+    return this.register(item, LiveScreen.channelCard(item, number, info, now, ctFailed));
+  };
+
+  LiveScreen.prototype.pspCard = function (item, number) {
+    return this.register(item, LiveScreen.pspCard(item, number, this.app.pspState(item.channel.id)));
+  };
+
+  /** The card registered for focus and OK. */
+  LiveScreen.prototype.register = function (item, card) {
+    this.cards.push({ key: item.key, el: card, item: item });
+    return card;
+  };
+
+  /** The card with its number, source icon and channel name. */
+  function cardHead(item, number, extraClass) {
+    var card = el('div', 'card' + extraClass);
+    var channel = el('div', 'card-channel');
+    channel.appendChild(el('span', 'channel-number', String(number)));
+    channel.appendChild(CT.sourceIcon(item.source));
+    channel.appendChild(el('span', 'card-channel-name', item.channel.name));
+    card.appendChild(channel);
+    return card;
+  }
+
+  /**
+   * A ČT or Anténa channel's card (also Domů's "Teď běží"): the programme on air with its time and progress, and
+   * the next one. `info` = the channel's {current, next} or null.
+   */
+  LiveScreen.channelCard = function (item, number, info, now, ctFailed) {
+    var card = cardHead(item, number, '');
     var current = info ? info.current : null;
     var next = info ? info.next : null;
     if (current) {
@@ -83,23 +112,13 @@
     return card;
   };
 
-  /** The card with its number, source icon and channel name, registered for focus and OK. */
-  LiveScreen.prototype.cardHead = function (item, number, extraClass) {
-    var card = el('div', 'card' + extraClass);
-    var channel = el('div', 'card-channel');
-    channel.appendChild(el('span', 'channel-number', String(number)));
-    channel.appendChild(CT.sourceIcon(item.source));
-    channel.appendChild(el('span', 'card-channel-name', item.channel.name));
-    card.appendChild(channel);
-    this.cards.push({ key: item.key, el: card, item: item });
-    return card;
-  };
-
-  /** Poslanecká sněmovna: on = red "● ŽIVĚ" and "Přímý přenos"; off = dimmed "Nevysílá se"; not checked yet = "Zjišťuji…". */
-  LiveScreen.prototype.pspCard = function (item, number) {
+  /**
+   * Poslanecká sněmovna (also Domů's "Sněmovna"): `state` 'live' = red "● ŽIVĚ" and "Přímý přenos"; 'off' = dimmed
+   * "Nevysílá se"; 'unknown' (not checked yet) = "Zjišťuji…".
+   */
+  LiveScreen.pspCard = function (item, number, state) {
     var P = CT.Psp;
-    var state = this.app.pspState(item.channel.id);
-    var card = this.cardHead(item, number, ' card-psp psp-' + state);
+    var card = cardHead(item, number, ' card-psp psp-' + state);
     if (state === 'live') {
       card.appendChild(el('div', 'live-badge', '● ŽIVĚ'));
       card.appendChild(el('div', 'card-title', P.LIVE_TEXT));

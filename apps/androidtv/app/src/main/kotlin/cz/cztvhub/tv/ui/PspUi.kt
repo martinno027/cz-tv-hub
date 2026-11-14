@@ -11,7 +11,7 @@ import cz.cztvhub.core.PspStream
 import cz.cztvhub.tv.R
 
 /**
- * Poslanecká sněmovna "is it on now?" checks while the calling screen (Živě or the guide) is composed and the app
+ * Poslanecká sněmovna "is it on now?" checks while the calling screen (Domů, Živě or the guide) is composed and the app
  * is visible; leaving the screen, opening the player or going to the background stops them (spec/apps.md).
  */
 @Composable

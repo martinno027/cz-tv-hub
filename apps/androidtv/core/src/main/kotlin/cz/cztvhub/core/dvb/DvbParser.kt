@@ -56,6 +56,7 @@ object DvbParser {
             tvheadendReachable = root.str("tvheadendReachable") == "true",
             thumbnails = root.str("thumbnails") == "true",
             watchLog = root.str("watchLog") == "true",
+            recordingPaused = root.str("recordingPaused") == "true",
         )
     }
 

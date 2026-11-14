@@ -1,8 +1,8 @@
 import CTCore
 import SwiftUI
 
-/// The current time top right, in the row of the tab bar (spec/apps.md "Clock (T22)"): Živě, the guide and Nastavení
-/// with its full-screen sections, not the player or the programme page (both full-screen covers over it).
+/// The current time top right, in the row of the tab bar (spec/apps.md "Clock (T22)"): Domů, Živě, the guide and
+/// Nastavení with its full-screen sections, not the player or the programme page (both full-screen covers over it).
 struct ClockView: View {
     /// Centre of the tab bar row, in points on the 1920 × 1080 screen. Horizontally the safe area still applies, so the
     /// clock ends where the content does ("Otevřít v iVysílání" in the guide).

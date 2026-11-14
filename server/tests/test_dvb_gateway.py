@@ -73,6 +73,10 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual([t["inUse"] for t in body["tuners"]], [True, False])
         self.assertGreater(body["disk"]["totalBytes"], 0)
         self.assertTrue(body["tvheadendReachable"])
+        self.assertIs(body["recordingPaused"], False)
+        self.gw.archive.recorders.paused = True  # T58: Domů tells the household recording stopped (disk full)
+        self.assertIs(self.get("/dvb/status")[1]["recordingPaused"], True)
+        self.gw.archive.recorders.paused = False
         self.client.unreachable = True
         resp, body = self.get("/dvb/status")
         self.assertEqual((resp.status, body["tuners"], body["tvheadendReachable"]), (200, [], False))

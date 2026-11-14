@@ -13,6 +13,7 @@
     <header id="top">
       <div id="brand">Televize</div>
       <nav id="tabs">
+        <div class="tab" data-tab="home">Domů</div>
         <div class="tab" data-tab="live">Živě</div>
         <div class="tab" data-tab="guide">TV průvodce</div>
         <div class="tab" data-tab="archive">Archiv</div>
@@ -22,6 +23,9 @@
     </header>
 
     <main>
+      <!-- Domů (spec/apps.md "Domů", T58): the date and calendar, the gateway notice, rows of cards (ui/home.js) -->
+      <section id="screen-home" class="screen"></section>
+
       <section id="screen-live" class="screen"></section>
 
       <section id="screen-guide" class="screen">
@@ -249,6 +253,8 @@
   <script src="js/core/archive.js"></script>
   <script src="js/core/archive-menu.js"></script>
   <script src="js/core/loading.js"></script>
+  <script src="js/core/calendar.js"></script>
+  <script src="js/core/home.js"></script>
   <!-- Optional, written only into the build by build.py (gateway address/key preset); absent in git. -->
   <script src="js/local-config.js"></script>
   <!-- Optional, written only into the build by build.py (version, build number, commit, build time). -->
@@ -266,6 +272,7 @@
   <script src="js/ui/archive-cards.js"></script>
   <script src="js/ui/show.js"></script>
   <script src="js/ui/archive.js"></script>
+  <script src="js/ui/home.js"></script>
   <script src="js/ui/settings.js"></script>
   <script src="js/ui/app.js"></script>
 </body>

@@ -27,6 +27,10 @@
  * its 1st and 2nd season, so it comes a month at a time (2012–2026, a daily episode, 15 a page; the 3rd season
  * has none); 2005–2011 are weekly, so those years come whole with no month row (T51); dvb_archive_show_periods.json answers for its own card when the sample is there (the card first in the
  * Seriály grid).
+ * "Pokračovat" (Archiv and Domů, T58): positions live in memory in the demo (never in this browser's real store),
+ * seeded with two ČT programmes and the sample Anténa recording; `?demo&resume=none` starts with none.
+ * `?demo&status=down` = /dvb/status fails ("Brána antény není dostupná."), `?demo&status=badkey` = it answers 401
+ * (the key notice), `?demo&status=paused` = it says recordingPaused (the disk notice).
  */
 (function (root) {
   'use strict';
@@ -201,6 +205,9 @@
   var WATCH_LOG = /[?&]watch\b/.test(root.location.search);
   var watchReports = [];
 
+  // `?demo&status=down`: /dvb/status fails, `=badkey` answers 401; `=paused`: it says recordingPaused (Domů, T58)
+  var STATUS = (/[?&]status=(down|paused|badkey)\b/.exec(root.location.search) || [])[1] || '';
+
   function transport(request) {
     var url = request.url;
     if (/\/dvb\/watch$/.test(url) && request.method === 'POST') {
@@ -225,10 +232,13 @@
     if (url.indexOf('/stream-data/channel/') >= 0) return load('live_CH_1.json');
     if (url.indexOf('/media/external/') >= 0) return load(/1$/.test(url) ? 'vod_drm.json' : 'vod_no_licence.json');
     if (url.indexOf('/dvb/status') >= 0) {
+      if (STATUS === 'down') return answer(503, { error: 'Brána neodpovídá (ukázka).' });
+      if (STATUS === 'badkey') return answer(401, { error: 'Neplatný klíč (ukázka).' });
       return load('dvb/dvb_status.json').then(function (r) {
         var body = JSON.parse(r.body);
         body.thumbnails = true; // the demo "gateway" offers thumbnails (synthetic, see blobTransport)
         body.watchLog = WATCH_LOG;
+        body.recordingPaused = STATUS === 'paused';
         return { status: r.status, body: JSON.stringify(body) };
       });
     }
@@ -746,12 +756,30 @@
     });
   }
 
+  /** The demo's "Pokračovat" positions: in memory, seeded (a ResumeStore backend). */
+  function resumeBackend() {
+    var now = Date.now();
+    var data = /[?&]resume=none\b/.test(root.location.search) ? {} : {
+      'ct:225544160510002': { progress: 1260, length: 2220, savedAt: now - 3600 * 1000, title: 'Testovací pořad 5',
+        showTitle: '', image: 'https://img.example.invalid/porad.jpg', source: 'ct' },
+      'dvb:bnova1-1792832400-1792834200': { progress: 600, length: 1800, savedAt: now - 3 * 3600 * 1000,
+        title: 'Zprávy', showTitle: '', image: '/dvb/recording/bnova1-1792832400-1792834200/thumb.jpg', source: 'dvb' },
+      'ct:224381492050002': { progress: 900, length: 3060, savedAt: now - DAY_MS, title: 'Testovací pořad 4',
+        showTitle: 'Testovací pořad 3', image: 'https://img.example.invalid/porad.jpg', source: 'ct' }
+    };
+    return {
+      load: function () { return JSON.parse(JSON.stringify(data)); },
+      save: function (next) { data = JSON.parse(JSON.stringify(next)); }
+    };
+  }
+
   CT.Demo = {
     enabled: /[?&]demo\b/.test(root.location.search),
     transport: transport,
     blobTransport: blobTransport,
     backend: function (cb) { return new DemoBackend(cb); },
     afterStart: afterStart,
+    resumeBackend: resumeBackend,
     /** The fake gateway's profiles, to play "another TV" from the browser console (change settings, version += 1). */
     profiles: profiles,
     /** The fake gateway's household default, e.g. `CT.Demo.defaults.channelPrefs = null; CT.Demo.defaults.version += 1`. */
