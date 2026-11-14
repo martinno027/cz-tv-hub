@@ -171,6 +171,39 @@ data class CtBarWindow(
      */
     fun resumeSpot(position: Double): ResumeSpot? {
         val programme = programmeAt(position) ?: return null
+        return spotOf(programme)
+    }
+
+    /**
+     * What "Pokračovat" saves for a playhead at [position] in the buffer: the spot and its progress (wall clock −
+     * programme start). While the playhead is in the 30 s margin before the [opened] programme's start it counts as
+     * that one with progress 0, so starting a programme does not clear the previous one's entry. Null = nothing
+     * (a gap, a programme without an idec).
+     */
+    fun resume(position: Double, opened: ResumeSpot?): Pair<ResumeSpot, Double>? {
+        val time = toTime(position)
+        val openedStart = opened?.start
+        if (openedStart != null && time.isBefore(openedStart) &&
+            !time.isBefore(openedStart.minus(Decisions.START_MARGIN))
+        ) {
+            return opened to 0.0
+        }
+        val spot = resumeSpot(position) ?: return null
+        val start = spot.start ?: return null
+        return spot to maxOf(0.0, Duration.between(start, time).toMillis() / 1000.0)
+    }
+
+    /**
+     * Resuming playback (the end of a pause) at [position]: the lower clamp when the buffer's start slid past the
+     * paused playhead, else null (play on where it is). Only the buffer slides.
+     */
+    fun resumeTarget(position: Double, clock: BarClock): Double? {
+        if (kind != CtBarKind.TIMESHIFT) return null
+        val lower = lower(clock)
+        return if (position < lower) lower else null
+    }
+
+    private fun spotOf(programme: TimelineProgramme): ResumeSpot? {
         val id = programme.id ?: return null
         val length = Duration.between(programme.start, programme.end).toMillis() / 1000.0
         return ResumeSpot(ResumeRules.ctKey(id), programme.start, length)

@@ -109,8 +109,6 @@
     <string name="state_live">Jen živě</string>
     <string name="back">Zpět</string>
     <string name="skip_ad">Přeskočit reklamu</string>
-    <string name="audio_title">Zvuk</string>
-    <string name="audio_subtitles_title">Zvuk a titulky</string>
     <string name="audio_single">Pořad má jen jednu zvukovou stopu</string>
     <string name="audio_track">Stopa %1$d</string>
     <string name="mute_on">Vypnout zvuk</string>

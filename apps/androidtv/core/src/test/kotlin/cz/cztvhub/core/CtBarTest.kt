@@ -237,6 +237,41 @@ class CtBarTest {
         assertNull("no idec", window.resumeSpot(window.toPosition(Instant.parse("2026-11-14T17:20:00Z"))))
     }
 
+    @Test fun theMarginBeforeTheOpenedProgrammeCountsAsIt() {
+        // Opened "Film" (15:00) from the start: playback begins 30 s early, inside "Zprávy".
+        val window = CtBarWindow.timeshift(now, "Film").copy(programmes = guide)
+        val opened = ResumeSpot("ct:2", guide[1].start, 6300.0)
+        val zpravy = ResumeSpot("ct:1", guide[0].start, 1800.0)
+        data class Case(val name: String, val time: String, val spot: ResumeSpot?, val progress: Double?)
+        val cases = listOf(
+            Case("30 s before the opened start: the opened one, 0", "2026-11-14T14:59:30Z", opened, 0.0),
+            Case("1 s before: still the opened one", "2026-11-14T14:59:59Z", opened, 0.0),
+            Case("at the start: the opened one", "2026-11-14T15:00:00Z", opened, 0.0),
+            Case("into it", "2026-11-14T15:10:00Z", opened, 600.0),
+            Case("31 s before: the previous programme", "2026-11-14T14:59:29Z", zpravy, 1769.0),
+            Case("moved on into the next one", "2026-11-14T16:50:00Z", ResumeSpot("ct:3", guide[2].start, 1800.0), 300.0),
+        )
+        cases.forEach { case ->
+            val result = window.resume(window.toPosition(Instant.parse(case.time)), opened)
+            assertEquals(case.name, case.spot, result?.first)
+            assertEquals(case.name, case.progress, result?.second)
+        }
+        // Without an opened programme the margin is the previous programme's (where the entry would be cleared).
+        val noOpened = window.resume(window.toPosition(Instant.parse("2026-11-14T14:59:30Z")), null)
+        assertEquals(zpravy, noOpened?.first)
+        assertEquals(ResumeAction.CLEAR, ResumeRules.action(noOpened!!.second, zpravy.lengthSeconds))
+        assertNull("a gap", window.resume(window.toPosition(Instant.parse("2026-11-14T14:10:00Z")), opened))
+    }
+
+    @Test fun aPlayheadLeftBelowTheClampByAPauseSeeksToIt() {
+        val window = CtBarWindow.timeshift(now, "Pořad") // origin = now − 3 h, lower clamp = 60
+        assertNull("inside: plays on", window.resumeTarget(600.0, BarClock(now)))
+        // Paused at 120 for ten minutes: the lower clamp is at 660 now.
+        val later = BarClock(now.plus(Duration.ofMinutes(10)))
+        assertEquals(660.0, window.resumeTarget(120.0, later)!!, 0.001)
+        assertNull("VOD does not slide", CtBarWindow.vod(null, 3600.0, "Film").resumeTarget(0.0, later))
+    }
+
     @Test fun whichPlaybacksUseTheBar() {
         val start = Instant.parse("2026-11-14T15:00:00Z")
         val programme = PlayRequest.Programme("CH_1", "Film", "123", start, start.plusSeconds(5400), true)

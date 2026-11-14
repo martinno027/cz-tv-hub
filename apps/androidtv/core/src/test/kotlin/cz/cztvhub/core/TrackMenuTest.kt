@@ -2,6 +2,7 @@ package cz.cztvhub.core
 
 import cz.cztvhub.core.TrackMenu.Kind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -16,6 +17,18 @@ class TrackMenuTest {
         assertEquals(listOf(Kind.AUDIO, Kind.AUDIO, Kind.SUBTITLES_OFF, Kind.SUBTITLE, Kind.SUBTITLE), items.map { it.kind })
         assertEquals("audio 0 and subtitles off are on", listOf(true, false, true, false, false), items.map { it.selected })
         assertEquals(listOf(0, 1, -1, 0, 1), items.map { it.index })
+    }
+
+    @Test fun subtitleNamesFallBackToTheLanguageThenANumber() {
+        assertEquals("CZ titulky", TrackMenu.trackName("CZ titulky", "cs"))
+        assertEquals("Čeština", TrackMenu.trackName(null, "cs"))
+        assertEquals("Angličtina", TrackMenu.trackName(" ", "en"))
+        assertNull(TrackMenu.trackName(null, "und"))
+        assertNull(TrackMenu.trackName(null, null))
+        val items = TrackMenu.items(emptyList(), null, listOf("Čeština", null), null)
+        assertEquals(listOf("Titulky: Vypnuto", "Titulky: Čeština", "Titulky 2"), items.map { it.label })
+        assertEquals("Zvuk a titulky", TrackMenu.title(hasSubtitles = true))
+        assertEquals("Zvuk", TrackMenu.title(hasSubtitles = false))
     }
 
     @Test fun aChosenSubtitleIsMarkedInsteadOfOff() {

@@ -119,6 +119,13 @@ class PlayerActivity : ComponentActivity() {
     /** Czech by default; the track picked in the settings menu once the viewer chooses one (Anténa audio tracks). */
     private var audioPreference = AudioPreference.DEFAULT
 
+    /**
+     * Subtitles of the own-bar players (T62): off at the start (no default or forced track of the stream), then the
+     * viewer's choice from the long-OK list; [subtitleLanguage] lets it hold across a re-resolve (new track groups).
+     */
+    private var subtitlesOn = false
+    private var subtitleLanguage: String? = null
+
     /** Ad breaks of a finished gateway recording (spec/ad-breaks.md); empty when unknown or off. */
     private var adBreaks: List<AdBreak> = emptyList()
     private var adBreaksJob: Job? = null
@@ -412,7 +419,7 @@ class PlayerActivity : ComponentActivity() {
             )
             .build()
         val exo = ExoPlayer.Builder(this).setLoadControl(loadControl).build().apply {
-            trackSelectionParameters = audioPreference.applyTo(trackSelectionParameters)
+            trackSelectionParameters = withSubtitleChoice(audioPreference.applyTo(trackSelectionParameters))
             // Mute holds for every player until the app closes (zapping, the next programme, a timeline window).
             volume = tvApp.mute.volume
             addListener(listener)
@@ -563,7 +570,7 @@ class PlayerActivity : ComponentActivity() {
         }
         val source = HlsMediaSource.Factory(http).createMediaSource(item)
         // A master playlist with several audio renditions gets new track groups: the menu's override is stale.
-        exo.trackSelectionParameters = audioPreference.applyTo(exo.trackSelectionParameters)
+        exo.trackSelectionParameters = withSubtitleChoice(audioPreference.applyTo(exo.trackSelectionParameters))
         if (startPositionMs != null) exo.setMediaSource(source, startPositionMs) else exo.setMediaSource(source)
         // Hold playback until the start-over seek is done, so the live edge never flashes by.
         exo.playWhenReady = pendingWallClockMs == null
@@ -592,6 +599,8 @@ class PlayerActivity : ComponentActivity() {
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // The ČT buffer slid on during a pause: a playhead now below the lower clamp goes to it (T62).
+            if (playWhenReady) resumeInsideBuffer()
             // A paused timeline keeps its bar on screen.
             if (barWindow != null) showBar()
         }
@@ -707,21 +716,33 @@ class PlayerActivity : ComponentActivity() {
 
     private fun saveProgress() {
         if (isTimeline) return saveTimelineProgress()
-        val remembered = rememberedSpot() ?: return
-        val seconds = progressSeconds(remembered) ?: return
+        val bar = ctBar
+        val (remembered, seconds) = if (bar != null && bar.kind == CtBarKind.TIMESHIFT && bar.programmes.isNotEmpty()) {
+            // The ČT buffer with its guide (T62): the programme at the playhead with an idec, the 30 s margin
+            // before the opened one counting as the opened one (progress 0).
+            val exo = player ?: return
+            if (!progressReady(exo)) return
+            val wallClock = timeshiftWallClockMs(exo) ?: return
+            bar.resume(bar.toPosition(Instant.ofEpochMilli(wallClock)), spot) ?: return
+        } else {
+            val opened = spot ?: return
+            opened to (progressSeconds(opened) ?: return)
+        }
         tvApp.resume.save(remembered.key, seconds, remembered.lengthSeconds, card?.takeIf { remembered.key == cardKey })
     }
 
-    /**
-     * Where "Pokračovat" goes: in the ČT buffer with a known guide the programme at the playhead with an idec (T62:
-     * also one the viewer moved into; null in a gap), else the programme opened.
-     */
-    private fun rememberedSpot(): ResumeSpot? {
-        val bar = ctBar
-        if (bar == null || bar.kind != CtBarKind.TIMESHIFT || bar.programmes.isEmpty()) return spot
-        val exo = player ?: return null
-        val wallClock = timeshiftWallClockMs(exo) ?: return null
-        return bar.resumeSpot(bar.toPosition(Instant.ofEpochMilli(wallClock)))
+    /** Not before the first seek, on an error page or without a stream. */
+    private fun progressReady(exo: ExoPlayer): Boolean =
+        target != null && pendingWallClockMs == null && message.visibility != View.VISIBLE &&
+            exo.playbackState != Player.STATE_IDLE
+
+    /** Resuming in the ČT buffer below its lower clamp (it slid on during a pause): seek to the clamp. */
+    private fun resumeInsideBuffer() {
+        val bar = ctBar ?: return
+        val exo = player ?: return
+        if (trick.moving || pendingWallClockMs != null || !progressReady(exo)) return
+        val to = bar.resumeTarget(playerBarPosition(exo), barClock()) ?: return
+        seekPlayer(exo, to, SystemClock.uptimeMillis())
     }
 
     /**
@@ -731,8 +752,7 @@ class PlayerActivity : ComponentActivity() {
     private fun progressSeconds(remembered: ResumeSpot): Double? {
         val exo = player ?: return null
         val planned = target ?: return null
-        if (pendingWallClockMs != null || message.visibility == View.VISIBLE) return null
-        if (exo.playbackState == Player.STATE_IDLE) return null
+        if (!progressReady(exo)) return null
         return when (planned.kind) {
             PlayKind.LIVE -> null
             PlayKind.VOD -> exo.currentPosition / 1000.0
@@ -1416,7 +1436,7 @@ class PlayerActivity : ComponentActivity() {
         val audio = mutableListOf<String>()
         val audioOverrides = mutableListOf<TrackSelectionOverride>()
         var audioSelected: Int? = null
-        val subtitles = mutableListOf<String>()
+        val subtitles = mutableListOf<String?>()
         val subtitleOverrides = mutableListOf<TrackSelectionOverride>()
         var subtitleSelected: Int? = null
         for (group in exo.currentTracks.groups) {
@@ -1430,7 +1450,8 @@ class PlayerActivity : ComponentActivity() {
                     }
                     C.TRACK_TYPE_TEXT -> {
                         if (group.isTrackSelected(i)) subtitleSelected = subtitles.size
-                        subtitles += trackLabel(group.getTrackFormat(i), subtitles.size + 1)
+                        val format = group.getTrackFormat(i)
+                        subtitles += TrackMenu.trackName(format.label, format.language)
                         subtitleOverrides += TrackSelectionOverride(group.mediaTrackGroup, i)
                     }
                 }
@@ -1439,7 +1460,7 @@ class PlayerActivity : ComponentActivity() {
         val items = TrackMenu.items(audio, audioSelected, subtitles, subtitleSelected)
         // The own-bar players have no controller: their mute button lives here (T34), also with a single track.
         val builder = AlertDialog.Builder(this)
-            .setTitle(if (subtitles.isEmpty()) R.string.audio_title else R.string.audio_subtitles_title)
+            .setTitle(TrackMenu.title(hasSubtitles = subtitles.isNotEmpty()))
             .setNeutralButton(muteLabel()) { _, _ -> toggleMute() }
         if (items.isEmpty()) {
             builder.setMessage(R.string.audio_single).show()
@@ -1449,13 +1470,19 @@ class PlayerActivity : ComponentActivity() {
             val params = exo.trackSelectionParameters.buildUpon()
             exo.trackSelectionParameters = when (item.kind) {
                 TrackMenu.Kind.AUDIO -> params.setOverrideForType(audioOverrides[item.index])
-                TrackMenu.Kind.SUBTITLES_OFF -> params.clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                    .setPreferredTextLanguage(null)
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                TrackMenu.Kind.SUBTITLES_OFF -> {
+                    subtitlesOn = false
+                    subtitleLanguage = null
+                    params.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setPreferredTextLanguage(null)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                }
                 // The language too: a re-resolved stream has new track groups, where the override no longer applies.
                 TrackMenu.Kind.SUBTITLE -> subtitleOverrides[item.index].let { override ->
+                    subtitlesOn = true
+                    subtitleLanguage = override.mediaTrackGroup.getFormat(override.trackIndices[0]).language
                     params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                        .setPreferredTextLanguage(override.mediaTrackGroup.getFormat(override.trackIndices[0]).language)
+                        .setPreferredTextLanguage(subtitleLanguage)
                         .setOverrideForType(override)
                 }
             }.build()
@@ -1515,13 +1542,26 @@ class PlayerActivity : ComponentActivity() {
         muteIndicator.visibility = if (muted) View.VISIBLE else View.GONE
     }
 
-    /** A track's name: its label, else its language in Czech, else "Stopa n". */
+    /** An audio track's name: its label, else its language in Czech, else "Stopa n". */
     private fun trackLabel(format: Format, number: Int): String {
         format.label?.takeIf { it.isNotBlank() }?.let { return it }
         val language = format.language?.takeIf { it.isNotBlank() && it != C.LANGUAGE_UNDETERMINED }
             ?.let { Locale.forLanguageTag(it).getDisplayLanguage(CZECH) }
             ?.takeIf { it.isNotBlank() }
         return language?.replaceFirstChar { it.titlecase(CZECH) } ?: getString(R.string.audio_track, number)
+    }
+
+    /**
+     * The own-bar players' subtitles in [params] (T62): off unless the viewer chose some (then by language, so the
+     * choice holds in a re-resolved stream); the native players keep Media3's own selection.
+     */
+    private fun withSubtitleChoice(params: TrackSelectionParameters): TrackSelectionParameters {
+        if (!ownBar) return params
+        val builder = params.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subtitlesOn)
+        // A new stream: an override of the old one's track groups no longer applies, the language does.
+        builder.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        builder.setPreferredTextLanguage(if (subtitlesOn) subtitleLanguage else null)
+        return builder.build()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
