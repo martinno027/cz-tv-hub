@@ -3,7 +3,9 @@
  * play with the Anténa timeline's own bar and keys (ui/timeline.js TimelineController), over one window of their own:
  * - timeshift: the 3 h buffer `now − 3 h` … `now`, its start sliding with now. AVPlay and the web have no wall clock of
  *   the stream (no PROGRAM-DATE-TIME), so the position ↔ wall clock map is the estimate start-over and "Pokračovat"
- *   already use: position 0 = the moment of planning − 3 h. Titles and ticks come from the ČT guide of that channel.
+ *   already use: position 0 = the moment of planning − 3 h. `now` is the END OF THE STREAM (ČT's stream ends minutes
+ *   behind the clock): position 0 + the player's current length, once it knows one, else the clock (streamNow).
+ *   Titles and ticks come from the ČT guide of that channel.
  * - vod: the programme's start (guide / archive) + position, complete; without a known start the labels are the
  *   elapsed position.
  * No neighbouring windows, no ad breaks; seeks and the moving playhead stay inside the clamps of core/timeline.js
@@ -44,6 +46,8 @@
     this.controller = null;
     this.days = null; // timeshift: the broadcast days the guide was asked for ("a|b")
     this.durationCheckedAt = 0;
+    this.lag = 0; // timeshift: ms the stream's end lies behind the clock (measured from the player's length)
+    this.lagCheckedAt = 0;
   }
 
   CtBarSource.prototype.attach = function (controller) {
@@ -67,6 +71,8 @@
     };
     if (this.mode === 'timeshift') {
       tl.origin = player.plannedAt - CT.Decisions.TIMESHIFT_WINDOW_MS; // position 0 (the estimate)
+      this.lag = 0; // a new stream: the clock until its player tells its length
+      this.lagCheckedAt = 0;
       tl.pieces = [{ position: 0, time: tl.origin, duration: CT.Decisions.TIMESHIFT_WINDOW_MS / 1000 }];
       tl.programme = { start: num(request.start) ? request.start : tl.origin, end: player.plannedAt };
       this.days = null;
@@ -96,7 +102,7 @@
   /** Every render: the buffer slides with now; a VOD takes the player's own length once it knows it. */
   CtBarSource.prototype.update = function (tl, now) {
     if (this.mode === 'timeshift') {
-      var w = T.ctWindow('timeshift', now);
+      var w = T.ctWindow('timeshift', this.streamNow(tl, now));
       var piece = tl.pieces[0];
       piece.position = (w.start - tl.origin) / 1000;
       piece.time = w.start;
@@ -112,11 +118,33 @@
     }
   };
 
+  /**
+   * The timeshift window's `now` (spec "ČT player bar"): the wall clock of the stream's end = position 0 + the
+   * player's seekable length (AVPlay getDuration, the web's video.seekable end), asked at most every 0.5 s; between
+   * two readings it runs on with the clock. Before the player knows a length: the clock. Never later than the clock
+   * (the estimate cannot know an end ahead of now).
+   */
+  CtBarSource.prototype.streamNow = function (tl, now) {
+    if (now - this.lagCheckedAt >= DURATION_CHECK_MS) {
+      this.lagCheckedAt = now;
+      var b = this.player.backend;
+      var length = b.seekableEnd ? b.seekableEnd() : b.duration();
+      if (length > 0) this.lag = Math.max(0, now - (tl.origin + length));
+    }
+    return now - this.lag;
+  };
+
+  /** The `now` of the bar's labels ("Teď" at the stream's end). */
+  CtBarSource.prototype.labelNow = function (tl, now) {
+    return this.mode === 'timeshift' ? this.streamNow(tl, now) : now;
+  };
+
   /** Positions (s) the playhead may reach now: ctClamp through this window's map. */
   CtBarSource.prototype.range = function (tl, now) {
     if (this.mode === 'timeshift') {
       var at = function (time) { return (time - tl.origin) / 1000; };
-      return { lo: at(T.ctClamp('timeshift', now, -Infinity)), hi: at(T.ctClamp('timeshift', now, Infinity)) };
+      var end = this.streamNow(tl, now);
+      return { lo: at(T.ctClamp('timeshift', end, -Infinity)), hi: at(T.ctClamp('timeshift', end, Infinity)) };
     }
     return { lo: 0, hi: T.ctClamp('vod', now, Infinity, tl.complete ? tl.pieces[0].duration : 0) };
   };

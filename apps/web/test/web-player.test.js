@@ -339,6 +339,19 @@ test('subtitles start off (T62): hls.js\'s own default rendition is turned off, 
   assert.equal(text[0].mode, 'disabled', 'native: the browser\'s default one off');
 });
 
+test('seekableEnd (T62): the last seekable range of a live/timeshift stream (duration Infinity), else the duration', () => {
+  const v = fakeVideo({});
+  const { b } = backend(v, fakeHls());
+  b.open({ url: 'https://cdn.example/ts.m3u8', kind: 'timeshift' }, 0);
+  assert.equal(b.seekableEnd(), 0, 'nothing known yet');
+  v.duration = Infinity;
+  v.seekable = { length: 2, end: (i) => [100, 10610.5][i] };
+  assert.equal(b.seekableEnd(), 10610500);
+  v.seekable = { length: 0, end: () => { throw new Error('IndexSizeError'); } };
+  v.duration = 3600;
+  assert.equal(b.seekableEnd(), 3600000);
+});
+
 test('hls.js: never X-Cztvhub-Client (T37) — not to the gateway\'s media, not to a CDN (no custom header, no CORS preflight)', () => {
   const Hls = fakeHls();
   const { b } = backend(fakeVideo({}), Hls);

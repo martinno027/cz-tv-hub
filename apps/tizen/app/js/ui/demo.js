@@ -628,6 +628,7 @@
 
   var SEEK_MS = 600;
   var DEMO_VOD_MS = 11228160; // vod_ok.json's duration
+  var DEMO_TIMESHIFT_LAG_MS = 190 * 1000; // ČT's buffer ends this far behind the clock (184–207 s measured on tvOS, T62)
 
   /** Whether the stream has an end (a finished window, a VOD) or grows with the clock. */
   DemoBackend.prototype.complete = function () {
@@ -638,7 +639,7 @@
   DemoBackend.prototype.limit = function () {
     var tl = this.target.timeline;
     var d = tl ? CT.Timeline.duration(tl.pieces) * 1000
-      : this.target.kind === 'vod' ? DEMO_VOD_MS : CT.Decisions.TIMESHIFT_WINDOW_MS;
+      : this.target.kind === 'vod' ? DEMO_VOD_MS : CT.Decisions.TIMESHIFT_WINDOW_MS - DEMO_TIMESHIFT_LAG_MS;
     return this.complete() ? d : d + (Date.now() - this.openedAt);
   };
 

@@ -213,6 +213,24 @@
     return isFinite(d) && d > 0 ? d * 1000 : 0;
   };
 
+  /**
+   * The end (ms from position 0) of what can be played now: the last seekable range (a live / timeshift playlist,
+   * whose duration a browser reports as Infinity), else the duration; 0 = not known yet. The ČT bar takes the
+   * timeshift window's end from it (T62).
+   */
+  WebBackend.prototype.seekableEnd = function () {
+    var r = this.video.seekable;
+    try {
+      if (r && r.length) {
+        var end = r.end(r.length - 1);
+        if (isFinite(end) && end > 0) return end * 1000;
+      }
+    } catch (e) {
+      // no range yet
+    }
+    return this.duration();
+  };
+
   /** Where a seek to `ms` goes: not before 0, not within the guard before a growing end. */
   WebBackend.prototype.clampSeek = function (ms) {
     var duration = this.duration();

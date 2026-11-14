@@ -29,6 +29,11 @@ const near = (a, b, what, eps) => assert.ok(Math.abs(a - b) < (eps || 1e-6), (wh
 async function ctBar(clock, mode, opts) {
   global.document = fakeDocument();
   const backend = fakeBackend(clock, opts);
+  if (mode === 'timeshift' && opts.duration === undefined) {
+    // a live buffer grows with the clock; opts.lag (ms) = how far its end lies behind the clock (ČT: ~3 min)
+    const opened = clock.now();
+    backend.durationS = () => W - (opts.lag || 0) / 1000 + (clock.now() - opened) / 1000;
+  }
   const saved = [];
   const days = [];
   const request = opts.request || {
@@ -361,5 +366,50 @@ test('the list is titled "Zvuk a titulky" with subtitles in the stream, else "Zv
     const { ctl } = await ctBar(clock, 'timeshift', { position: 3600 });
     ctl.openAudioList();
     assert.equal($('audio-list-title').textContent, 'Zvuk');
+  });
+});
+
+const LAG = 190 * 1000; // ČT's stream ended 184–207 s behind the clock (tvOS, T62)
+
+test('the stream\'s end lags the clock: ⏩ 16 stops 10 s before the stream\'s end, not the clock\'s; "Teď" there', async () => {
+  await withClock(NOW, async (clock) => {
+    const { ctl, backend } = await ctBar(clock, 'timeshift', { position: 3600, lag: LAG });
+    clock.advance(600); // the player's length is read
+    ctl.showBar();
+    assert.equal($('tl-end').textContent, 'Teď', 'the right end is the stream\'s end');
+    const span = CT.Timeline.span(ctl.tl.pieces);
+    near(span.end, clock.now() - LAG, 'the window ends at the stream\'s end', 1);
+    for (let i = 0; i < 6; i++) click(clock, ctl, 'forward');
+    let stopAt = null;
+    clock.advance(12000, (now) => { if (stopAt === null && !ctl.trick) stopAt = now; });
+    assert.ok(stopAt !== null);
+    assert.equal(backend.seeks.length, 1);
+    near(backend.seeks[0], pos(stopAt - LAG - 10 * 1000), 'stream end − 10 s', 0.6);
+    assert.ok(backend.seeks[0] < pos(stopAt - 10 * 1000) - 150, 'well before the clock − 10 s');
+  });
+});
+
+test('the stream\'s end lags the clock: the lower clamp is the stream\'s end − 3 h + 60 s; before a length is known, the clock', async () => {
+  await withClock(NOW, async (clock) => {
+    const { ctl, backend } = await ctBar(clock, 'timeshift', { position: 900, lag: LAG });
+    clock.advance(300 * 1000); // 5 min later: the clamp lies inside the stream (below, position 0 would hold it)
+    ctl.onKeyDown('rewind');
+    let stopAt = null;
+    clock.advance(15000, (now) => { if (stopAt === null && !ctl.trick) stopAt = now; });
+    const lo = pos(stopAt - LAG - W * 1000 + 60 * 1000);
+    assert.ok(lo > 100, 'inside the stream: ' + lo);
+    near(backend.seeks[0], lo, 'stream end − 3 h + 60 s', 0.6);
+  });
+  await withClock(NOW, async (clock) => { // just opened: end − 3 h + 60 s lies before position 0, the start holds
+    const { ctl, backend } = await ctBar(clock, 'timeshift', { position: 600, lag: LAG });
+    clock.advance(600);
+    ctl.onKeyDown('rewind');
+    clock.advance(15000);
+    assert.deepEqual(backend.seeks, [0]);
+  });
+  await withClock(NOW, async (clock) => {
+    const { ctl, backend } = await ctBar(clock, 'timeshift', { position: W - 15, duration: 0 }); // no length yet
+    click(clock, ctl, 'right');
+    near(backend.seeks[0], pos(clock.now() - 10 * 1000), 'the clock − 10 s', 0.2);
   });
 });
