@@ -358,7 +358,13 @@ sources, approved separately); their places are listed below but stay empty unti
      **clock change** today or within the next 6 days (`V neděli 25. října se mění čas: o hodinu zpět` / `… o hodinu
      dopředu`, `Dnes …`/`Zítra …` when it is today/tomorrow), **school holidays** today or starting within the next
      6 days (`Podzimní prázdniny 29.–30. října`, `Dnes jsou vánoční prázdniny`), a **full or new moon** today
-     (`Dnes je úplněk` / `Dnes je nov`). [T59: weather today next to the date.]
+     (`Dnes je úplněk` / `Dnes je nov`). **Weather now** (T59) next to the date, from `GET /dvb/weather`
+     (`spec/dvb-gateway.md` "Weather"): icon, `8 °C, polojasno`, `Slunce 7:13–16:19`; under it, each only when present,
+     `Ovzduší: zhoršené` (`aqiText`), `Pyl: bříza střední, tráva nízká` (`pollen`), and **ČHMÚ warnings** as one line
+     per warning in its colour (`Výstraha ČHMÚ: Silný vítr do 18:00`, `to` in Prague time, another day `do po 16. 11. 18:00`;
+     `to` null → `Výstraha ČHMÚ: Riziko požárů (do odvolání)`; yellow/orange/red; in the gateway's order), and the
+     small `attribution` line (on the web "Open-Meteo.com" in it is a link to https://open-meteo.com/, as its licence
+     asks; TVs cannot link and show the text). Without weather (no gateway, `404`, `error`) the header shows the date only.
   2. **Gateway notice** (only with a gateway configured), one line with the source's warning colour:
      `Brána antény není dostupná.` when `/dvb/status` failed (the same check as everywhere, no extra polling),
      `Brána antény odmítla klíč. Zkontrolujte ho v Nastavení → Server.` when it answered `401`, or
@@ -371,7 +377,29 @@ sources, approved separately); their places are listed below but stay empty unti
      programme on air now, the same card as Živě (logo, number, title, progress); OK plays that channel live, exactly
      as on Živě. "Další kanály" at the row's end opens Živě.
   5. **Sněmovna** (only while at least one Chamber stream is live): the live streams as on Živě (`● ŽIVĚ`); OK plays.
-  6. [T60: Dnes večer] 7. [T60: Zprávy] 8. [T59: Počasí na týden] 9. [T60: Výročí dne]
+  6. [T61: Dnes večer] 7. [T61: Zprávy] 8. **Počasí na týden** (T59): the 7 `days` as cards (`út 4. 11.` / `Dnes`,
+     icon, `9° / 2°`, `srážky 60 %` when `rainChance` ≥ 20), not focusable as a row of their own (focus skips it) 9. [T61: Výročí dne]
+- **Location for weather** (T59): the TV asks its OS for its location (tvOS CoreLocation "when in use", Android TV
+  network location `ACCESS_COARSE_LOCATION`, Tizen `navigator.geolocation` with the `location` privilege, the web
+  `navigator.geolocation` only on HTTPS), rounds it **on the device to 0.1°** and sends only that to the gateway
+  (`?lat=&lon=`); no location (none on the device, refused, error, plain HTTP) = the request without them (the gateway's
+  household place). Before the first OS prompt the app shows once: "Počasí na Domů podle polohy této televize: poloha
+  se zaokrouhlí asi na 10 km, pošle se jen vaší bráně a ta podle ní zjistí počasí u Open-Meteo. Nikde se neukládá."
+  (`Povolit` / `Nepoužívat`; Nepoužívat = never ask the OS, household place). Nastavení → Server has the switch
+  "Počasí podle polohy této televize" (default on after Povolit). Location and weather are refreshed when Domů is
+  shown and the last answer is older than 30 min; nothing in the background; the location is kept in memory only.
+- **Weather texts** (golden `weather_cases.json` "temperature", "weekday"): temperatures round half away from zero to
+  whole degrees (`2.5` → `3`, `-2.5` → `-3`; JavaScript's `Math.round` gives `-2`, so do not use it), `-0.4` → `0`
+  (never `-0`), minus as the ASCII hyphen (`-2°`); now `8 °C`, week cards `9° / 2°`. Week cards: `Dnes`, else the
+  abbreviation `po út st čt pá so ne` and `d. m.` (`út 4. 11.`). A device location that rounds to `null` in "round"
+  (outside the range, not a number) is not sent: the request goes without `lat`/`lon` (the household place).
+  Times are `H:mm` without a leading zero (`do 6:00`, `Slunce 7:13–16:19`, also when the gateway sends `07:13`). The
+  weather text after the temperature starts lower-case (`8 °C, polojasno` from `"Polojasno"`). A warning whose `to`
+  has passed is not shown (the answer may be up to 30 min old). Back on the consent question = no answer: asked again
+  at the next app start; until answered the switch is off and the OS is never asked (switching it on in Nastavení shows
+  the same question). Block 8 takes no focus, so focusing the last focusable row of Domů scrolls the page to its end.
+  Days before today (a cached answer after midnight) are left out of block 8. Unknown icon key → `cloud`; unknown
+  warning level → the line without a colour.
 - **Focus**: on Domů's first open the first card of the first focusable row (Pokračovat, else Teď běží); up/down
   moves between rows (keeping the column as far as the row allows), left/right within a row; up from the first row
   reaches the tab bar. Coming back from the player: the card that was played.

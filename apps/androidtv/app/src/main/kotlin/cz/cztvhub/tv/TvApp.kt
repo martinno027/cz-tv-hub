@@ -100,6 +100,9 @@ class TvApp : Application() {
     /** "Náhledy anténních pořadů": the switch for gateway thumbnails, this TV's own or a signed-in profile's. */
     val thumbnailPrefs by lazy { ThumbnailPrefs(this) }
 
+    /** "Počasí podle polohy této televize" (T59): the choice only, this TV's own. */
+    val weatherPrefs by lazy { WeatherPrefs(this) }
+
     /** "Profil": the settings above kept in a profile on the gateway while signed in. */
     val profiles by lazy { ProfileManager(this, dvbSettings, channelPrefs, thumbnailPrefs) {
             gateway.value?.let { config ->

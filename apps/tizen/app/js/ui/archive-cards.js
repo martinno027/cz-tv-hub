@@ -210,14 +210,19 @@
   var Menu = {
     items: null,
     focus: 0,
+    /** function (chosen) when it closes (chosen = an item was picked); set after open(), cleared by the next open. */
+    onClose: null,
 
     isOpen: function () {
       return !!Menu.items;
     },
 
-    open: function (title, items) {
+    /** `wide` = a longer text that wraps (Domů's location question) instead of one cut line. */
+    open: function (title, items, wide) {
       Menu.items = items;
       Menu.focus = 0;
+      Menu.onClose = null;
+      document.getElementById('ar-menu').classList.toggle('wide', !!wide);
       document.getElementById('ar-menu-title').textContent = title;
       var box = document.getElementById('ar-menu-buttons');
       box.innerHTML = '';
@@ -226,9 +231,13 @@
       Menu.render();
     },
 
-    close: function () {
+    close: function (chosen) {
+      if (!Menu.items) return;
       Menu.items = null;
       document.getElementById('ar-menu').classList.add('hidden');
+      var done = Menu.onClose;
+      Menu.onClose = null;
+      if (done) done(!!chosen);
     },
 
     render: function () {
@@ -237,15 +246,18 @@
       });
     },
 
-    /** Keys while open; OK runs the focused item's action after closing. */
+    /** Keys while open; OK runs the focused item's action after closing, then onClose(true). */
     onKey: function (key) {
       if (key === 'left') Menu.focus = Math.max(0, Menu.focus - 1);
       else if (key === 'right') Menu.focus = Math.min(Menu.items.length - 1, Menu.focus + 1);
       else if (key === 'back') Menu.close();
       else if (key === 'enter') {
         var action = Menu.items[Menu.focus].action;
-        Menu.close();
+        var done = Menu.onClose;
+        Menu.onClose = null;
+        Menu.close(true);
         if (action) action();
+        if (done) done(true);
         return;
       }
       if (Menu.isOpen()) Menu.render();

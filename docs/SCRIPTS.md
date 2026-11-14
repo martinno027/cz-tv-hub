@@ -41,7 +41,10 @@ TVHeadend; for `/web/` there, stage the web app first (`python3 deploy/stage_web
 
 Can go wrong: two servers on one port; a dev config pointing at a real TVHeadend; the log line `web: off (…)` at
 start: `web_dir` has no `index.html` (not staged) or overlaps `hls_dir`, `buffer_dir`, `state_dir`, `breaks_dir`
-or the config's directory (the web stays off rather than publish recordings or state without a key).
+or the config's directory (the web stays off rather than publish recordings or state without a key). A dev
+gateway is a real one for weather (T59): `/dvb/weather` with a location or a household place set on its `/admin`
+asks the real Open-Meteo, and while weather is in use it reads ČHMÚ's warnings directory every 15 min (log lines
+`weather: …` / `warnings: …` say what failed, never the place); there is no fake for them.
 
 </details>
 
@@ -262,6 +265,11 @@ xcodebuild test -scheme Televize -destination 'platform=tvOS Simulator,name=…'
 Teď běží (true with `dvb-fake` and the default order); it seeds six "Pokračovat" entries into the app's data (use your
 own simulator); the app itself still loads ČT's schedule and checks the Chamber's CDN as usual, the test only never
 selects a ČT or Chamber card; one run takes about 70 s.
+Opt-in weather UI tests (T59), against a gateway whose `/dvb/weather` answers (a dev gateway calls the real
+Open-Meteo; a local stub serving `spec/fixtures/dvb/dvb_weather_ok.json` avoids that):
+`TEST_RUNNER_WEATHER_GATEWAY=127.0.0.1:<P> TEST_RUNNER_WEATHER_KEY=<dev key> xcodebuild test … -only-testing:TelevizeUITests/HomeWeatherUITests -only-testing:TelevizeUITests/HomeWeatherConsentUITests`
+(they set the simulator's location with `xcrun simctl location`; use a fresh simulator, an old one may replay an
+earlier location prompt; the DEBUG launch argument `-weatherConsentReset YES` clears a stored consent answer).
 
 </details>
 
@@ -299,9 +307,11 @@ over `spec/fixtures/dvb/dvb_timeline.json`, `&timeline=growing` as a growing win
 broadcast start (the archive then answers `vod_ok.json`, ČT1 gets synthetic afternoon programmes); the demo player is
 a clock-driven fake, also for ČT start-over and archive opened from the guide; Domů (T58): `&resume=none` = nothing
 to resume, `&status=down|badkey|paused` = the gateway notice for an unreachable gateway, a refused key, paused
-recording). The demo keeps "Pokračovat" in memory only (three seeded entries, also in Archiv's demo row), never in
-the browser's storage, because the web demo shares its origin with the household's real web app. `build.py`
-packages `dist/Televize.wgt` with the
+recording; T59 weather: `&weather=off|error` = `404` / `200` with `error` (date only), `&location=none|denied` = no
+location source / refused; the demo location is a stand-in (Prague), never the browser's; the consent answer is kept
+in memory only; requests sent are in `CT.Demo.weatherRequests`). The demo keeps "Pokračovat" in memory only (three
+seeded entries, also in Archiv's demo row), never in the browser's storage, because the web demo shares its origin
+with the household's real web app. `build.py` packages `dist/Televize.wgt` with the
 Tizen Studio CLI; `--gateway`/`--key-file` preset the gateway in that build only.
 
 Can go wrong: the preset key ends up in the built package — never share or commit `dist/`.

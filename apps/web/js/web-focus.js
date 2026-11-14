@@ -154,7 +154,7 @@
       }
       return false;
     } },
-    { match: '#set-key, #set-address, #set-save, #set-clear, #set-thumbs, #set-key-reveal', focus: function (app, el) {
+    { match: '#set-key, #set-address, #set-save, #set-clear, #set-thumbs, #set-key-reveal, #set-weather', focus: function (app, el) {
       var settings = app.screens.settings;
       var at = settings.items.indexOf(el);
       if (at < 0) return false;

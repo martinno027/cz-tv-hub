@@ -54,9 +54,9 @@ or Poslanecká sněmovna Parlamentu ČR.
 - Playback of the recording is one programme, the live window, or a channel timeline: a window of at most 12 hours
   of one channel around a programme (the programme ± 3 h), opened one at a time as the viewer seeks (approved by the
   user on 2026-10-24). No playlist covers a channel's whole recording, and no view can be downloaded or exported.
-- Remote viewing over Tailscale is meant for members of the same household only (Tailscale ACLs, no Funnel, no node
-  sharing). Relaying broadcasts outside the home is a legal grey area; you decide whether to enable it and you are
-  responsible for that decision. Another household needs its own tuner.
+- Remote viewing goes over the owner's own Tailscale tailnet (Tailscale ACLs, no Funnel, no node sharing), with the
+  gateway key. Anyone the owner gives access to (app, key, tailnet login) may use it (the owner's decision,
+  2026-10-24, T12).
 - Optional ad-break detection: a worker on a household machine (home LAN or own tailnet, never a cloud machine)
   reads ended programmes of the recording through the gateway's authenticated HLS, analyses them in memory and stores only break
   timestamps and per-channel logo masks. Skipping is a manual seek by the viewer; the recording is never cut or
@@ -121,9 +121,35 @@ aplikací zmizí."
   households use your gateway, their viewing is in it too: data-protection rules may apply to you (not legal
   advice).
 
+## Weather on Domů (approved by the user on 2026-11-14, T59: „schvaluji pravidla T59 a T61“)
+- Only the gateway talks to the weather services, from the Raspberry Pi's address, with fixed hosts, no redirects,
+  size caps, no key and an honest User-Agent naming this repository. The TVs and the web never contact them.
+- **Open-Meteo** (`api.open-meteo.com` forecast, `air-quality-api.open-meteo.com` air quality and pollen): gets only
+  a place rounded to 0.1° (about 10 km), either the location a TV or the web sends (rounded on the device, checked to
+  lie within Czechia and surroundings and rounded again on the Pi) or the household place typed on `/admin`; at most
+  20 places per hour, one request at a time, answers cached in memory for 30 minutes. Terms checked 2026-11-14
+  (https://open-meteo.com/en/terms, https://open-meteo.com/en/licence): the free API is for non-commercial use
+  only, under 10 000 calls a day, 5 000 an hour and 600 a minute; the data are CC BY 4.0 and the licence asks for
+  credit with a link to open-meteo.com next to where the data are shown. Air quality and pollen are CAMS (Copernicus
+  Atmosphere Monitoring Service) forecasts that Open-Meteo passes on; they are credited as "CAMS".
+- **ČHMÚ** warnings: the gateway reads the public CAP directory https://opendata.chmi.cz/meteorology/weather/alerts/cap/
+  every 15 minutes while weather is in use, and downloads only a file it has not read yet. ČHMÚ gets no location: the
+  warnings are matched to the place on the Pi (the nearest ORP). ČHMÚ open data are CC BY 4.0 (the National Open
+  Data Catalogue, NKOD), checked 2026-11-14; credited as "ČHMÚ".
+- **ORP table** in the code (`orp.py`, built once on 2026-11-14): definition points from ČÚZK's RÚIAN exchange
+  format (`20261031_ST_UZSZ`, https://vdp.cuzk.gov.cz/vymenny_format/soucasna/, CC BY 4.0), converted to WGS 84 by
+  ČÚZK's own GeometryServer (transformation 1623), and the ORP codes from ČSÚ's codelist 65 "CISORP" (ČSÚ open
+  data). ČHMÚ's code for Praha (1100) differs from ČSÚ's (1000); the table keeps ČHMÚ's.
+- A location shows roughly where a TV is. It passes the Pi in memory only: coordinates are never written to disk
+  (except the household place, 0600, set and deleted on `/admin`), never logged, never in the sign-in or watch log
+  and never sent anywhere except the rounded place to Open-Meteo. Without a device location and without a household
+  place, weather is off. Every screen with weather says „Počasí: Open-Meteo.com (CC BY 4.0), CAMS · Výstrahy: ČHMÚ
+  (CC BY 4.0)“.
+
 ## Publishing and use
 - The source code is public for personal, non-commercial use. The maintainer publishes no builds, Kodi ZIPs, APKs,
-  playlists or EPG exports and runs no public server. You build and run it yourself, for your own household only.
-- Do not host it for others, expose it to the public internet or share access outside your household.
+  playlists or EPG exports and runs no public server. You build and run it yourself.
+- Do not host it as a public service or expose it to the public internet; access is for the people you give the
+  app, the key or a tailnet login to.
 - Do not add video sources other than those listed above, and never pirate sources.
 - The Czech TV licence fee (televizní poplatek) remains your responsibility.

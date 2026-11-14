@@ -98,6 +98,15 @@
       return CT.Watch.finalSend({ fetch: typeof root.fetch === 'function' ? root.fetch.bind(root) : null, send: send })(request);
     };
   };
+  /**
+   * Domů's weather (spec/apps.md "Location for weather", T59): the browser's location only on a secure origin (the
+   * gateway's HTTPS on 8443, T47); over plain http no location, the gateway's household place.
+   */
+  /** Open-Meteo's licence asks for a link next to its data (spec/apps.md "Domů", T59); opened in a new tab. */
+  P.attributionLinks = [{ text: 'Open-Meteo.com', url: 'https://open-meteo.com/' }];
+  P.geolocation = function () {
+    return root.isSecureContext === true && root.navigator && root.navigator.geolocation ? root.navigator.geolocation : null;
+  };
   P.versionSuffix = ' (web)';
 
   function el(tag, id, cls, text) {

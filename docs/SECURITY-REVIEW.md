@@ -57,7 +57,8 @@ of "done".
   `/admin` tab „Sledování" (`/admin/api/watch`) needs the admin login, and its POSTs (switch, „Smazat záznamy") the
   admin header and same origin. *Wrong:* a report accepted with the cookie or the worker key, an answer that tells
   whether the log is on (other than `/dvb/status` `watchLog`), the switch or a delete reachable with the app key.
-- GET routes with side effects (live sessions, thumbnails, TMDb lookups on request, `/dvb/ct/*`) can be started with
+- GET routes with side effects (live sessions, thumbnails, TMDb lookups on request, `/dvb/ct/*`, `/dvb/weather`:
+  an Open-Meteo request per new place, capped at 20 places an hour and one at a time) can be started with
   the cookie alone; `SameSite=Strict` and `Path=/dvb` keep foreign sites out, but cookies ignore ports: every page
   on the Pi's host name is the same site and receives the cookie for its own `/dvb` paths. *Wrong:* another web UI
   with untrusted content on the Pi's name (TVHeadend on `127.0.0.1` only, as above).
@@ -105,6 +106,15 @@ of "done".
   by the `/admin` period, deleted without a key, and `/admin` shows it without any export. *Wrong:* a details route
   that looks up any text a client sends, archive search text sent to TMDb, a poster route that fetches a client URL,
   a download of the store.
+- Weather (T59, `dvb/weather.py`, `warnings.py`): `/dvb/weather` reads only `lat`/`lon`, refuses anything that is not
+  a plain decimal within lat 48.0–51.5 / lon 11.5–19.5 (`400`), rounds to 0.1° and sends Open-Meteo only that, at
+  most 20 new places an hour, one request at a time, fixed hosts, no redirects, ≤ 512 KB; ČHMÚ gets no location
+  (listing and CAP file only, no DTD, ≤ 4 MB). Coordinates are never in a log line, an error text, the sign-in or
+  watch log or any other answer (`test_no_coordinate_in_any_log_line_or_error` captures every path, including
+  urllib errors that quote the URL; the HTTP error line has no query). The household place is the only coordinate
+  on disk (`home-place.json`, 0600, atomic), changed only with the admin login, header and same origin, logged
+  without the coordinates. *Wrong:* a coordinate or the request URL in the journal, unrounded or client text sent
+  upstream, a weather service reached from the apps, a limit that a stream of new places can get round.
 - Archive search text goes only to ČT's own search (`searchShows`, ≤ 100 characters, cached 10 min), with our honest
   User-Agent; ČT is asked one request at a time with cached rows. *Wrong:* a faked browser, crawling whole
   categories, search text in a log line.
@@ -206,6 +216,7 @@ of "done".
 | ---- | ---- | ----- | -------- |
 | 2026-10-24 | T05 | Channel timeline (`/dvb/timeline`, views, apps' timeline players) | Key required (401), worker key 403/404, media outside the window 404, no playlist over a whole recording; open timeline views capped at 4 per channel; view keys were never pruned (fixed); apps accept the JSON's playlist only as a gateway path (added to the checklist). |
 | 2026-11-01 | T33 | `/admin` (Access), the update from `/admin`, "Irreversible admin actions are logged" | Admin auth, header and same origin cover `POST /admin/api/update` (tests, mutations); requests and refusals logged. Found while building: `git pull --ff-only` alone does not stop on non-conflicting local edits or on another branch (it fast-forwards that branch to `main`): explicit check step; the status written by root into the gateway user's directory would have been a symlink-write primitive: written as `cztvhub` instead. Item added under Access. |
+| 2026-11-14 | T59 | `/dvb/weather`, ČHMÚ warnings, `/admin` „Domů" (Access, What leaves the Pi, Secrets/irreversible actions logged) | App key only (401 without, worker 403, non-GET 405); only rounded `lat`/`lon` reach Open-Meteo (test checks the exact query of both hosts), 20 new places/hour and one request at a time (tests, mutations red: limit off by one, three at a time); no coordinate in any log or error text (mutation adding the place to a log line red); `/admin` place needs login, header and same origin (403/401 tests, mutation red), file 0600 (mutation red), set/removed logged without coordinates. ČHMÚ: no DTD (mutation red), size caps, no redirects. Not checked: real ČHMÚ files during an active warning beyond the one July 2026 file. |
 | 2026-11-02 | T49 | `/admin` connection manual (Access, Secrets, irreversible actions logged) | The app key now leaves the Pi through `/admin`: admin login, header, same origin (tests: 401 for no login, wrong password, app key, worker key, cookie; 403 without the header or with a foreign origin; nothing gathered or logged then); only `[dvb] key` in the file (test with real admin/worker/TMDb/TVHeadend values); `no-store`, `nosniff`, attachment; log line without the key (mutations red). The Secrets statement "keys only in the config and the TVs" was no longer true (the web's browser storage, now the manual): rewritten. Not checked: whether the hardened service may run `tailscale status` on the Pi. |
 | 2026-11-02 | T53 | Watch log: `POST /dvb/watch`, `/admin` „Sledování" (Access, What leaves the Pi, Robustness, irreversible actions logged) | Bearer header only (cookie `403` like every state-changing `/dvb/*` route; the brief/spec said "bearer or cookie", contradicting spec/web.md "Security" – kept the CSRF rule, the apps send bearer), worker `403`, `401` without the key; off by default, off deletes (logged), leftover deleted at start; limits 2 KB / 4 per address / 200 / 60 per minute; no journal line for a `204`, the route only for a `400` (`test_dvb_watchlog.JournalTest`); admin login, header, same origin; 24 mutations of the rules all red. |
 | 2026-11-01 | T39 | `/admin` TMDb keys (Access, Secrets, irreversible actions logged) | Saving/removing needs admin login, `X-Cztvhub-Admin` and same origin (tests: 401/403, no TMDb request, no file); `[tmdb] key` in the config makes both `409`; the file is 0600 also over a leftover tmp file; no key value in any answer or log line after a save, a refusal, TMDb down (URL with `api_key` in the error) or a removal (tests, mutations red); the key check shares the lookups' limiter. Nothing open. |

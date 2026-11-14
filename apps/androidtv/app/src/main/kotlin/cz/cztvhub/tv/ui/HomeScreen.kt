@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -49,9 +52,10 @@ private const val MORE_CHANNELS = "more"
 
 /**
  * Domů (spec/apps.md "Domů", T58): the date with the name day and calendar lines, the gateway's warning,
- * "Pokračovat", "Teď běží" and the live Chamber streams. Nothing new is fetched: the rows read what Živě and Archiv
- * already have. A block with nothing to show is left out. Up/down between rows keeps the column; the played card
- * gets the focus back after the player.
+ * "Pokračovat", "Teď běží", the live Chamber streams and the week's weather (T59). Nothing new is fetched for the
+ * rows: they read what Živě and Archiv already have; only the weather comes from `/dvb/weather`, when Domů is shown
+ * and the last answer is older than 30 min. A block with nothing to show is left out. Up/down between rows keeps the
+ * column; the played card gets the focus back after the player.
  */
 @Composable
 fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: PlayWithCard, onMoreChannels: () -> Unit) {
@@ -67,8 +71,11 @@ fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
     val tailnetNotice by viewModel.tailnetNotice.collectAsStateWithLifecycle()
     val gatewayNotice = HomeRows.notice(cards.antenna, connecting = tailnetNotice != null)
     val header = HomeCalendar.header(cards.now)
+    val weather by viewModel.weather.collectAsStateWithLifecycle()
+    val weatherAsked by viewModel.weatherAsked.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val gateway by context.tvApp.gateway.collectAsState()
     val images = remember { ArchiveImages(context.tvApp.images) }
     val thumbnailsOnTv by viewModel.antennaThumbnails.collectAsStateWithLifecycle()
     val thumbnails = cards.antenna?.thumbnails == true && thumbnailsOnTv
@@ -97,9 +104,17 @@ fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
         }
     }
 
+    // Domů shown (also when the gateway or its route changes): the weather when the last answer is old.
+    LaunchedEffect(gateway) { viewModel.refreshWeather() }
+    // The one-time location question (only with a gateway, the only place weather comes from).
+    var consentClosed by remember { mutableStateOf(false) }
+    val askConsent = gateway != null && !weatherAsked && !consentClosed && !viewModel.weatherQuestionPostponed
+    val allow = rememberWeatherAllow(viewModel) { viewModel.refreshWeather(force = true) }
+
     // Back from the player (and every return to the app): the resume store again, the played card focused.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         archive.refreshContinueRow()
+        viewModel.refreshWeather()
         viewModel.homePlayedCard?.let {
             viewModel.homePlayedCard = null
             focus(it)
@@ -126,14 +141,24 @@ fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
         onPlay(request, null)
     }
 
+    val scroll = rememberScrollState()
+    // "Počasí na týden" is no focus stop: the last focusable row scrolls the page to its end so the cards show.
+    val lastRowFocus = Modifier.onFocusChanged { if (it.hasFocus) scope.launch { scroll.animateScrollTo(scroll.maxValue) } }
+    fun rowModifier(row: Int): Modifier = if (row == rows.lastIndex) lastRowFocus else Modifier
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 8.dp, bottom = 16.dp),
+        Modifier.fillMaxSize().verticalScroll(scroll).padding(top = 8.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(header.fullDate, style = MaterialTheme.typography.headlineMedium)
-            header.nameLine?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
-            header.lines.forEach { Text(it, style = MaterialTheme.typography.bodyLarge, color = Palette.textDim) }
+        Row(verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(header.fullDate, style = MaterialTheme.typography.headlineMedium)
+                header.nameLine?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+                header.lines.forEach { Text(it, style = MaterialTheme.typography.bodyLarge, color = Palette.textDim) }
+            }
+            weather?.let {
+                Spacer(Modifier.width(24.dp))
+                WeatherNowBlock(it, cards.now)
+            }
         }
         when (gatewayNotice) {
             // As on Živě: "Připojuji se k Tailscale…" (or the wait for a login), dimmed.
@@ -145,7 +170,7 @@ fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
         }
         if (continueRow.isNotEmpty()) {
             val row = rowOf("c:${continueRow.first().key}")
-            HomeRow(stringResource(R.string.home_continue)) {
+            HomeRow(stringResource(R.string.home_continue), rowModifier(row)) {
                 continueRow.forEachIndexed { index, item ->
                     val key = "c:${item.key}"
                     ContinueCard(
@@ -162,7 +187,7 @@ fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
         }
         if (nowOn.isNotEmpty()) {
             val row = rowOf(MORE_CHANNELS)
-            HomeRow(stringResource(R.string.home_now)) {
+            HomeRow(stringResource(R.string.home_now), rowModifier(row)) {
                 nowOn.forEachIndexed { index, (number, channel) ->
                     val key = "n:${channel.key}"
                     LiveChannelCard(channel, number, cards, viewModel, cardModifier(row, index).width(380.dp).height(200.dp), playing(key))
@@ -172,13 +197,35 @@ fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
         }
         if (pspLive.isNotEmpty()) {
             val row = rowOf("p:${pspLive.first().channel.key}")
-            HomeRow(stringResource(R.string.home_psp)) {
+            HomeRow(stringResource(R.string.home_psp), rowModifier(row)) {
                 pspLive.forEachIndexed { index, (number, channel) ->
                     val key = "p:${channel.key}"
                     LiveChannelCard(channel, number, cards, viewModel, cardModifier(row, index).width(380.dp).height(200.dp), playing(key))
                 }
             }
         }
+        weather?.takeIf { it.days.isNotEmpty() }?.let { WeatherWeek(it, cards.now) }
+    }
+
+    if (askConsent) {
+        WeatherConsentDialog(
+            onAllow = {
+                consentClosed = true
+                allow()
+                focus(null)
+            },
+            onDecline = {
+                consentClosed = true
+                viewModel.setWeatherByLocation(false)
+                focus(null)
+            },
+            // Back: no answer; asked again at the next start.
+            onDismiss = {
+                viewModel.weatherQuestionPostponed = true
+                consentClosed = true
+                focus(null)
+            },
+        )
     }
 
     removing?.let { item ->
@@ -195,8 +242,8 @@ fun HomeScreen(viewModel: MainViewModel, archive: ArchiveViewModel, onPlay: Play
 }
 
 @Composable
-private fun HomeRow(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun HomeRow(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleLarge, color = Palette.textDim)
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 8.dp),

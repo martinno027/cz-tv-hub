@@ -73,6 +73,10 @@ Android TV apps, T12). Owner's words and decisions: `notes/TASKS.md` T27 (privat
   itself (Safari's native HLS cannot add a header; hls.js sends the `Authorization` header). "Odebrat bránu" deletes
   both. Without a key every tab shows "Zadejte klíč brány v Nastavení → Server." (the archive's no-gateway text
   pattern).
+- **Location for Domů weather (T59)**: `navigator.geolocation` only when `window.isSecureContext` (the gateway's
+  HTTPS on 8443 with the Tailscale certificate); on plain `http://` the web sends no location and the gateway uses the
+  household place (`spec/apps.md` "Domů"). The gateway sends no `Permissions-Policy` that would block it. The demo
+  never asks the browser and keeps the consent answer in memory only (it shares the real web app's origin).
 - **Version line**: "Verze … (web)" from the build info the gateway install writes.
 
 ## Install as an app (T35, owner 2026-11-01: „zobrazí jen tu zobrazovací část … a tlačítko zase přejít na klasické

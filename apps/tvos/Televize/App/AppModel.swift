@@ -49,6 +49,8 @@ final class AppModel {
     let parliament = PSPLiveMonitor()
     /// What is on air now, for Živě and Domů's "Teď běží" (one loop, the same caches).
     let liveNow = LiveNowStore()
+    /// Domů's weather from the gateway (spec/apps.md "Domů", T59), memory only.
+    let weather = WeatherController()
     /// Mute of every player until the app closes (spec/apps.md "Mute (T34)"); never stored.
     let mute = PlayerMute()
     /// Watch reports to the gateway while its `/dvb/status` says `watchLog` (spec/dvb-gateway.md "Watch log (T53)").
@@ -339,6 +341,7 @@ final class AppModel {
         antenna = config.map { AntennaStore(client: DVBClient(config: $0, transport: watched(URLSessionTransport()))) }
         detailsClient = client
         detailsCache = [:]
+        weather.setClient(client)
         watch.gatewayChanged()
         images.setGateway(config)
         let images = images

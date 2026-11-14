@@ -1,8 +1,9 @@
 /*
- * "Domů" (spec/apps.md "Domů", T58): the first tab. The date with the name day and calendar lines, the gateway
- * notice, then rows of cards: "Pokračovat" (Archiv's row), "Teď běží" (the first channels as on Živě, then "Další
- * kanály") and "Sněmovna" (the Chamber streams live now). A row with nothing to show is left out. Nothing is fetched
- * here: the app's on-air data, the resume store and the last /dvb/status check.
+ * "Domů" (spec/apps.md "Domů", T58): the first tab. The date with the name day and calendar lines and the weather
+ * now (T59), the gateway notice, then rows of cards: "Pokračovat" (Archiv's row), "Teď běží" (the first channels as
+ * on Živě, then "Další kanály") and "Sněmovna" (the Chamber streams live now), and "Počasí na týden" (not a focus
+ * stop). A row with nothing to show is left out. Nothing is fetched for the rows: the app's on-air data, the resume
+ * store and the last /dvb/status check; the weather is asked for when Domů is shown (app.weather, at most every 30 min).
  */
 (function (root) {
   'use strict';
@@ -27,6 +28,7 @@
     this.at = { row: 0, col: 0 };
     this.visible = false;
     this.header = null;
+    this.consentAsked = false; // the location question was on screen in this run (Return leaves it undecided)
     // OK on a "Pokračovat" card: short = play from the position, long = "Odebrat z řady" (as in Archiv)
     this.press = new Cards.LongPress(function () { self.activate(); }, function () { self.offerRemove(); });
   }
@@ -37,11 +39,29 @@
     this.visible = true;
     this.render(opening);
     if (opening) this.root.scrollTop = 0;
+    if (opening && this.offerLocation()) return; // the weather waits for the answer
+    this.app.weather.refresh();
+  };
+
+  /**
+   * Once, before the first OS prompt (spec/apps.md "Location for weather"): Povolit = the switch on and the location
+   * asked for, Nepoužívat = never asked, the gateway's household place. True while the question is on screen.
+   */
+  HomeScreen.prototype.offerLocation = function () {
+    var self = this;
+    var app = this.app;
+    if (this.consentAsked || Menu.isOpen() || !app.weatherConsentDue()) return false;
+    this.consentAsked = true;
+    app.zone = 'content'; // the question has the keys
+    app.askWeatherLocation(function (chosen) {
+      if (!chosen && self.visible) app.weather.refresh(); // Return: no answer, without the location until the next start
+    });
+    return true;
   };
 
   HomeScreen.prototype.hide = function () {
-    Menu.close();
     this.visible = false;
+    Menu.close();
   };
 
   /** Everything again (data changed); the focus stays on the same card, else as near as the rows allow. */
@@ -89,6 +109,9 @@
         action: function () { app.playItem(x.item); }
       };
     }));
+    // block 8: shown, never focused (not in this.rows)
+    var week = CT.WeatherView.week(app.weather.weather, CT.Days.today(Date.now()));
+    if (week) this.root.appendChild(week);
 
     if (!this.restore(focused, focusedRow)) this.at = { row: 0, col: 0 };
     this.root.scrollTop = scrolled.top;
@@ -96,17 +119,27 @@
     this.applyFocus(fresh || this.focused() !== focused); // scrolled only when the focus is new or had to move
   };
 
-  /** Today's date, name day and calendar lines (also on every minute: the day may have changed). */
+  /**
+   * Today's date, name day and calendar lines, and the weather now beside them (also on every minute: the day may
+   * have changed, a warning may have ended).
+   */
   HomeScreen.prototype.renderHeader = function () {
     if (!this.header) return;
-    var day = CT.Calendar.today(Date.now());
-    var key = JSON.stringify(day);
+    var now = Date.now();
+    var day = CT.Calendar.today(now);
+    var source = this.app.weather;
+    var weather = source.weather;
+    var key = JSON.stringify(day) + '|' + source.answeredAt + '|' +
+      (weather ? CT.Weather.currentWarnings(weather, now).length : '');
     if (this.header.dataset.key === key) return;
     this.header.dataset.key = key;
     this.header.innerHTML = '';
-    this.header.appendChild(el('div', 'home-date', day.fullDate));
-    if (day.nameLine) this.header.appendChild(el('div', 'home-name', day.nameLine));
-    day.lines.forEach(function (line) { this.header.appendChild(el('div', 'home-line', line)); }, this);
+    var calendar = this.header.appendChild(el('div', 'home-calendar'));
+    calendar.appendChild(el('div', 'home-date', day.fullDate));
+    if (day.nameLine) calendar.appendChild(el('div', 'home-name', day.nameLine));
+    day.lines.forEach(function (line) { calendar.appendChild(el('div', 'home-line', line)); });
+    var box = CT.WeatherView.now(weather, now);
+    if (box) this.header.appendChild(box);
   };
 
   HomeScreen.prototype.onMinute = function () {
@@ -192,6 +225,10 @@
     var box = this.root;
     if (this.at.row === 0) {
       box.scrollTop = 0;
+      return;
+    }
+    if (this.at.row === this.rows.length - 1) {
+      box.scrollTop = box.scrollHeight; // the last focus stop: "Počasí na týden" under it comes into view too
       return;
     }
     var bottom = row.offsetTop + row.offsetHeight;

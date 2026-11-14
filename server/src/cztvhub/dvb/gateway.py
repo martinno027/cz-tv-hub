@@ -45,6 +45,8 @@ from .profiles import ProfileError, ProfileStore
 from .signinlog import SigninLog, client_info
 from .signinlog import network as signinlog_network
 from . import watchlog
+from . import warnings as cap
+from . import weather as wx
 from .defaults import PSP_STREAMS
 from .thumbs import Settings, Thumbnails, ThumbsBusy
 from .tvheadend import Channel, DvrEntry, TunerBusy, TvheadendClient, TvhError, TvhNotFound
@@ -57,6 +59,7 @@ THUMB_RE = re.compile(rf"^/dvb/recording/({UUID})/thumb\.jpg$")
 TIMELINE_RE = re.compile(rf"^/dvb/timeline/({UUID})(\.m3u8)?$")
 JOBS_PATH = "/dvb/ads/jobs"
 WATCH_PATH = "/dvb/watch"  # watch reports (spec "Watch log", T53)
+WEATHER_PATH = "/dvb/weather"  # weather for Domů (spec "Weather", T59)
 PSP_NAMES = {key.split(":", 1)[1]: name for key, name in PSP_STREAMS}  # the apps' Chamber stream ids
 PROFILE_PREFIX = "/dvb/profile"  # /dvb/profile, /dvb/profile/logout, /dvb/profiles, /dvb/profiles/login
 PROFILE_HEADER = "X-Cztvhub-Profile"
@@ -198,6 +201,11 @@ class DvbGateway:
                                               store=lambda: self.details.store if self.details else None,
                                               thumbs=lambda: self.thumbs.enabled, now=now, log=log,
                                               on_listed=lambda: self.tmdb_worker and self.tmdb_worker.poke())
+        # weather for Domů (spec "Weather"): Open-Meteo per place, ČHMÚ warnings while weather is in use
+        self.home_place = wx.HomePlace(self.dvb.state_dir, log=log)
+        self.warnings = cap.Warnings(now=now, log=log, in_use=lambda: self.home_place.get() is not None)
+        self.weather = wx.Weather(self.home_place, self.warnings.for_place, clock=clock, log=log,
+                                  on_use=self.warnings.used)
         self.tmdb_apply()
 
     def tmdb_apply(self) -> None:
@@ -236,6 +244,7 @@ class DvbGateway:
         self.retention.start()
         self.archive.start()
         threading.Thread(target=self._collect_loop, name="dvb-epg-history", daemon=True).start()
+        self.warnings.start()
         with self._tmdb_lock:
             self._started = True
             if self.tmdb_worker is not None:
@@ -243,6 +252,7 @@ class DvbGateway:
 
     def stop(self) -> None:
         self._collector_stop.set()
+        self.warnings.stop()
         with self._tmdb_lock:
             self._started = False
             if self.tmdb_worker is not None:
@@ -314,6 +324,9 @@ class DvbGateway:
             return self.epg(query.get("date"))
         if path == "/dvb/defaults":
             return json_response(200, self.defaults.get())
+        if path == WEATHER_PATH:
+            status, body = self.weather.answer(query)
+            return json_response(status, body)
         if path == DETAILS_PATH:
             return self.programme_details(query)
         if m := DETAILS_IMAGE_RE.match(path):
