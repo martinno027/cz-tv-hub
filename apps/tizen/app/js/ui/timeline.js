@@ -840,7 +840,7 @@
       highlight.style.display = 'none';
     }
     var ends = tl.elapsed ? T.elapsedEdges((a.span.end - a.span.start) / 1000)
-      : T.edgeLabels(a.span.start, a.span.end, playhead, now, !tl.complete);
+      : T.edgeLabels(a.span.start, a.span.end, playhead, this.source.labelNow ? this.source.labelNow(tl, now) : now, !tl.complete);
     setText($('tl-start'), ends.start);
     setText($('tl-end'), ends.end);
     var text = this.switching !== null ? 'Načítání…' : this.ended ? 'Konec nahrávky' :

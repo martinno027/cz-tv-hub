@@ -82,7 +82,7 @@ function fakeBackend(clock, opts) {
       if (b.landAt !== null && clock.now() >= b.landAt) { b.pos = b.landTo; b.landAt = null; }
       return b.pos;
     },
-    duration: () => b.durationS * 1000,
+    duration: () => (typeof b.durationS === 'function' ? b.durationS() : b.durationS) * 1000,
     paused: () => !b.playing,
     togglePause() { b.toggles++; b.playing = !b.playing; },
     pause() { b.playing = false; },
